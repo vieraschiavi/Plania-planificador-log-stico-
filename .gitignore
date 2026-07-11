@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+data/*.csv
+data/*.db
+data/uso_licencias.db
+.streamlit/
+*.log
+.DS_Store
+data/auditoria.log*
+*.lock
