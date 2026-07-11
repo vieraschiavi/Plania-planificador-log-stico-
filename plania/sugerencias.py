@@ -34,6 +34,7 @@ def ofertas_por_sobrestock(productos: pd.DataFrame, v: pd.DataFrame) -> pd.DataF
     sob["descuento_pct"] = np.where(precio_oferta < piso,
                                     (1 - piso / sob["precio"]).clip(lower=0),
                                     desc).round(3) * 100
+    sob["dias_stock"] = sob["dias_stock"].round(1)
     sob["precio_oferta"] = (sob["precio"] * (1 - sob["descuento_pct"] / 100)).round(2)
     sob["capital_inmovilizado"] = (sob["stock"] * sob["costo"]).round(2)
     sob["motivo"] = sob.apply(
@@ -58,6 +59,7 @@ def reposicion(productos: pd.DataFrame, v: pd.DataFrame) -> pd.DataFrame:
     riesgo["cantidad_sugerida"] = np.ceil(
         riesgo["venta_diaria"] * 30 - riesgo["stock"]).clip(lower=0).astype(int)
     riesgo = riesgo[riesgo["cantidad_sugerida"] > 0]
+    riesgo["dias_stock"] = riesgo["dias_stock"].round(1)
     riesgo["inversion"] = (riesgo["cantidad_sugerida"] * riesgo["costo"]).round(2)
     riesgo["venta_en_riesgo"] = (riesgo["venta_diaria"] * riesgo["precio"] * 30).round(2)
     riesgo["motivo"] = riesgo.apply(

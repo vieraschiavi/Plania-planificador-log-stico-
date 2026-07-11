@@ -7,6 +7,15 @@ re-precificar, qué zona atacar y por dónde repartir** — con un copiloto IA
 que responde consultas sobre los datos reales y exporta todo a
 **PDF, Word y Excel**.
 
+## El producto
+
+| | |
+|---|---|
+| ![Inicio](assets/capturas/inicio.png) | ![Copiloto](assets/capturas/copiloto.png) |
+| *Inicio: demo 3 días full + resumen en pesos* | *Copiloto: consultas reales + export PDF/Word/Excel* |
+| ![Panel](assets/capturas/panel.png) | ![Ofertas](assets/capturas/ofertas.png) |
+| *Panel ejecutivo* | *Ofertas y sugerencias accionables* |
+
 ## Probarlo en 60 segundos
 
 ```bash
