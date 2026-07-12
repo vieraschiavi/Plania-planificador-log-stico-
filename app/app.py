@@ -1,0 +1,556 @@
+"""
+Plania · Planificación logística y comercial inteligente — Dashboard
+====================================================================
+La aplicación que ve el cliente (web y PC: el instalador de Windows levanta
+esto mismo embebido). Menú lateral profesional, demo de 3 días full
+integrada, copiloto sobre datos reales y exportes PDF/Word/Excel.
+
+    streamlit run app/app.py
+"""
+from __future__ import annotations
+
+import os
+import sys
+
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+# pandas 3 + pyarrow: los strings Arrow-backed pueden segfaultear al insertar
+# columnas dentro del thread del ScriptRunner de Streamlit (reproducido en
+# Linux con pandas 3.0/pyarrow 25). Storage "python" lo evita con costo
+# marginal para volúmenes de PyME.
+pd.set_option("mode.string_storage", "python")
+
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, RAIZ)
+
+from plania import analitica, conectores, copiloto, exportes, licencia, rutas, sugerencias  # noqa: E402
+from plania import config as pconfig  # noqa: E402
+
+pconfig.aplicar()
+
+# ---------------------------------------------------------------------------
+# Estilo de marca
+# ---------------------------------------------------------------------------
+AZUL = "#1F3D7A"
+CELESTE = "#2E86DE"
+VERDE = "#20BF6B"
+NARANJA = "#F39C12"
+ROJO = "#E74C3C"
+
+st.set_page_config(page_title="Plania · Planificación Inteligente",
+                   page_icon="🚚", layout="wide",
+                   initial_sidebar_state="expanded")
+
+st.markdown(f"""
+<style>
+  .block-container {{ padding-top: 1.4rem; }}
+  section[data-testid="stSidebar"] {{
+      background: linear-gradient(180deg, {AZUL} 0%, #16294f 100%);
+  }}
+  section[data-testid="stSidebar"] * {{ color: #EAF0FA !important; }}
+  section[data-testid="stSidebar"] .stRadio label {{
+      padding: 6px 10px; border-radius: 8px; width: 100%;
+  }}
+  section[data-testid="stSidebar"] .stRadio label:hover {{
+      background: rgba(255,255,255,.08);
+  }}
+  .plania-badge {{
+      background: {CELESTE}; color: white; border-radius: 8px;
+      padding: 2px 10px; font-size: .55em; vertical-align: middle;
+  }}
+  .plania-demo {{
+      background: linear-gradient(90deg, {NARANJA}, #f7b731); color: #222;
+      border-radius: 10px; padding: 10px 16px; font-weight: 600;
+      margin-bottom: 10px;
+  }}
+  div[data-testid="stMetric"] {{
+      background: #F5F7FB; border: 1px solid #E3E8F2;
+      border-radius: 12px; padding: 12px 14px;
+  }}
+  .stChatMessage {{ border-radius: 12px; }}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Datos: ERP conectado o demo — cacheado
+# ---------------------------------------------------------------------------
+@st.cache_data(show_spinner="Leyendo datos del negocio…")
+def _cargar(url: str | None, tablas_key: str) -> dict:
+    tablas = st.session_state.get("tablas_erp") or None
+    return conectores.cargar_datos(url=url or None, tablas=tablas)
+
+
+def cargar_datos() -> dict | None:
+    url = st.session_state.get("erp_url") or pconfig.leer_extra("ERP_DB_URL") or ""
+    try:
+        if not url and not os.path.exists(os.path.join(RAIZ, "data", "erp_demo.db")):
+            import data.generate_dataset as gen
+            gen.main()
+            _cargar.clear()
+        return _cargar(url, str(st.session_state.get("tablas_erp")))
+    except Exception as e:
+        st.error(f"No pude leer los datos: {e}")
+        return None
+
+
+def _fmt(n: float) -> str:
+    return f"${n:,.0f}"
+
+
+# ---------------------------------------------------------------------------
+# Sidebar: marca + menú + estado de licencia
+# ---------------------------------------------------------------------------
+lic = licencia.estado()
+
+with st.sidebar:
+    st.markdown("## 🚚 Plania")
+    st.caption("Planificación logística y comercial inteligente")
+    st.markdown("---")
+    MENU = ["🏠 Inicio",
+            "📊 Panel ejecutivo",
+            "📦 Stock & Reposición",
+            "💰 Precios & Márgenes",
+            "🗺️ Zonas & Negocios",
+            "🚛 Rutas de reparto",
+            "🏷️ Ofertas & Sugerencias",
+            "🤖 Copiloto IA",
+            "🔌 Conectar ERP / Base",
+            "💳 Planes & Licencia",
+            "⚙️ Configuración",
+            "❓ Ayuda"]
+    pagina = st.radio("Menú", MENU, label_visibility="collapsed")
+    st.markdown("---")
+    if lic["modo"] == "demo":
+        st.markdown(f"**🕒 Demo full:** quedan "
+                    f"{lic.get('horas_restantes', lic['dias_restantes'] * 24)} h")
+        st.progress(min(1.0, lic.get("horas_restantes", 72) / (licencia.DIAS_DEMO * 24)))
+    elif lic["modo"] == "licencia":
+        st.markdown(f"**✅ Plan {lic['plan']}** · vence en {lic['dias_restantes']} días")
+    else:
+        st.markdown("**⛔ Demo vencida** — activá tu licencia en *Planes & Licencia*")
+    fuente = "ERP conectado" if (st.session_state.get("erp_url")
+                                 or pconfig.leer_extra("ERP_DB_URL")) else "Base demo (Uruguay)"
+    st.caption(f"Fuente de datos: {fuente}")
+
+BLOQUEADA = lic["modo"] == "vencida" and pagina not in (
+    "🏠 Inicio", "💳 Planes & Licencia", "❓ Ayuda", "⚙️ Configuración")
+if BLOQUEADA:
+    st.warning("La demo de 3 días terminó. Activá tu licencia en **💳 Planes & Licencia** "
+               "para seguir usando Plania con todos tus datos intactos.")
+    st.stop()
+
+datos = None
+if pagina not in ("💳 Planes & Licencia", "⚙️ Configuración", "❓ Ayuda", "🔌 Conectar ERP / Base"):
+    datos = cargar_datos()
+
+
+def _ventas_enriquecidas(d: dict) -> pd.DataFrame:
+    return analitica.enriquecer_ventas(d["ventas"], d["productos"], d["clientes"])
+
+
+def _botones_export(clave: str, secciones: list, etiqueta: str = "⬇️ Exportar"):
+    """Botones de descarga PDF / Word / Excel para cualquier tabla o informe."""
+    if not licencia.tiene("exportes"):
+        st.caption("Exportes disponibles en planes pagos y demo.")
+        return
+    titulo = secciones[0][0] if secciones else "Informe"
+    c1, c2, c3, _ = st.columns([1, 1, 1, 3])
+    c1.download_button("📄 PDF", exportes.a_pdf(titulo, secciones),
+                       file_name=f"plania_{clave}.pdf", key=f"pdf_{clave}",
+                       mime="application/pdf")
+    c2.download_button("📝 Word", exportes.a_word(titulo, secciones),
+                       file_name=f"plania_{clave}.docx", key=f"docx_{clave}",
+                       mime="application/vnd.openxmlformats-officedocument"
+                            ".wordprocessingml.document")
+    c3.download_button("📊 Excel", exportes.a_excel(secciones),
+                       file_name=f"plania_{clave}.xlsx", key=f"xlsx_{clave}",
+                       mime="application/vnd.openxmlformats-officedocument"
+                            ".spreadsheetml.sheet")
+
+
+# ---------------------------------------------------------------------------
+# Páginas
+# ---------------------------------------------------------------------------
+if pagina == "🏠 Inicio":
+    st.markdown(f"# 🚚 Plania <span class='plania-badge'>PLANIFICACIÓN INTELIGENTE</span>",
+                unsafe_allow_html=True)
+    if lic["modo"] == "demo":
+        st.markdown(f"<div class='plania-demo'>🎁 Estás en la <b>demo de 3 días con TODO "
+                    f"habilitado</b> — conectá tu ERP real o explorá con la base demo. "
+                    f"Quedan {lic.get('horas_restantes', 72)} horas.</div>",
+                    unsafe_allow_html=True)
+    st.markdown(
+        "El único planificador que **se conecta al ERP que ya tenés** (PostgreSQL, "
+        "MySQL, SQL Server, Oracle, SQLite, CSV/Excel), te dice **qué ofertar, qué "
+        "reponer, qué re-precificar y por dónde repartir**, y te deja todo listo en "
+        "**PDF/Word/Excel** — con un copiloto que responde sobre tus datos reales.")
+    if datos:
+        v = _ventas_enriquecidas(datos)
+        k = analitica.kpis(datos["productos"], v)
+        paq = sugerencias.generar_todas(datos)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Venta últimos 30 días", _fmt(k["venta_periodo"]))
+        c2.metric("Margen", f"{k['margen_pct']:.1f}%")
+        c3.metric("Capital liberable (sobrestock)", _fmt(paq["resumen"]["capital_liberable"]))
+        c4.metric("Venta en riesgo (quiebres)", _fmt(paq["resumen"]["venta_en_riesgo"]))
+        st.info("👉 Empezá por **🏷️ Ofertas & Sugerencias** para ver las decisiones de hoy, "
+                "o preguntale al **🤖 Copiloto**: *«¿qué ofertas armo esta semana?»*")
+
+elif pagina == "📊 Panel ejecutivo":
+    st.title("📊 Panel ejecutivo")
+    if datos:
+        v = _ventas_enriquecidas(datos)
+        k = analitica.kpis(datos["productos"], v)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Venta 30d", _fmt(k["venta_periodo"]))
+        c2.metric("Margen 30d", _fmt(k["margen_periodo"]), f"{k['margen_pct']:.1f}%")
+        c3.metric("Valor stock (costo)", _fmt(k["valor_stock"]))
+        c4.metric("Quiebres / bajo mín.", f"{k['quiebres']} / {k['bajo_minimo']}")
+        c5.metric("Clientes activos 30d", k["clientes_activos"])
+        st.markdown("---")
+        col1, col2 = st.columns([3, 2])
+        tm = analitica.tendencia_mensual(v)
+        fig = px.area(tm, x="mes", y="venta", title="Venta mensual",
+                      color_discrete_sequence=[CELESTE])
+        fig.update_layout(margin=dict(t=40, b=0), height=320)
+        col1.plotly_chart(fig, width="stretch")
+        g = analitica.por_dimension(v, "categoria")
+        fig2 = px.bar(g, x="venta", y="categoria", orientation="h",
+                      title="Venta por categoría", color="margen_pct",
+                      color_continuous_scale=["#E74C3C", "#F39C12", "#20BF6B"])
+        fig2.update_layout(margin=dict(t=40, b=0), height=320)
+        col2.plotly_chart(fig2, width="stretch")
+        st.markdown("#### Top clientes")
+        st.dataframe(analitica.top_clientes(v), width="stretch", hide_index=True)
+
+elif pagina == "📦 Stock & Reposición":
+    st.title("📦 Stock & Reposición")
+    if datos:
+        v = _ventas_enriquecidas(datos)
+        r = analitica.rotacion(datos["productos"], v)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("SKUs", len(r))
+        c2.metric("Quiebres", int((r["stock"] <= 0).sum()))
+        c3.metric("Sobrestock (>90 días)", int((r["dias_stock"] > 90).sum()))
+        tab1, tab2 = st.tabs(["🛒 Reposición urgente", "📋 Stock completo"])
+        with tab1:
+            rep = sugerencias.reposicion(datos["productos"], v)
+            if len(rep):
+                st.dataframe(rep, width="stretch", hide_index=True)
+                _botones_export("reposicion", [("Reposición urgente",
+                                                exportes.TITULOS["reposicion"][1], rep)])
+            else:
+                st.success("Sin riesgo de quiebre con la rotación actual.")
+        with tab2:
+            filtro = st.multiselect("Categoría",
+                                    sorted(r["categoria"].dropna().unique()))
+            rr = r[r["categoria"].isin(filtro)] if filtro else r
+            st.dataframe(rr.drop(columns=["venta_diaria"]).assign(
+                dias_stock=rr["dias_stock"].replace([float("inf")], 999).round(0)),
+                width="stretch", hide_index=True)
+
+elif pagina == "💰 Precios & Márgenes":
+    st.title("💰 Precios & Márgenes")
+    if datos:
+        v = _ventas_enriquecidas(datos)
+        mp = analitica.margen_por_producto(v)
+        c1, c2 = st.columns(2)
+        c1.metric("Margen promedio ponderado",
+                  f"{v['margen'].sum() / v['venta'].sum() * 100:.1f}%")
+        pr = sugerencias.precios(datos["productos"], v)
+        c2.metric("Margen extra disponible",
+                  _fmt(pr["margen_extra_mensual"].sum() if len(pr) else 0) + "/mes")
+        fig = px.scatter(mp, x="venta", y="margen_pct", color="categoria",
+                         hover_name="nombre", title="Venta vs margen por producto",
+                         labels={"venta": "Venta ($)", "margen_pct": "Margen %"})
+        fig.update_layout(height=380, margin=dict(t=40, b=0))
+        st.plotly_chart(fig, width="stretch")
+        st.markdown("#### Sugerencias de ajuste de precio")
+        if len(pr):
+            st.dataframe(pr, width="stretch", hide_index=True)
+            _botones_export("precios", [("Ajustes de precio",
+                                         exportes.TITULOS["precios"][1], pr)])
+        else:
+            st.success("Márgenes alineados con su categoría.")
+
+elif pagina == "🗺️ Zonas & Negocios":
+    st.title("🗺️ Zonas & tipos de negocio")
+    if datos:
+        v = _ventas_enriquecidas(datos)
+        dim = st.radio("Ver por", ["zona", "departamento", "tipo_negocio"],
+                       horizontal=True)
+        g = analitica.por_dimension(v, dim)
+        if len(g):
+            col1, col2 = st.columns([3, 2])
+            fig = px.bar(g.head(15), x="venta", y=dim, orientation="h",
+                         color="margen_pct", title=f"Venta por {dim}",
+                         color_continuous_scale=["#E74C3C", "#F39C12", "#20BF6B"])
+            fig.update_layout(height=420, margin=dict(t=40, b=0))
+            col1.plotly_chart(fig, width="stretch")
+            col2.dataframe(g, width="stretch", hide_index=True)
+        st.markdown("#### 🎯 Oportunidades de venta cruzada por zona")
+        op = sugerencias.oportunidades_zona(v)
+        if len(op):
+            st.dataframe(op, width="stretch", hide_index=True)
+            _botones_export("zonas", [("Oportunidades por zona",
+                                       exportes.TITULOS["zonas"][1], op)])
+        else:
+            st.info("Sin brechas de penetración relevantes (o faltan datos de zona).")
+
+elif pagina == "🚛 Rutas de reparto":
+    st.title("🚛 Rutas de reparto")
+    if not licencia.tiene("rutas"):
+        st.warning("El plan actual no incluye el planificador de rutas — "
+                   "disponible en **Pro** y **Enterprise**.")
+    elif datos:
+        v = _ventas_enriquecidas(datos)
+        clientes = datos["clientes"]
+        c1, c2, c3 = st.columns(3)
+        vehiculos = c1.number_input("Vehículos", 1, 20, 2)
+        paradas = c2.number_input("Paradas máx. por vehículo", 5, 60, 25)
+        deptos = c3.multiselect("Departamento",
+                                sorted(clientes["departamento"].dropna().unique()))
+        base = clientes[clientes["departamento"].isin(deptos)] if deptos else clientes
+        modo = st.radio("A quién visitar", ["Clientes activos (últimos 30 días)",
+                                            "Clientes inactivos (recupero)", "Todos"],
+                        horizontal=True)
+        if "inactivos" in modo:
+            objetivo = base.merge(
+                analitica.clientes_inactivos(v, base)[["cliente_id"]], on="cliente_id")
+        elif "activos" in modo:
+            corte = v["fecha"].max() - pd.Timedelta(days=30)
+            act = v[v["fecha"] > corte]["cliente_id"].unique()
+            objetivo = base[base["cliente_id"].isin(act)]
+        else:
+            objetivo = base
+        st.caption(f"{len(objetivo)} clientes a rutear")
+        if len(objetivo) and st.button("🚚 Planificar rutas", type="primary"):
+            plan = rutas.planificar(objetivo, vehiculos=int(vehiculos),
+                                    paradas_max=int(paradas))
+            st.dataframe(plan["resumen"], width="stretch", hide_index=True)
+            if {"lat", "lon"}.issubset(plan["rutas"].columns):
+                figm = px.scatter_map(plan["rutas"], lat="lat", lon="lon",
+                                      color=plan["rutas"]["vehiculo"].astype(str),
+                                      hover_name="nombre", zoom=10, height=420,
+                                      title="Paradas por vehículo")
+                figm.update_layout(margin=dict(t=40, b=0))
+                st.plotly_chart(figm, width="stretch")
+            st.dataframe(plan["rutas"], width="stretch", hide_index=True)
+            _botones_export("rutas", [("Hoja de ruta",
+                                       "Orden de visita optimizado por vehículo "
+                                       "(vecino más cercano + 2-opt).", plan["rutas"])])
+
+elif pagina == "🏷️ Ofertas & Sugerencias":
+    st.title("🏷️ Ofertas & Sugerencias")
+    if datos:
+        paq = sugerencias.generar_todas(datos)
+        res = paq["resumen"]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Capital liberable", _fmt(res["capital_liberable"]))
+        c2.metric("Venta en riesgo", _fmt(res["venta_en_riesgo"]))
+        c3.metric("Margen extra/mes", _fmt(res["margen_extra_mensual"]))
+        c4.metric("Potencial por zonas", _fmt(res["venta_potencial_zonas"]))
+        st.markdown("---")
+        secciones = exportes.secciones_desde_paquete(paq)
+        _botones_export("paquete_completo", secciones,
+                        etiqueta="⬇️ Exportar informe completo")
+        tabs = st.tabs(["🏷️ Ofertas", "🛒 Reposición", "💰 Precios",
+                        "🗺️ Zonas", "📞 Recupero"])
+        for tab, clave in zip(tabs, ["ofertas", "reposicion", "precios",
+                                     "zonas", "recupero"]):
+            with tab:
+                df = paq[clave]
+                if df is not None and len(df):
+                    st.caption(exportes.TITULOS[clave][1])
+                    st.dataframe(df, width="stretch", hide_index=True)
+                else:
+                    st.success("Nada para accionar acá — todo en orden.")
+
+elif pagina == "🤖 Copiloto IA":
+    st.title("🤖 Copiloto — preguntale a tus datos")
+    if not licencia.tiene("copiloto"):
+        st.warning("El plan actual no incluye el Copiloto.")
+    elif datos:
+        st.caption("Responde con datos reales del negocio conectado. Ejemplos: "
+                   "*¿qué ofertas armo esta semana?* · *¿cuánto stock hay de bebidas?* · "
+                   "*¿qué zona está floja?* · *¿qué repongo ya?* · "
+                   "*¿qué clientes perdí?*")
+        if "chat" not in st.session_state:
+            st.session_state.chat = []
+        for m in st.session_state.chat:
+            with st.chat_message(m["rol"]):
+                st.markdown(m["texto"])
+                if m.get("tabla") is not None:
+                    st.dataframe(m["tabla"], width="stretch", hide_index=True)
+        pregunta = st.chat_input("Escribí tu consulta…")
+        if pregunta:
+            st.session_state.chat.append({"rol": "user", "texto": pregunta})
+            with st.chat_message("user"):
+                st.markdown(pregunta)
+            with st.chat_message("assistant"):
+                with st.spinner("Calculando sobre tus datos…"):
+                    r = copiloto.responder(pregunta, datos)
+                st.markdown(r["respuesta"])
+                if r["tabla"] is not None and len(r["tabla"]):
+                    st.dataframe(r["tabla"], width="stretch", hide_index=True)
+                    _botones_export(f"copiloto_{len(st.session_state.chat)}",
+                                    [(r["titulo"], r["respuesta"], r["tabla"])])
+            st.session_state.chat.append({"rol": "assistant", "texto": r["respuesta"],
+                                          "tabla": r["tabla"]})
+
+elif pagina == "🔌 Conectar ERP / Base":
+    st.title("🔌 Conectar tu ERP o base de datos")
+    st.markdown(
+        "Plania **no te hace migrar nada**: apunta a la base que ya usás y "
+        "auto-detecta las columnas. Motores soportados: PostgreSQL, MySQL/MariaDB, "
+        "SQL Server, Oracle y SQLite — o subí un CSV/Excel exportado del ERP "
+        "(Zureo, Memory, Tango, Bejerman, Odoo, SAP B1 y similares).")
+    tab1, tab2 = st.tabs(["🗄️ Base de datos (SQL)", "📄 Archivos CSV/Excel"])
+    with tab1:
+        url = st.text_input("URL de conexión SQLAlchemy",
+                            value=pconfig.leer_extra("ERP_DB_URL") or "",
+                            placeholder="postgresql://usuario:clave@servidor:5432/erp")
+        c1, c2 = st.columns(2)
+        if c1.button("Probar conexión", type="primary"):
+            try:
+                eng = conectores.conectar_sql(url)
+                tablas = conectores.listar_tablas(eng)
+                st.success(f"✅ Conectado. {len(tablas)} tablas: "
+                           f"{', '.join(tablas[:12])}{'…' if len(tablas) > 12 else ''}")
+                auto = {e: conectores.autodescubrir_tabla(eng, e)
+                        for e in ("productos", "clientes", "ventas")}
+                st.json({f"tabla de {k}": v or "(elegir manualmente)"
+                         for k, v in auto.items()})
+                st.session_state.erp_url = url
+            except Exception as e:
+                st.error(f"No conectó: {e}")
+        if c2.button("💾 Guardar y usar esta base"):
+            pconfig.guardar_extra("ERP_DB_URL", url)
+            st.session_state.erp_url = url
+            _cargar.clear()
+            st.success("Guardado. Toda la app pasa a leer de tu ERP.")
+        with st.expander("Elegir tablas manualmente (si el autodescubrimiento no acierta)"):
+            t_p = st.text_input("Tabla/consulta de productos", "")
+            t_c = st.text_input("Tabla/consulta de clientes", "")
+            t_v = st.text_input("Tabla/consulta de ventas", "")
+            if st.button("Usar estas tablas"):
+                st.session_state.tablas_erp = {k: v for k, v in
+                                               {"productos": t_p, "clientes": t_c,
+                                                "ventas": t_v}.items() if v}
+                _cargar.clear()
+                st.success("Listo — se usan esas tablas/consultas.")
+    with tab2:
+        st.caption("Subí los tres archivos (clientes es opcional). Las columnas se "
+                   "auto-mapean; abajo ves cómo quedó.")
+        arch = {e: st.file_uploader(f"Archivo de {e}", type=["csv", "xlsx", "xls"],
+                                    key=f"up_{e}")
+                for e in ("productos", "ventas", "clientes")}
+        if arch["productos"] and arch["ventas"]:
+            try:
+                nuevos = {}
+                for e, f in arch.items():
+                    if f is None:
+                        nuevos[e] = pd.DataFrame(
+                            columns=list(conectores.SINONIMOS["clientes"]))
+                        continue
+                    crudo = conectores.leer_archivo(f)
+                    mapeo = conectores.autodetectar_mapeo(crudo, e)
+                    st.caption(f"**{e}**: mapeo detectado {mapeo}")
+                    nuevos[e] = conectores.normalizar(crudo, e, mapeo)
+                st.session_state.datos_archivo = nuevos
+                st.success("Archivos cargados y normalizados. (Para persistirlos, "
+                           "guardalos como base SQLite desde Configuración.)")
+                st.dataframe(nuevos["productos"].head(), width="stretch")
+            except Exception as e:
+                st.error(str(e))
+
+elif pagina == "💳 Planes & Licencia":
+    st.title("💳 Planes & Licencia")
+    backend = os.environ.get("PLANIA_BACKEND_URL",
+                             pconfig.leer_extra("BACKEND_URL") or "http://localhost:8100")
+    if lic["modo"] == "demo":
+        st.markdown(f"<div class='plania-demo'>🎁 Demo full activa — quedan "
+                    f"{lic.get('horas_restantes', 72)} horas. Al comprar, tus datos y "
+                    f"configuración quedan tal cual.</div>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+    for col, (plan, titulo, precio, detalle) in zip((col1, col2, col3), [
+        ("starter", "Starter", "USD 59/mes",
+         "Copiloto + ERP + exportes · 500 consultas/mes"),
+        ("pro", "Pro ⭐", "USD 129/mes",
+         "Todo Starter + rutas + excedente · 2.000 consultas/mes"),
+        ("enterprise", "Enterprise", "a medida",
+         "Multi-sucursal, white label, SSO, SLA"),
+    ]):
+        with col:
+            st.markdown(f"### {titulo}")
+            st.markdown(f"## {precio}")
+            st.caption(detalle)
+    st.markdown("---")
+    email = st.text_input("Tu email (para emitir la licencia)")
+    plan_sel = st.selectbox("Plan", ["starter", "pro"])
+    if st.button("💳 Pagar con MercadoPago", type="primary"):
+        try:
+            import requests
+            r = requests.post(f"{backend}/checkout",
+                              json={"plan": plan_sel, "email": email}, timeout=15)
+            if r.ok:
+                st.link_button("👉 Ir al checkout seguro de MercadoPago",
+                               r.json()["init_point"])
+            else:
+                st.error(r.json().get("detail", r.text))
+        except Exception as e:
+            st.error(f"No pude contactar el backend de venta ({backend}): {e}")
+    st.markdown("#### Ya tengo mi licencia")
+    tok = st.text_input("Pegá el token de licencia", type="password")
+    if st.button("Activar licencia"):
+        r = licencia.activar_licencia(tok.strip())
+        if r["ok"]:
+            st.success(f"✅ Licencia activada — plan {r['claims'].get('plan')}. "
+                       "Recargá la página.")
+        else:
+            st.error(r["error"])
+
+elif pagina == "⚙️ Configuración":
+    st.title("⚙️ Configuración")
+    st.caption(f"Guardado seguro: **{pconfig.backend_activo()}** "
+               "(keyring del sistema > archivo cifrado > texto plano)")
+    cfg = pconfig.cargar()
+    with st.form("cfg"):
+        nuevos = {}
+        for clave, desc in pconfig.CLAVES.items():
+            actual = cfg.get(clave, "")
+            nuevos[clave] = st.text_input(
+                desc, value="", placeholder=pconfig.enmascarar(actual) if actual
+                else "(sin configurar)", type="password" if "KEY" in clave
+                or "TOKEN" in clave or "PASSWORD" in clave else "default")
+        if st.form_submit_button("💾 Guardar", type="primary"):
+            cambios = {k: v for k, v in nuevos.items() if v.strip()}
+            if cambios:
+                pconfig.guardar(cambios)
+                pconfig.aplicar()
+                st.success(f"Guardado: {', '.join(cambios)}.")
+            else:
+                st.info("No ingresaste valores nuevos.")
+
+else:  # ❓ Ayuda
+    st.title("❓ Ayuda")
+    st.markdown("""
+**¿Qué hace Plania?** Se conecta a tu ERP o base de datos (sin migrar nada),
+analiza stock, precios, márgenes, zonas y clientes, y te devuelve decisiones
+accionables: ofertas, reposición, ajustes de precio, rutas de reparto y
+clientes a recuperar — todo exportable a **PDF, Word y Excel** y consultable
+por chat con el **Copiloto**.
+
+**Primeros pasos**
+1. 🔌 *Conectar ERP / Base*: apuntá a tu base (o probá con la demo incluida).
+2. 🏷️ *Ofertas & Sugerencias*: exportá el informe completo del día.
+3. 🤖 *Copiloto*: preguntá en criollo — «¿qué repongo ya?».
+
+**Demo de 3 días** — todo habilitado, sin tarjeta. Al vencer, tus datos no
+se tocan: activás la licencia y seguís donde estabas.
+
+**Soporte** — soporte@plania.uy · WhatsApp +598 99 000 000
+""")

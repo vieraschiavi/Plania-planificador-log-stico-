@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plania · Planificación logística y comercial inteligente</title>
+<meta name="description" content="Conectá tu ERP y descubrí qué ofertar, qué reponer, qué re-precificar y por dónde repartir. Copiloto IA sobre tus datos reales. Demo 3 días full, sin tarjeta.">
+<style>
+  :root { --azul:#1F3D7A; --celeste:#2E86DE; --verde:#20BF6B; --naranja:#F39C12; --gris:#F5F7FB; }
+  * { margin:0; box-sizing:border-box; font-family:'Segoe UI',system-ui,sans-serif; }
+  body { color:#1c2434; }
+  .hero { background:linear-gradient(135deg,var(--azul) 0%,#16294f 100%); color:#fff; padding:64px 24px 80px; text-align:center; }
+  .hero h1 { font-size:2.6rem; margin-bottom:14px; }
+  .hero p.sub { font-size:1.25rem; opacity:.92; max-width:760px; margin:0 auto 30px; }
+  .cta { display:inline-block; background:var(--naranja); color:#222; font-weight:700; padding:14px 34px; border-radius:12px; text-decoration:none; font-size:1.1rem; margin:6px; border:none; cursor:pointer; }
+  .cta.sec { background:transparent; color:#fff; border:2px solid #fff; }
+  .badge { background:rgba(255,255,255,.14); border-radius:20px; padding:6px 16px; font-size:.85rem; display:inline-block; margin-bottom:22px; }
+  section { padding:56px 24px; max-width:1080px; margin:0 auto; }
+  h2 { color:var(--azul); font-size:1.9rem; margin-bottom:26px; text-align:center; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:20px; }
+  .card { background:var(--gris); border:1px solid #E3E8F2; border-radius:14px; padding:22px; }
+  .card h3 { color:var(--azul); margin-bottom:8px; font-size:1.08rem; }
+  .card p { font-size:.95rem; color:#3d4a5f; }
+  .planes { background:var(--gris); }
+  .plan { background:#fff; border:1px solid #E3E8F2; border-radius:16px; padding:28px; text-align:center; position:relative; }
+  .plan.destacado { border:2px solid var(--celeste); box-shadow:0 8px 28px rgba(46,134,222,.18); }
+  .plan .precio { font-size:2rem; color:var(--azul); font-weight:800; margin:10px 0; }
+  .plan ul { list-style:none; margin:14px 0 22px; }
+  .plan li { padding:5px 0; font-size:.93rem; }
+  .tag { position:absolute; top:-13px; left:50%; transform:translateX(-50%); background:var(--celeste); color:#fff; border-radius:14px; padding:3px 14px; font-size:.8rem; }
+  .btn-mp { background:#009EE3; color:#fff; font-weight:700; border:none; border-radius:10px; padding:12px 24px; cursor:pointer; width:100%; font-size:1rem; }
+  .btn-demo { background:var(--verde); color:#fff; font-weight:700; border:none; border-radius:10px; padding:12px 24px; cursor:pointer; width:100%; font-size:1rem; }
+  input[type=email] { width:100%; padding:11px; border:1px solid #cdd6e4; border-radius:9px; margin-bottom:10px; font-size:1rem; }
+  footer { background:#16294f; color:#c9d4e8; text-align:center; padding:30px 20px; font-size:.9rem; }
+  .vs td, .vs th { border:1px solid #E3E8F2; padding:9px 12px; font-size:.92rem; text-align:center; }
+  .vs { border-collapse:collapse; margin:0 auto; }
+  .vs th { background:var(--azul); color:#fff; }
+  .vs td:first-child { text-align:left; font-weight:600; }
+  .si { color:var(--verde); font-weight:800; } .no { color:#c0392b; }
+  #msg { margin-top:10px; font-weight:600; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="badge">🇺🇾 Hecho para distribuidores, mayoristas y comercios de Uruguay y LATAM</div>
+  <h1>🚚 Plania</h1>
+  <p class="sub">Conectá el ERP que <b>ya tenés</b> y descubrí en minutos <b>qué ofertar,
+  qué reponer, qué re-precificar y por dónde repartir</b> — con un copiloto IA que
+  responde sobre tus datos reales y te arma el informe en PDF, Word o Excel.</p>
+  <a class="cta" href="#demo">🎁 Probar 3 días GRATIS con todo</a>
+  <a class="cta sec" href="#planes">Ver planes</a>
+</div>
+
+<section>
+  <h2>Lo que Plania hace por tu negocio, todos los días</h2>
+  <div class="grid">
+    <div class="card"><h3>🔌 Se adapta a cualquier ERP o base</h3><p>PostgreSQL, MySQL, SQL Server, Oracle, SQLite o CSV/Excel. Auto-detecta tus columnas (Zureo, Memory, Tango, Bejerman, Odoo, SAP B1…). Sin migraciones, sin consultores.</p></div>
+    <div class="card"><h3>🤖 Copiloto IA sobre datos reales</h3><p>«¿Qué ofertas armo esta semana?» «¿Qué repongo ya?» «¿Qué zona está floja?» — responde con tus números y te deja la evidencia exportable.</p></div>
+    <div class="card"><h3>🏷️ Ofertas que liberan capital</h3><p>Detecta sobrestock, calcula el descuento justo (nunca debajo de costo+8%) y te dice cuánta plata inmovilizada liberás.</p></div>
+    <div class="card"><h3>🛒 Reposición antes del quiebre</h3><p>Cruza rotación real con el plazo de cada proveedor y te avisa qué comprar hoy, cuánto, y cuánta venta está en riesgo.</p></div>
+    <div class="card"><h3>💰 Márgenes sin fugas</h3><p>Encuentra productos vendiendo bajo el margen de su categoría y sugiere el precio nuevo con el impacto mensual en pesos.</p></div>
+    <div class="card"><h3>🚛 Rutas de reparto optimizadas</h3><p>Arma las rutas del día por vehículo minimizando kilómetros — con o sin GPS en tus datos. Exportá la hoja de ruta y listo.</p></div>
+    <div class="card"><h3>🗺️ Zonas y tipos de negocio</h3><p>Detecta venta cruzada sin explotar: qué categorías compran los almacenes de otras zonas que los tuyos todavía no.</p></div>
+    <div class="card"><h3>📄 Todo exportable</h3><p>Cada análisis sale en PDF, Word y Excel con tu marca, listo para el dueño, el comprador o el vendedor de la ruta.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Plania vs. lo que hay en el mercado</h2>
+  <table class="vs">
+    <tr><th></th><th>Plania</th><th>ERP tradicional</th><th>BI genérico</th><th>Planilla Excel</th></tr>
+    <tr><td>Se conecta a tu base actual sin migrar</td><td class="si">✔</td><td class="no">✘</td><td>parcial</td><td class="no">✘</td></tr>
+    <tr><td>Sugerencias accionables (ofertas, precios, reposición)</td><td class="si">✔</td><td class="no">✘</td><td class="no">✘</td><td class="no">✘</td></tr>
+    <tr><td>Chatbot IA sobre datos reales</td><td class="si">✔</td><td class="no">✘</td><td class="no">✘</td><td class="no">✘</td></tr>
+    <tr><td>Rutas de reparto optimizadas</td><td class="si">✔</td><td>módulo aparte</td><td class="no">✘</td><td class="no">✘</td></tr>
+    <tr><td>Exporta informes a PDF/Word/Excel</td><td class="si">✔</td><td>parcial</td><td>parcial</td><td>manual</td></tr>
+    <tr><td>Demo full sin tarjeta</td><td class="si">✔ 3 días</td><td class="no">✘</td><td>limitada</td><td>—</td></tr>
+    <tr><td>Precio PyME + pago con MercadoPago</td><td class="si">✔</td><td class="no">✘</td><td class="no">✘</td><td>—</td></tr>
+    <tr><td>Programa PC (Windows) + Web</td><td class="si">✔</td><td>según versión</td><td>solo web</td><td>local</td></tr>
+  </table>
+</section>
+
+<section class="planes" id="planes">
+  <h2>Planes claros, en tu moneda, con MercadoPago</h2>
+  <div class="grid">
+    <div class="plan">
+      <h3>Starter</h3><div class="precio">USD 59<span style="font-size:1rem">/mes</span></div>
+      <ul><li>✔ Conector universal ERP/BD</li><li>✔ Copiloto IA (500 consultas/mes)</li><li>✔ Ofertas, precios y reposición</li><li>✔ Exportes PDF/Word/Excel</li></ul>
+      <button class="btn-mp" onclick="pagar('starter')">Pagar con MercadoPago</button>
+    </div>
+    <div class="plan destacado">
+      <div class="tag">Más elegido</div>
+      <h3>Pro</h3><div class="precio">USD 129<span style="font-size:1rem">/mes</span></div>
+      <ul><li>✔ Todo Starter</li><li>✔ Rutas de reparto optimizadas</li><li>✔ 2.000 consultas/mes + excedente</li><li>✔ Soporte prioritario</li></ul>
+      <button class="btn-mp" onclick="pagar('pro')">Pagar con MercadoPago</button>
+    </div>
+    <div class="plan">
+      <h3>Enterprise</h3><div class="precio">a medida</div>
+      <ul><li>✔ Multi-sucursal y multi-empresa</li><li>✔ White label con tu marca</li><li>✔ SSO corporativo</li><li>✔ SLA y onboarding dedicado</li></ul>
+      <button class="btn-mp" style="background:var(--azul)" onclick="location.href='mailto:ventas@plania.uy?subject=Plania Enterprise'">Hablar con ventas</button>
+    </div>
+  </div>
+</section>
+
+<section id="demo" style="text-align:center; max-width:560px;">
+  <h2>🎁 Demo de 3 días con TODO habilitado</h2>
+  <p style="margin-bottom:18px">Sin tarjeta. Con tu email te mandamos la licencia demo y el
+  instalador para PC (también corre en el navegador). Probalo contra tus datos reales.</p>
+  <input type="email" id="email" placeholder="tu@empresa.com.uy">
+  <button class="btn-demo" onclick="demo()">Quiero mi demo full</button>
+  <div id="msg"></div>
+</section>
+
+<footer>
+  Plania · planificación logística y comercial inteligente · Montevideo, Uruguay<br>
+  ventas@plania.uy · WhatsApp +598 99 000 000
+</footer>
+
+<script>
+const BACKEND = window.PLANIA_BACKEND || "http://localhost:8100";
+async function pagar(plan) {
+  const email = prompt("Tu email (ahí llega la licencia):");
+  if (!email) return;
+  try {
+    const r = await fetch(BACKEND + "/checkout", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({plan, email})});
+    const d = await r.json();
+    if (r.ok && d.init_point) location.href = d.init_point;
+    else alert(d.detail || "No se pudo iniciar el pago.");
+  } catch (e) { alert("No se pudo contactar el servidor de pagos."); }
+}
+async function demo() {
+  const email = document.getElementById("email").value.trim();
+  const msg = document.getElementById("msg");
+  if (!email.includes("@")) { msg.textContent = "Ingresá un email válido."; return; }
+  try {
+    const r = await fetch(BACKEND + "/licencias/trial", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})});
+    const d = await r.json();
+    if (r.ok) {
+      msg.style.color = "var(--verde)";
+      msg.innerHTML = "✅ ¡Demo activada por " + d.dias + " días! Copiá tu licencia:<br>" +
+        "<textarea style='width:100%;height:70px;margin-top:8px'>" + d.licencia + "</textarea>";
+    } else { msg.style.color = "#c0392b"; msg.textContent = d.detail || "No se pudo emitir la demo."; }
+  } catch (e) { msg.style.color = "#c0392b"; msg.textContent = "No se pudo contactar el servidor."; }
+}
+</script>
+</body>
+</html>
