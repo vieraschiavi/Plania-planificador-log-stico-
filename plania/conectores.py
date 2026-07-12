@@ -207,6 +207,33 @@ def leer_archivo(ruta) -> pd.DataFrame:
     return pd.read_csv(ruta)
 
 
+def guardar_como_base(datos: dict[str, pd.DataFrame], ruta_db: str | None = None) -> str:
+    """Persiste DataFrames ya normalizados como una base SQLite con los
+    nombres canónicos de tabla, y devuelve la URL SQLAlchemy. Es lo que usa
+    la pantalla 'Conectar ERP' para que los CSV/Excel subidos queden como
+    fuente de datos permanente de toda la app (no solo de esa sesión)."""
+    import sqlite3
+
+    from plania import config as pconfig
+    if ruta_db is None:
+        os.makedirs(pconfig.CONFIG_DIR, exist_ok=True)
+        ruta_db = os.path.join(pconfig.CONFIG_DIR, "erp_archivos.db")
+    con = sqlite3.connect(ruta_db)
+    try:
+        for entidad in ("productos", "clientes", "ventas"):
+            df = datos.get(entidad)
+            if df is None:
+                df = pd.DataFrame(columns=list(SINONIMOS[entidad]))
+            df = df.copy()
+            for c in df.columns:
+                if pd.api.types.is_datetime64_any_dtype(df[c]):
+                    df[c] = df[c].astype(str)
+            df.to_sql(entidad, con, if_exists="replace", index=False)
+    finally:
+        con.close()
+    return f"sqlite:///{ruta_db}"
+
+
 def cargar_datos(url: str | None = None,
                  tablas: dict | None = None,
                  mapeos: dict | None = None) -> dict[str, pd.DataFrame]:

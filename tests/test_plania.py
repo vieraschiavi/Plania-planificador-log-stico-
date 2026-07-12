@@ -264,6 +264,22 @@ def test_e2e_demo_a_licencia_paga():
     pconfig.guardar_extra("DEMO_INICIO", "")
 
 
+def test_archivos_subidos_quedan_como_fuente(datos, tmp_path):
+    """CSV/Excel del ERP subidos por la UI → base SQLite → cargar_datos
+    los lee igual que a cualquier ERP conectado."""
+    ruta = str(tmp_path / "erp_archivos.db")
+    url = conectores.guardar_como_base(
+        {"productos": datos["productos"], "clientes": datos["clientes"],
+         "ventas": datos["ventas"]}, ruta_db=ruta)
+    releidos = conectores.cargar_datos(url=url)
+    assert len(releidos["productos"]) == len(datos["productos"])
+    assert len(releidos["ventas"]) == len(datos["ventas"])
+    # y la analítica corre sobre lo releído sin fricción
+    v = analitica.enriquecer_ventas(releidos["ventas"], releidos["productos"],
+                                    releidos["clientes"])
+    assert analitica.kpis(releidos["productos"], v)["venta_periodo"] > 0
+
+
 @pytest.mark.parametrize("pregunta,clave", [
     ("¿cómo viene cada proveedor?", "proveedor principal"),
     ("¿cuánto vendí de congelados?", "unidades"),

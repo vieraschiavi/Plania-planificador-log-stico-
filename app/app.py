@@ -461,9 +461,16 @@ elif pagina == "🔌 Conectar ERP / Base":
                     st.caption(f"**{e}**: mapeo detectado {mapeo}")
                     nuevos[e] = conectores.normalizar(crudo, e, mapeo)
                 st.session_state.datos_archivo = nuevos
-                st.success("Archivos cargados y normalizados. (Para persistirlos, "
-                           "guardalos como base SQLite desde Configuración.)")
                 st.dataframe(nuevos["productos"].head(), width="stretch")
+                if st.button("💾 Usar estos archivos en toda la app", type="primary"):
+                    url_archivos = conectores.guardar_como_base(nuevos)
+                    pconfig.guardar_extra("ERP_DB_URL", url_archivos)
+                    st.session_state.erp_url = url_archivos
+                    _cargar.clear()
+                    st.success("Listo: los archivos quedaron guardados como base "
+                               "de datos y toda la app pasa a leer de ahí (panel, "
+                               "sugerencias, copiloto, rutas). Podés volver a la "
+                               "base demo borrando ERP · URL en Configuración.")
             except Exception as e:
                 st.error(str(e))
 
