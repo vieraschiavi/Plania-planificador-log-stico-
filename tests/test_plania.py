@@ -216,3 +216,59 @@ def test_licencia_cliente_demo_local():
     est = licencia.estado()
     assert est["modo"] in ("demo", "licencia")
     assert "copiloto" in est["features"]
+
+
+def test_e2e_demo_a_licencia_paga():
+    """Circuito completo del cliente: demo local → compra → activación.
+    (El pago real lo simula la emisión directa: el webhook de MP termina
+    llamando exactamente a licencias.emitir_licencia.)"""
+    from datetime import datetime, timedelta, timezone
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta import licencias
+    from backend_venta.app import app
+    from plania import config as pconfig
+    from plania import licencia
+
+    # 1) demo local vencida (instalada hace 5 días)
+    pconfig.guardar_extra("LICENCIA_JWT", "")
+    inicio_viejo = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    pconfig.guardar_extra("DEMO_INICIO", inicio_viejo)
+    est = licencia.estado()
+    assert est["modo"] == "vencida"
+    assert est["features"] == []
+
+    # 2) el cliente pide la demo por la landing y la activa en la app
+    c = TestClient(app)
+    r = c.post("/licencias/trial", json={"email": "e2e@plania.uy"})
+    assert r.status_code == 200
+    act = licencia.activar_licencia(r.json()["licencia"])
+    assert act["ok"]
+    est = licencia.estado()
+    assert est["modo"] == "licencia" and est["plan"] == "trial"
+    assert "rutas" in est["features"]
+
+    # 3) paga → webhook emite plan pro → activa y desbloquea todo
+    lic_pro = licencias.emitir_licencia("e2e@plania.uy", "pro")
+    assert licencia.activar_licencia(lic_pro)["ok"]
+    est = licencia.estado()
+    assert est["plan"] == "pro" and licencia.tiene("rutas") and licencia.tiene("copiloto")
+
+    # 4) contra el backend, esa licencia consulta su estado/cupo
+    r = c.get("/licencias/estado", headers={"Authorization": f"Bearer {lic_pro}"})
+    assert r.status_code == 200 and r.json()["cupo_mensual"] == 2000
+
+    # limpiar para no afectar otros tests
+    pconfig.guardar_extra("LICENCIA_JWT", "")
+    pconfig.guardar_extra("DEMO_INICIO", "")
+
+
+@pytest.mark.parametrize("pregunta,clave", [
+    ("¿cómo viene cada proveedor?", "proveedor principal"),
+    ("¿cuánto vendí de congelados?", "unidades"),
+])
+def test_copiloto_intents_nuevos(datos, pregunta, clave):
+    r = copiloto.responder(pregunta, datos)
+    assert clave.lower() in r["respuesta"].lower()
+    assert r["tabla"] is not None and len(r["tabla"])

@@ -42,7 +42,8 @@ def _buscar_producto(texto: str, productos: pd.DataFrame) -> pd.DataFrame:
     stop = {"cuanto", "cuanta", "stock", "hay", "de", "del", "la", "el", "los",
             "las", "que", "cual", "precio", "margen", "tengo", "queda", "quedan",
             "producto", "productos", "en", "y", "con", "para", "cuales", "mas",
-            "menos", "top", "mejor", "peor", "este", "mes", "sobre", "bajo"}
+            "menos", "top", "mejor", "peor", "este", "mes", "sobre", "bajo",
+            "vendi", "vende", "venta", "ventas", "como"}
     palabras = [w for w in re.findall(r"[a-z]+", t) if w not in stop and len(w) > 3]
     if not palabras:
         return productos.head(0)
@@ -187,6 +188,41 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
                   f"{g.sort_values('margen_pct').iloc[-1]['tipo_negocio']} "
                   f"({g['margen_pct'].max():.1f}%).",
                   g, "Ventas por tipo de negocio")
+
+    # --- proveedores --------------------------------------------------------------
+    if "proveedor" in t:
+        g = analitica.por_dimension(v, "proveedor")
+        if not len(g):
+            return _r("Los datos conectados no traen proveedor.", None, "Proveedores")
+        rep = sugerencias.reposicion(productos, v)
+        urgente = ""
+        if len(rep):
+            top_prov = rep.groupby("proveedor")["venta_en_riesgo"].sum().idxmax()
+            urgente = (f" Ojo: el pedido más urgente es a {top_prov} "
+                       f"(${rep[rep['proveedor'] == top_prov]['inversion'].sum():,.0f} "
+                       "de compra sugerida).")
+        return _r(f"Tu proveedor principal es {g.iloc[0]['proveedor']} "
+                  f"(${g.iloc[0]['venta']:,.0f} de venta asociada, margen "
+                  f"{g.iloc[0]['margen_pct']:.1f}%).{urgente}",
+                  g, "Análisis por proveedor")
+
+    # --- venta de un producto puntual ----------------------------------------------
+    if any(k in t for k in ["cuanto vendi", "venta de", "ventas de", "como vende",
+                            "se vende"]):
+        prods = _buscar_producto(pregunta, productos)
+        if len(prods):
+            mp = analitica.margen_por_producto(v)
+            m = (prods[["sku", "nombre", "categoria", "precio", "stock"]]
+                 .merge(mp[["sku", "venta", "margen", "margen_pct", "unidades"]],
+                        on="sku", how="left").fillna(0)
+                 .sort_values("venta", ascending=False))
+            tot_v, tot_u = m["venta"].sum(), m["unidades"].sum()
+            x = m.iloc[0]
+            que = "Ese producto" if len(m) == 1 else f"Esos {len(m)} productos"
+            extra = f" El que más mueve: {x['nombre']}." if len(m) > 1 else ""
+            return _r(f"{que} vendió {tot_u:,.0f} unidades por ${tot_v:,.0f} "
+                      f"en el período.{extra}",
+                      m.head(30), "Venta del producto")
 
     # --- clientes ----------------------------------------------------------------
     if any(k in t for k in ["cliente", "inactivo", "recuperar", "dejo de comprar", "perdi"]):
