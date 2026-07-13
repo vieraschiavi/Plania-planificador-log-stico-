@@ -65,8 +65,11 @@ def main():
     if base not in sys.path:
         sys.path.insert(0, base)
 
-    threading.Thread(target=_abrir_navegador,
-                     args=(f"http://localhost:{port}",), daemon=True).start()
+    # Con PLANIA_NO_BROWSER=1 no se abre navegador: es el modo en que el
+    # escritorio Electron (desktop/) embebe este mismo server en su ventana.
+    if not os.environ.get("PLANIA_NO_BROWSER"):
+        threading.Thread(target=_abrir_navegador,
+                         args=(f"http://localhost:{port}",), daemon=True).start()
 
     from streamlit.web import cli as stcli
     sys.argv = ["streamlit", "run", app_path,
