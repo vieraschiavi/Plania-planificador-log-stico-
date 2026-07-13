@@ -1,9 +1,23 @@
 name: CI
+# NOTA: los triggers automáticos (push/pull_request) están desactivados a
+# propósito: esta cuenta de GitHub hoy no asigna runners a los jobs de este
+# repo privado (los runs mueren en 1-4 s con runner_id 0, sin logs), así que
+# cada push marcaba una ✗ roja engañosa sin ejecutar nada del código.
+#
+# Para reactivar el CI automático cuando Actions esté destrabado
+# (Settings → Billing → Spending limits de Actions, o repo Settings →
+# Actions → General, o haciendo el repo público), reemplazá el bloque `on:`
+# por:
+#
+#   on:
+#     workflow_dispatch:
+#     push:
+#       branches: ["**"]
+#     pull_request:
+#
+# Mientras tanto se puede correr a mano: pestaña Actions → CI → Run workflow.
 on:
   workflow_dispatch:
-  push:
-    branches: ["**"]
-  pull_request:
 
 jobs:
   tests:
