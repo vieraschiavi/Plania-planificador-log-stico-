@@ -40,36 +40,62 @@ NARANJA = "#F39C12"
 ROJO = "#E74C3C"
 
 st.set_page_config(page_title="Plania · Planificación Inteligente",
-                   page_icon="🚚", layout="wide",
+                   page_icon=os.path.join(RAIZ, "assets", "brand", "plania_icon.png"), layout="wide",
                    initial_sidebar_state="expanded")
 
 st.markdown(f"""
 <style>
-  .block-container {{ padding-top: 1.4rem; }}
-  section[data-testid="stSidebar"] {{
-      background: linear-gradient(180deg, {AZUL} 0%, #16294f 100%);
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  html, body, [class*="css"], .stMarkdown, button, input, textarea {{
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   }}
-  section[data-testid="stSidebar"] * {{ color: #EAF0FA !important; }}
+  .block-container {{ padding-top: 1.4rem; max-width: 1240px; }}
+  h1, h2, h3 {{ letter-spacing: -0.015em; }}
+
+  /* ---- Sidebar corporativo ---- */
+  section[data-testid="stSidebar"] {{
+      background: linear-gradient(180deg, {AZUL} 0%, #14264a 100%);
+      border-right: 1px solid rgba(255,255,255,.06);
+  }}
+  section[data-testid="stSidebar"] * {{ color: #E8EEF9 !important; }}
+  .plania-logo {{
+      font-weight: 800; font-size: 1.5rem; letter-spacing: .14em;
+      color: #FFFFFF; margin: 4px 0 0 0;
+  }}
+  .plania-logo span {{ color: {CELESTE}; }}
   section[data-testid="stSidebar"] .stRadio label {{
-      padding: 6px 10px; border-radius: 8px; width: 100%;
+      padding: 7px 12px; border-radius: 8px; width: 100%;
+      font-size: .93rem; font-weight: 500;
+      border-left: 3px solid transparent; transition: background .15s;
   }}
   section[data-testid="stSidebar"] .stRadio label:hover {{
-      background: rgba(255,255,255,.08);
+      background: rgba(255,255,255,.07);
   }}
+  section[data-testid="stSidebar"] .stRadio label[data-checked="true"],
+  section[data-testid="stSidebar"] .stRadio label:has(input:checked) {{
+      background: rgba(46,134,222,.18); border-left-color: {CELESTE};
+  }}
+
+  /* ---- Componentes ---- */
   .plania-badge {{
-      background: {CELESTE}; color: white; border-radius: 8px;
-      padding: 2px 10px; font-size: .55em; vertical-align: middle;
+      background: {CELESTE}; color: white; border-radius: 6px;
+      padding: 3px 12px; font-size: .5em; vertical-align: middle;
+      letter-spacing: .1em; font-weight: 600;
   }}
   .plania-demo {{
-      background: linear-gradient(90deg, {NARANJA}, #f7b731); color: #222;
-      border-radius: 10px; padding: 10px 16px; font-weight: 600;
-      margin-bottom: 10px;
+      background: #FFF6E5; color: #6b4a00; border: 1px solid #F1D18E;
+      border-left: 4px solid {NARANJA};
+      border-radius: 8px; padding: 12px 16px; font-weight: 500;
+      margin-bottom: 12px;
   }}
   div[data-testid="stMetric"] {{
-      background: #F5F7FB; border: 1px solid #E3E8F2;
-      border-radius: 12px; padding: 12px 14px;
+      background: #FFFFFF; border: 1px solid #E3E8F2;
+      border-radius: 10px; padding: 14px 16px;
+      box-shadow: 0 1px 3px rgba(16,30,60,.06);
   }}
-  .stChatMessage {{ border-radius: 12px; }}
+  div[data-testid="stMetric"] label {{ color: #5A6B85 !important; font-weight: 500; }}
+  .stChatMessage {{ border-radius: 10px; }}
+  button[kind="primary"] {{ border-radius: 8px; font-weight: 600; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,6 +123,9 @@ def cargar_datos() -> dict | None:
 
 
 def _fmt(n: float) -> str:
+    """Montos compactos para tarjetas: $2.86 M en vez de $2,856,128 truncado."""
+    if abs(n) >= 1_000_000:
+        return f"${n / 1_000_000:,.2f} M"
     return f"${n:,.0f}"
 
 
@@ -106,44 +135,45 @@ def _fmt(n: float) -> str:
 lic = licencia.estado()
 
 with st.sidebar:
-    st.markdown("## 🚚 Plania")
+    st.markdown("<div class='plania-logo'>PLAN<span>IA</span></div>",
+                unsafe_allow_html=True)
     st.caption("Planificación logística y comercial inteligente")
     st.markdown("---")
-    MENU = ["🏠 Inicio",
-            "📊 Panel ejecutivo",
-            "📦 Stock & Reposición",
-            "💰 Precios & Márgenes",
-            "🗺️ Zonas & Negocios",
-            "🚛 Rutas de reparto",
-            "🏷️ Ofertas & Sugerencias",
-            "🤖 Copiloto IA",
-            "🔌 Conectar ERP / Base",
-            "💳 Planes & Licencia",
-            "⚙️ Configuración",
-            "❓ Ayuda"]
+    MENU = ["Inicio",
+            "Panel ejecutivo",
+            "Stock y reposición",
+            "Precios y márgenes",
+            "Zonas y negocios",
+            "Rutas de reparto",
+            "Ofertas y sugerencias",
+            "Copiloto IA",
+            "Conectar ERP",
+            "Planes y licencia",
+            "Configuración",
+            "Ayuda"]
     pagina = st.radio("Menú", MENU, label_visibility="collapsed")
     st.markdown("---")
     if lic["modo"] == "demo":
-        st.markdown(f"**🕒 Demo full:** quedan "
+        st.markdown(f"**Demo full:** quedan "
                     f"{lic.get('horas_restantes', lic['dias_restantes'] * 24)} h")
         st.progress(min(1.0, lic.get("horas_restantes", 72) / (licencia.DIAS_DEMO * 24)))
     elif lic["modo"] == "licencia":
-        st.markdown(f"**✅ Plan {lic['plan']}** · vence en {lic['dias_restantes']} días")
+        st.markdown(f"**Plan {lic['plan']}** · vence en {lic['dias_restantes']} días")
     else:
-        st.markdown("**⛔ Demo vencida** — activá tu licencia en *Planes & Licencia*")
+        st.markdown("**Demo vencida** — activá tu licencia en *Planes y licencia*")
     fuente = "ERP conectado" if (st.session_state.get("erp_url")
                                  or pconfig.leer_extra("ERP_DB_URL")) else "Base demo (Uruguay)"
     st.caption(f"Fuente de datos: {fuente}")
 
 BLOQUEADA = lic["modo"] == "vencida" and pagina not in (
-    "🏠 Inicio", "💳 Planes & Licencia", "❓ Ayuda", "⚙️ Configuración")
+    "Inicio", "Planes y licencia", "Ayuda", "Configuración")
 if BLOQUEADA:
-    st.warning("La demo de 3 días terminó. Activá tu licencia en **💳 Planes & Licencia** "
+    st.warning("La demo de 3 días terminó. Activá tu licencia en **Planes y licencia** "
                "para seguir usando Plania con todos tus datos intactos.")
     st.stop()
 
 datos = None
-if pagina not in ("💳 Planes & Licencia", "⚙️ Configuración", "❓ Ayuda", "🔌 Conectar ERP / Base"):
+if pagina not in ("Planes y licencia", "Configuración", "Ayuda", "Conectar ERP"):
     datos = cargar_datos()
 
 
@@ -151,21 +181,21 @@ def _ventas_enriquecidas(d: dict) -> pd.DataFrame:
     return analitica.enriquecer_ventas(d["ventas"], d["productos"], d["clientes"])
 
 
-def _botones_export(clave: str, secciones: list, etiqueta: str = "⬇️ Exportar"):
+def _botones_export(clave: str, secciones: list, etiqueta: str = "Exportar"):
     """Botones de descarga PDF / Word / Excel para cualquier tabla o informe."""
     if not licencia.tiene("exportes"):
         st.caption("Exportes disponibles en planes pagos y demo.")
         return
     titulo = secciones[0][0] if secciones else "Informe"
     c1, c2, c3, _ = st.columns([1, 1, 1, 3])
-    c1.download_button("📄 PDF", exportes.a_pdf(titulo, secciones),
+    c1.download_button("PDF", exportes.a_pdf(titulo, secciones),
                        file_name=f"plania_{clave}.pdf", key=f"pdf_{clave}",
                        mime="application/pdf")
-    c2.download_button("📝 Word", exportes.a_word(titulo, secciones),
+    c2.download_button("Word", exportes.a_word(titulo, secciones),
                        file_name=f"plania_{clave}.docx", key=f"docx_{clave}",
                        mime="application/vnd.openxmlformats-officedocument"
                             ".wordprocessingml.document")
-    c3.download_button("📊 Excel", exportes.a_excel(secciones),
+    c3.download_button("Excel", exportes.a_excel(secciones),
                        file_name=f"plania_{clave}.xlsx", key=f"xlsx_{clave}",
                        mime="application/vnd.openxmlformats-officedocument"
                             ".spreadsheetml.sheet")
@@ -174,11 +204,11 @@ def _botones_export(clave: str, secciones: list, etiqueta: str = "⬇️ Exporta
 # ---------------------------------------------------------------------------
 # Páginas
 # ---------------------------------------------------------------------------
-if pagina == "🏠 Inicio":
-    st.markdown(f"# 🚚 Plania <span class='plania-badge'>PLANIFICACIÓN INTELIGENTE</span>",
+if pagina == "Inicio":
+    st.markdown(f"# Plania <span class='plania-badge'>PLANIFICACIÓN INTELIGENTE</span>",
                 unsafe_allow_html=True)
     if lic["modo"] == "demo":
-        st.markdown(f"<div class='plania-demo'>🎁 Estás en la <b>demo de 3 días con TODO "
+        st.markdown(f"<div class='plania-demo'>Estás en la <b>demo de 3 días con TODO "
                     f"habilitado</b> — conectá tu ERP real o explorá con la base demo. "
                     f"Quedan {lic.get('horas_restantes', 72)} horas.</div>",
                     unsafe_allow_html=True)
@@ -196,11 +226,11 @@ if pagina == "🏠 Inicio":
         c2.metric("Margen", f"{k['margen_pct']:.1f}%")
         c3.metric("Capital liberable (sobrestock)", _fmt(paq["resumen"]["capital_liberable"]))
         c4.metric("Venta en riesgo (quiebres)", _fmt(paq["resumen"]["venta_en_riesgo"]))
-        st.info("👉 Empezá por **🏷️ Ofertas & Sugerencias** para ver las decisiones de hoy, "
-                "o preguntale al **🤖 Copiloto**: *«¿qué ofertas armo esta semana?»*")
+        st.info("Empezá por **Ofertas y sugerencias** para ver las decisiones de hoy, "
+                "o preguntale al **Copiloto**: *«¿qué ofertas armo esta semana?»*")
 
-elif pagina == "📊 Panel ejecutivo":
-    st.title("📊 Panel ejecutivo")
+elif pagina == "Panel ejecutivo":
+    st.title("Panel ejecutivo")
     if datos:
         v = _ventas_enriquecidas(datos)
         k = analitica.kpis(datos["productos"], v)
@@ -226,8 +256,8 @@ elif pagina == "📊 Panel ejecutivo":
         st.markdown("#### Top clientes")
         st.dataframe(analitica.top_clientes(v), width="stretch", hide_index=True)
 
-elif pagina == "📦 Stock & Reposición":
-    st.title("📦 Stock & Reposición")
+elif pagina == "Stock y reposición":
+    st.title("Stock y reposición")
     if datos:
         v = _ventas_enriquecidas(datos)
         r = analitica.rotacion(datos["productos"], v)
@@ -235,7 +265,7 @@ elif pagina == "📦 Stock & Reposición":
         c1.metric("SKUs", len(r))
         c2.metric("Quiebres", int((r["stock"] <= 0).sum()))
         c3.metric("Sobrestock (>90 días)", int((r["dias_stock"] > 90).sum()))
-        tab1, tab2 = st.tabs(["🛒 Reposición urgente", "📋 Stock completo"])
+        tab1, tab2 = st.tabs(["Reposición urgente", "Stock completo"])
         with tab1:
             rep = sugerencias.reposicion(datos["productos"], v)
             if len(rep):
@@ -252,8 +282,8 @@ elif pagina == "📦 Stock & Reposición":
                 dias_stock=rr["dias_stock"].replace([float("inf")], 999).round(0)),
                 width="stretch", hide_index=True)
 
-elif pagina == "💰 Precios & Márgenes":
-    st.title("💰 Precios & Márgenes")
+elif pagina == "Precios y márgenes":
+    st.title("Precios y márgenes")
     if datos:
         v = _ventas_enriquecidas(datos)
         mp = analitica.margen_por_producto(v)
@@ -276,8 +306,8 @@ elif pagina == "💰 Precios & Márgenes":
         else:
             st.success("Márgenes alineados con su categoría.")
 
-elif pagina == "🗺️ Zonas & Negocios":
-    st.title("🗺️ Zonas & tipos de negocio")
+elif pagina == "Zonas y negocios":
+    st.title(" Zonas & tipos de negocio")
     if datos:
         v = _ventas_enriquecidas(datos)
         dim = st.radio("Ver por", ["zona", "departamento", "tipo_negocio"],
@@ -291,7 +321,7 @@ elif pagina == "🗺️ Zonas & Negocios":
             fig.update_layout(height=420, margin=dict(t=40, b=0))
             col1.plotly_chart(fig, width="stretch")
             col2.dataframe(g, width="stretch", hide_index=True)
-        st.markdown("#### 🎯 Oportunidades de venta cruzada por zona")
+        st.markdown("#### Oportunidades de venta cruzada por zona")
         op = sugerencias.oportunidades_zona(v)
         if len(op):
             st.dataframe(op, width="stretch", hide_index=True)
@@ -300,8 +330,8 @@ elif pagina == "🗺️ Zonas & Negocios":
         else:
             st.info("Sin brechas de penetración relevantes (o faltan datos de zona).")
 
-elif pagina == "🚛 Rutas de reparto":
-    st.title("🚛 Rutas de reparto")
+elif pagina == "Rutas de reparto":
+    st.title("Rutas de reparto")
     if not licencia.tiene("rutas"):
         st.warning("El plan actual no incluye el planificador de rutas — "
                    "disponible en **Pro** y **Enterprise**.")
@@ -327,7 +357,7 @@ elif pagina == "🚛 Rutas de reparto":
         else:
             objetivo = base
         st.caption(f"{len(objetivo)} clientes a rutear")
-        if len(objetivo) and st.button("🚚 Planificar rutas", type="primary"):
+        if len(objetivo) and st.button("Planificar rutas", type="primary"):
             plan = rutas.planificar(objetivo, vehiculos=int(vehiculos),
                                     paradas_max=int(paradas))
             st.dataframe(plan["resumen"], width="stretch", hide_index=True)
@@ -343,8 +373,8 @@ elif pagina == "🚛 Rutas de reparto":
                                        "Orden de visita optimizado por vehículo "
                                        "(vecino más cercano + 2-opt).", plan["rutas"])])
 
-elif pagina == "🏷️ Ofertas & Sugerencias":
-    st.title("🏷️ Ofertas & Sugerencias")
+elif pagina == "Ofertas y sugerencias":
+    st.title("Ofertas y sugerencias")
     if datos:
         paq = sugerencias.generar_todas(datos)
         res = paq["resumen"]
@@ -356,9 +386,8 @@ elif pagina == "🏷️ Ofertas & Sugerencias":
         st.markdown("---")
         secciones = exportes.secciones_desde_paquete(paq)
         _botones_export("paquete_completo", secciones,
-                        etiqueta="⬇️ Exportar informe completo")
-        tabs = st.tabs(["🏷️ Ofertas", "🛒 Reposición", "💰 Precios",
-                        "🗺️ Zonas", "📞 Recupero"])
+                        etiqueta="Exportar informe completo")
+        tabs = st.tabs(["Ofertas", "Reposición", "Precios", "Zonas", "Recupero"])
         for tab, clave in zip(tabs, ["ofertas", "reposicion", "precios",
                                      "zonas", "recupero"]):
             with tab:
@@ -369,8 +398,8 @@ elif pagina == "🏷️ Ofertas & Sugerencias":
                 else:
                     st.success("Nada para accionar acá — todo en orden.")
 
-elif pagina == "🤖 Copiloto IA":
-    st.title("🤖 Copiloto — preguntale a tus datos")
+elif pagina == "Copiloto IA":
+    st.title("Copiloto — preguntale a tus datos")
     if not licencia.tiene("copiloto"):
         st.warning("El plan actual no incluye el Copiloto.")
     elif datos:
@@ -401,14 +430,14 @@ elif pagina == "🤖 Copiloto IA":
             st.session_state.chat.append({"rol": "assistant", "texto": r["respuesta"],
                                           "tabla": r["tabla"]})
 
-elif pagina == "🔌 Conectar ERP / Base":
-    st.title("🔌 Conectar tu ERP o base de datos")
+elif pagina == "Conectar ERP":
+    st.title(" Conectar tu ERP o base de datos")
     st.markdown(
         "Plania **no te hace migrar nada**: apunta a la base que ya usás y "
         "auto-detecta las columnas. Motores soportados: PostgreSQL, MySQL/MariaDB, "
         "SQL Server, Oracle y SQLite — o subí un CSV/Excel exportado del ERP "
         "(Zureo, Memory, Tango, Bejerman, Odoo, SAP B1 y similares).")
-    tab1, tab2 = st.tabs(["🗄️ Base de datos (SQL)", "📄 Archivos CSV/Excel"])
+    tab1, tab2 = st.tabs(["Base de datos (SQL)", "Archivos CSV/Excel"])
     with tab1:
         url = st.text_input("URL de conexión SQLAlchemy",
                             value=pconfig.leer_extra("ERP_DB_URL") or "",
@@ -418,7 +447,7 @@ elif pagina == "🔌 Conectar ERP / Base":
             try:
                 eng = conectores.conectar_sql(url)
                 tablas = conectores.listar_tablas(eng)
-                st.success(f"✅ Conectado. {len(tablas)} tablas: "
+                st.success(f" Conectado. {len(tablas)} tablas: "
                            f"{', '.join(tablas[:12])}{'…' if len(tablas) > 12 else ''}")
                 auto = {e: conectores.autodescubrir_tabla(eng, e)
                         for e in ("productos", "clientes", "ventas")}
@@ -427,7 +456,7 @@ elif pagina == "🔌 Conectar ERP / Base":
                 st.session_state.erp_url = url
             except Exception as e:
                 st.error(f"No conectó: {e}")
-        if c2.button("💾 Guardar y usar esta base"):
+        if c2.button("Guardar y usar esta base"):
             pconfig.guardar_extra("ERP_DB_URL", url)
             st.session_state.erp_url = url
             _cargar.clear()
@@ -462,7 +491,7 @@ elif pagina == "🔌 Conectar ERP / Base":
                     nuevos[e] = conectores.normalizar(crudo, e, mapeo)
                 st.session_state.datos_archivo = nuevos
                 st.dataframe(nuevos["productos"].head(), width="stretch")
-                if st.button("💾 Usar estos archivos en toda la app", type="primary"):
+                if st.button("Usar estos archivos en toda la app", type="primary"):
                     url_archivos = conectores.guardar_como_base(nuevos)
                     pconfig.guardar_extra("ERP_DB_URL", url_archivos)
                     st.session_state.erp_url = url_archivos
@@ -474,19 +503,19 @@ elif pagina == "🔌 Conectar ERP / Base":
             except Exception as e:
                 st.error(str(e))
 
-elif pagina == "💳 Planes & Licencia":
-    st.title("💳 Planes & Licencia")
+elif pagina == "Planes y licencia":
+    st.title("Planes y licencia")
     backend = os.environ.get("PLANIA_BACKEND_URL",
                              pconfig.leer_extra("BACKEND_URL") or "http://localhost:8100")
     if lic["modo"] == "demo":
-        st.markdown(f"<div class='plania-demo'>🎁 Demo full activa — quedan "
+        st.markdown(f"<div class='plania-demo'>Demo full activa — quedan "
                     f"{lic.get('horas_restantes', 72)} horas. Al comprar, tus datos y "
                     f"configuración quedan tal cual.</div>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     for col, (plan, titulo, precio, detalle) in zip((col1, col2, col3), [
         ("starter", "Starter", "USD 59/mes",
          "Copiloto + ERP + exportes · 500 consultas/mes"),
-        ("pro", "Pro ⭐", "USD 129/mes",
+        ("pro", "Pro — recomendado", "USD 129/mes",
          "Todo Starter + rutas + excedente · 2.000 consultas/mes"),
         ("enterprise", "Enterprise", "a medida",
          "Multi-sucursal, white label, SSO, SLA"),
@@ -498,13 +527,13 @@ elif pagina == "💳 Planes & Licencia":
     st.markdown("---")
     email = st.text_input("Tu email (para emitir la licencia)")
     plan_sel = st.selectbox("Plan", ["starter", "pro"])
-    if st.button("💳 Pagar con MercadoPago", type="primary"):
+    if st.button("Pagar con MercadoPago", type="primary"):
         try:
             import requests
             r = requests.post(f"{backend}/checkout",
                               json={"plan": plan_sel, "email": email}, timeout=15)
             if r.ok:
-                st.link_button("👉 Ir al checkout seguro de MercadoPago",
+                st.link_button("Ir al checkout seguro de MercadoPago",
                                r.json()["init_point"])
             else:
                 st.error(r.json().get("detail", r.text))
@@ -515,13 +544,13 @@ elif pagina == "💳 Planes & Licencia":
     if st.button("Activar licencia"):
         r = licencia.activar_licencia(tok.strip())
         if r["ok"]:
-            st.success(f"✅ Licencia activada — plan {r['claims'].get('plan')}. "
+            st.success(f" Licencia activada — plan {r['claims'].get('plan')}. "
                        "Recargá la página.")
         else:
             st.error(r["error"])
 
-elif pagina == "⚙️ Configuración":
-    st.title("⚙️ Configuración")
+elif pagina == "Configuración":
+    st.title("Configuración")
     st.caption(f"Guardado seguro: **{pconfig.backend_activo()}** "
                "(keyring del sistema > archivo cifrado > texto plano)")
     cfg = pconfig.cargar()
@@ -533,7 +562,7 @@ elif pagina == "⚙️ Configuración":
                 desc, value="", placeholder=pconfig.enmascarar(actual) if actual
                 else "(sin configurar)", type="password" if "KEY" in clave
                 or "TOKEN" in clave or "PASSWORD" in clave else "default")
-        if st.form_submit_button("💾 Guardar", type="primary"):
+        if st.form_submit_button("Guardar", type="primary"):
             cambios = {k: v for k, v in nuevos.items() if v.strip()}
             if cambios:
                 pconfig.guardar(cambios)
@@ -542,8 +571,8 @@ elif pagina == "⚙️ Configuración":
             else:
                 st.info("No ingresaste valores nuevos.")
 
-else:  # ❓ Ayuda
-    st.title("❓ Ayuda")
+else:  # Ayuda
+    st.title("Ayuda")
     st.markdown("""
 **¿Qué hace Plania?** Se conecta a tu ERP o base de datos (sin migrar nada),
 analiza stock, precios, márgenes, zonas y clientes, y te devuelve decisiones
@@ -552,9 +581,9 @@ clientes a recuperar — todo exportable a **PDF, Word y Excel** y consultable
 por chat con el **Copiloto**.
 
 **Primeros pasos**
-1. 🔌 *Conectar ERP / Base*: apuntá a tu base (o probá con la demo incluida).
-2. 🏷️ *Ofertas & Sugerencias*: exportá el informe completo del día.
-3. 🤖 *Copiloto*: preguntá en criollo — «¿qué repongo ya?».
+1.  *Conectar ERP / Base*: apuntá a tu base (o probá con la demo incluida).
+2.  *Ofertas & Sugerencias*: exportá el informe completo del día.
+3.  *Copiloto*: preguntá en criollo — «¿qué repongo ya?».
 
 **Demo de 3 días** — todo habilitado, sin tarjeta. Al vencer, tus datos no
 se tocan: activás la licencia y seguís donde estabas.

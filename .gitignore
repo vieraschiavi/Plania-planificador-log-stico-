@@ -10,3 +10,5 @@ data/uso_licencias.db
 .DS_Store
 data/auditoria.log*
 *.lock
+desktop/node_modules/
+desktop/dist_electron/
