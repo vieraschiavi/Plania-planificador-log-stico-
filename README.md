@@ -16,6 +16,24 @@ que responde consultas sobre los datos reales y exporta todo a
 | ![Panel](assets/capturas/panel.png) | ![Ofertas](assets/capturas/ofertas.png) |
 | *Panel ejecutivo* | *Ofertas y sugerencias accionables* |
 
+## Descargas (Windows)
+
+**Sin esperar nada — hoy mismo, desde GitHub:**
+
+1. Botón verde **Code → Download ZIP** (o [este enlace directo](../../archive/refs/heads/main.zip)).
+2. Descomprimir y hacer **doble clic en `INICIAR_PLANIA.bat`** — la primera vez
+   crea el entorno e instala todo solo (requiere tener
+   [Python 3.11+](https://www.python.org/downloads/) instalado con
+   "Add to PATH"); las siguientes abre directo.
+
+**Ejecutables .exe (Electron + React, sin requisitos):** se generan con el
+workflow **Release** (pestaña Actions → Release → *Run workflow*) y quedan
+publicados en [Releases](../../releases): instalador `Plania Setup.exe`,
+`.exe` portable, bundle PyInstaller y ZIP con la versión .BAT.
+*Nota: requiere GitHub Actions habilitado para el repo — ver la nota en
+`.github/workflows/ci.yml`.* También se pueden construir localmente en
+Windows (`python packaging/build_release.py` y `desktop/ → npm run dist`).
+
 ## Probarlo en 60 segundos
 
 ```bash
