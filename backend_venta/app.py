@@ -96,7 +96,7 @@ async def emitir(payload: dict, _admin: None = Depends(requerir_admin)):
 
 @app.post("/licencias/trial")
 async def trial(payload: dict):
-    """Demo 3 días full self-service: solo pide un email. Una por email."""
+    """Demo 7 días full self-service: solo pide un email. Una por email."""
     email = str(payload.get("email") or "").strip().lower()
     if "@" not in email:
         raise HTTPException(400, "email inválido")

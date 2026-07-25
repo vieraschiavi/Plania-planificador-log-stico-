@@ -35,7 +35,7 @@ planificación con alguna mezcla de:
 5. **Planificación comercial + logística juntas.** Ofertas, precios,
    reposición, zonas *y* rutas de reparto en el mismo producto — hoy eso
    son 2 o 3 contratos distintos.
-6. **Demo 3 días full sin tarjeta** contra los datos reales del prospecto:
+6. **Demo 7 días full sin tarjeta** contra los datos reales del prospecto:
    el producto se vende solo mostrando plata encontrada en SU base.
 7. **Comercialización regional:** precios PyME, pago con **MercadoPago**
    (la billetera que el comercio ya usa), licencia automática post-pago,
@@ -44,7 +44,7 @@ planificación con alguna mezcla de:
 ## Argumentario corto (objeciones frecuentes)
 
 - *"Ya tengo ERP"* → Perfecto: Plania no lo reemplaza, lo lee. En la demo
-  de 3 días lo conectamos y te muestra plata que hoy no ves.
+  de 7 días lo conectamos y te muestra plata que hoy no ves.
 - *"Power BI lo hace"* → Power BI te muestra un gráfico si alguien lo
   construye y mantiene. Plania te dice qué ofertar el lunes, con descuento
   calculado y piso de margen, sin analista.

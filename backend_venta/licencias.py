@@ -24,13 +24,13 @@ from plania import config as kconfig
 
 _CLAVE_SECRETO = "LICENSE_SECRET"
 
-# Nota sobre el trial: es la "demo 3 días full" del modelo comercial — TODAS
+# Nota sobre el trial: es la "demo 7 días full" del modelo comercial — TODAS
 # las features habilitadas (copiloto, ERP, exportes, rutas) con cupo real,
 # para que el prospecto pruebe el producto completo contra SUS datos antes de
-# pagar. Vence solo a los 3 días; convertir = pagar por MercadoPago (webhook
+# pagar. Vence solo a los 7 días; convertir = pagar por MercadoPago (webhook
 # emite la licencia definitiva sin intervención manual).
 PLANES = {
-    "trial":      {"cupo_mensual": 300,  "precio": 0.0,   "dias": 3,
+    "trial":      {"cupo_mensual": 300,  "precio": 0.0,   "dias": 7,
                    "features": ["copiloto", "erp", "exportes", "rutas"]},
     "starter":    {"cupo_mensual": 500,  "precio": 59.0,  "dias": 30,
                    "features": ["copiloto", "erp", "exportes"]},

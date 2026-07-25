@@ -2,7 +2,7 @@
 Plania · Planificación logística y comercial inteligente — Dashboard
 ====================================================================
 La aplicación que ve el cliente (web y PC: el instalador de Windows levanta
-esto mismo embebido). Menú lateral profesional, demo de 3 días full
+esto mismo embebido). Menú lateral profesional, demo de 7 días full
 integrada, copiloto sobre datos reales y exportes PDF/Word/Excel.
 
     streamlit run app/app.py
@@ -156,7 +156,7 @@ with st.sidebar:
     if lic["modo"] == "demo":
         st.markdown(f"**Demo full:** quedan "
                     f"{lic.get('horas_restantes', lic['dias_restantes'] * 24)} h")
-        st.progress(min(1.0, lic.get("horas_restantes", 72) / (licencia.DIAS_DEMO * 24)))
+        st.progress(min(1.0, lic.get("horas_restantes", licencia.DIAS_DEMO * 24) / (licencia.DIAS_DEMO * 24)))
     elif lic["modo"] == "licencia":
         st.markdown(f"**Plan {lic['plan']}** · vence en {lic['dias_restantes']} días")
     else:
@@ -168,7 +168,7 @@ with st.sidebar:
 BLOQUEADA = lic["modo"] == "vencida" and pagina not in (
     "Inicio", "Planes y licencia", "Ayuda", "Configuración")
 if BLOQUEADA:
-    st.warning("La demo de 3 días terminó. Activá tu licencia en **Planes y licencia** "
+    st.warning("La demo de 7 días terminó. Activá tu licencia en **Planes y licencia** "
                "para seguir usando Plania con todos tus datos intactos.")
     st.stop()
 
@@ -208,9 +208,9 @@ if pagina == "Inicio":
     st.markdown(f"# Plania <span class='plania-badge'>PLANIFICACIÓN INTELIGENTE</span>",
                 unsafe_allow_html=True)
     if lic["modo"] == "demo":
-        st.markdown(f"<div class='plania-demo'>Estás en la <b>demo de 3 días con TODO "
+        st.markdown(f"<div class='plania-demo'>Estás en la <b>demo de 7 días con TODO "
                     f"habilitado</b> — conectá tu ERP real o explorá con la base demo. "
-                    f"Quedan {lic.get('horas_restantes', 72)} horas.</div>",
+                    f"Quedan {lic.get('horas_restantes', licencia.DIAS_DEMO * 24)} horas.</div>",
                     unsafe_allow_html=True)
     st.markdown(
         "El único planificador que **se conecta al ERP que ya tenés** (PostgreSQL, "
@@ -509,7 +509,7 @@ elif pagina == "Planes y licencia":
                              pconfig.leer_extra("BACKEND_URL") or "http://localhost:8100")
     if lic["modo"] == "demo":
         st.markdown(f"<div class='plania-demo'>Demo full activa — quedan "
-                    f"{lic.get('horas_restantes', 72)} horas. Al comprar, tus datos y "
+                    f"{lic.get('horas_restantes', licencia.DIAS_DEMO * 24)} horas. Al comprar, tus datos y "
                     f"configuración quedan tal cual.</div>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     for col, (plan, titulo, precio, detalle) in zip((col1, col2, col3), [
@@ -585,7 +585,7 @@ por chat con el **Copiloto**.
 2.  *Ofertas & Sugerencias*: exportá el informe completo del día.
 3.  *Copiloto*: preguntá en criollo — «¿qué repongo ya?».
 
-**Demo de 3 días** — todo habilitado, sin tarjeta. Al vencer, tus datos no
+**Demo de 7 días** — todo habilitado, sin tarjeta. Al vencer, tus datos no
 se tocan: activás la licencia y seguís donde estabas.
 
 **Soporte** — soporte@plania.uy · WhatsApp +598 99 000 000

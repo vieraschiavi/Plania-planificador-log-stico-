@@ -1,7 +1,7 @@
 """
-Plania · Licencia del lado del cliente (demo 3 días full + licencia paga)
+Plania · Licencia del lado del cliente (demo 7 días full + licencia paga)
 =========================================================================
-La primera vez que se abre el programa arranca sola la **demo de 3 días con
+La primera vez que se abre el programa arranca sola la **demo de 7 días con
 todo habilitado** (copiloto, ERP, exportes, rutas) — sin tarjeta, sin
 registro. Al vencer, el programa sigue abriendo pero pide activar una
 licencia (JWT emitida por `backend_venta`, comprada por MercadoPago).
@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from plania import config as pconfig
 
-DIAS_DEMO = 3
+DIAS_DEMO = 7
 FEATURES_DEMO = ["copiloto", "erp", "exportes", "rutas"]
 
 _CLAVE_DEMO = "DEMO_INICIO"

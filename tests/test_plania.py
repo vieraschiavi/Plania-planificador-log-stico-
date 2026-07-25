@@ -188,9 +188,9 @@ def test_licencia_jwt_ciclo_completo():
     assert set(r["claims"]["features"]) == {"copiloto", "erp", "exportes", "rutas"}
 
 
-def test_trial_es_3_dias():
+def test_trial_es_7_dias():
     from backend_venta import licencias
-    assert licencias.PLANES["trial"]["dias"] == 3
+    assert licencias.PLANES["trial"]["dias"] == 7
     assert licencias.PLANES["trial"]["precio"] == 0.0
 
 
@@ -202,7 +202,7 @@ def test_backend_endpoints():
     planes = c.get("/planes").json()
     assert "trial" in planes and "pro" in planes
     r = c.post("/licencias/trial", json={"email": "demo1@test.uy"})
-    assert r.status_code == 200 and r.json()["dias"] == 3
+    assert r.status_code == 200 and r.json()["dias"] == 7
     # segunda demo con el mismo email: rechazada
     assert c.post("/licencias/trial", json={"email": "demo1@test.uy"}).status_code == 409
     # checkout sin MP_ACCESS_TOKEN: 503 claro, no un 500 críptico
@@ -231,9 +231,9 @@ def test_e2e_demo_a_licencia_paga():
     from plania import config as pconfig
     from plania import licencia
 
-    # 1) demo local vencida (instalada hace 5 días)
+    # 1) demo local vencida (instalada hace 10 días, más que los 7 de demo)
     pconfig.guardar_extra("LICENCIA_JWT", "")
-    inicio_viejo = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    inicio_viejo = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
     pconfig.guardar_extra("DEMO_INICIO", inicio_viejo)
     est = licencia.estado()
     assert est["modo"] == "vencida"

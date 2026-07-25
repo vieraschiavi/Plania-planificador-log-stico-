@@ -3,7 +3,7 @@ Plania · Medición de uso por licencia (Edición Venta)
 ======================================================
 Cada llamada al gateway del Copiloto queda registrada acá — es la base para
 saber si un cliente superó su cupo mensual y para facturar el excedente.
-También registra qué emails ya consumieron la demo de 3 días (una por email).
+También registra qué emails ya consumieron la demo de 7 días (una por email).
 
 SQLite por simplicidad: alcanza para este servicio corriendo en un solo
 servidor; migrar a Postgres es cambiar la URL de conexión si hace falta
