@@ -288,3 +288,119 @@ def test_copiloto_intents_nuevos(datos, pregunta, clave):
     r = copiloto.responder(pregunta, datos)
     assert clave.lower() in r["respuesta"].lower()
     assert r["tabla"] is not None and len(r["tabla"])
+
+
+# ---------------------------------------------------------------------------
+# Modelo de negocio: la plata proyectada tiene que ser aritmética, no deseo
+# ---------------------------------------------------------------------------
+def test_simulacion_respeta_ciclo_de_venta():
+    """Con ciclo de venta de N meses, no puede haber clientes antes del mes N+1.
+    Es el error clásico de las proyecciones: cerrar ventas el mes uno."""
+    from plania import negocio
+    df = negocio.simular(negocio.BASE, meses=12, inversion_ads_mes=300.0)
+    ciclo = negocio.BASE.ciclo_venta_meses
+    assert df.head(ciclo)["clientes_nuevos"].sum() == 0
+    assert df["clientes_activos"].iloc[-1] > 0
+
+
+def test_simulacion_respeta_capacidad_horaria():
+    """Nunca se pueden implementar más clientes que las horas disponibles."""
+    from plania import negocio
+    esc = negocio.OPTIMISTA
+    df = negocio.simular(esc, meses=18, inversion_ads_mes=1500.0, contratar=False)
+    horas_disp = negocio.HORAS_MES_FUNDADOR - esc.horas_venta_mes
+    max_implementaciones = horas_disp / esc.horas_implementacion
+    assert (df["clientes_nuevos"] <= max_implementaciones + 1e-6).all()
+    # y la demanda excedente tiene que quedar registrada como backlog
+    assert df["backlog"].max() > 0
+
+
+def test_regimen_tributario_cambia_al_superar_el_tope():
+    from plania import negocio
+    df = negocio.simular(negocio.OPTIMISTA, meses=18, inversion_ads_mes=300.0)
+    assert df.iloc[0]["regimen"] == "Monotributo"
+    assert (df["regimen"] == "General (IRAE)").any()
+    # en régimen general se paga IRAE sobre utilidad positiva
+    general = df[(df["regimen"] == "General (IRAE)") & (df["resultado_neto"] > 0)]
+    assert (general["impuesto_renta"] > 0).all()
+
+
+def test_escenario_conservador_no_se_maquilla():
+    """El conservador debe dar pérdida a 18 meses. Si algún cambio lo vuelve
+    rentable, es que se aflojaron los supuestos sin querer."""
+    from plania import negocio
+    df = negocio.simular(negocio.CONSERVADOR, meses=18, inversion_ads_mes=0.0)
+    assert df["resultado_neto"].sum() < 0
+    assert negocio.mes_supera_sueldo(df) is None
+
+
+def test_comparativa_cubre_todos_los_cortes():
+    from plania import negocio
+    comp = negocio.comparativa_escenarios(meses=18)
+    assert set(comp["escenario"]) == set(negocio.ESCENARIOS)
+    assert set(comp["horizonte_meses"]) == set(negocio.HORIZONTES)
+    assert set(comp["inversion_redes_mes"]) == {0.0, 300.0}
+
+
+def test_mercados_son_coherentes():
+    """SOM <= SAM <= TAM <= total. Un mercado mal anidado invalida el análisis."""
+    from plania import negocio
+    for _, m in negocio.potencial_mercados().iterrows():
+        assert m["SOM_18m_empresas"] <= m["SAM_empresas"] <= m["TAM_empresas"] <= m["empresas_totales"]
+
+
+# ---------------------------------------------------------------------------
+# Contenido para redes
+# ---------------------------------------------------------------------------
+def test_kit_de_contenido_usa_numeros_reales(datos):
+    from plania import contenido
+    posts = contenido.posts_linkedin(datos)
+    assert len(posts) >= 5
+    # La mayoría de los ganchos tiene que apoyarse en un número real: es lo
+    # que diferencia un post que vende de uno genérico. No se exige el 100%
+    # a propósito — un par de piezas de posicionamiento sin cifra le dan
+    # variedad al feed y evitan que todo suene a la misma plantilla.
+    con_numero = sum(any(ch.isdigit() for ch in g) for g in posts["gancho"])
+    assert con_numero >= len(posts) * 0.8, (
+        f"solo {con_numero}/{len(posts)} ganchos usan un dato concreto")
+    assert len(contenido.calendario(datos)) == 12
+    assert contenido.presupuesto_pauta(300.0)["usd_mes"].sum() == pytest.approx(300.0)
+
+
+def test_contenido_avisa_cuando_son_datos_demo(datos):
+    """Publicar números de la base demo como caso real sería fabricar un
+    testimonio: el kit tiene que advertirlo solo."""
+    from plania import contenido
+    kit = contenido.secciones_para_kit(datos)
+    if contenido._sobre_datos_demo():
+        assert "EJEMPLO" in kit[0][1]
+
+
+def test_kit_exporta_a_los_tres_formatos(datos):
+    from plania import contenido, exportes
+    kit = contenido.secciones_para_kit(datos)
+    assert exportes.a_pdf("Kit", kit)[:4] == b"%PDF"
+    assert exportes.a_word("Kit", kit)[:2] == b"PK"
+    assert exportes.a_excel(kit)[:2] == b"PK"
+
+
+# ---------------------------------------------------------------------------
+# Verificación end-to-end y panel del dueño
+# ---------------------------------------------------------------------------
+def test_verificacion_end_to_end_sin_fallas():
+    """El control maestro: si esto falla, el producto no se puede vender."""
+    from plania import verificacion
+    resultados = verificacion.verificar_todo()
+    res = verificacion.resumen(resultados)
+    fallas = [r.control for r in resultados if r.estado == verificacion.FALLA]
+    assert not fallas, f"controles en falla: {fallas}"
+    assert res["vendible"] is True
+    assert res["puntaje_sobre_10"] >= 9.0
+
+
+def test_owner_lee_el_negocio_sin_romperse():
+    from plania import owner
+    k = owner.kpis_negocio()
+    for clave in ("demos_entregadas", "clientes_pagos", "mrr_usd", "conversion_pct"):
+        assert clave in k
+    assert owner.integridad_registros().get("ok") is True
