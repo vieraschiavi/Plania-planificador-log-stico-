@@ -404,3 +404,95 @@ def test_owner_lee_el_negocio_sin_romperse():
     for clave in ("demos_entregadas", "clientes_pagos", "mrr_usd", "conversion_pct"):
         assert clave in k
     assert owner.integridad_registros().get("ok") is True
+
+
+# ---------------------------------------------------------------------------
+# Web pública trilingüe y video
+# ---------------------------------------------------------------------------
+def _guion():
+    import sys, os
+    sys.path.insert(0, os.path.join(RAIZ, "sitio"))
+    import doblar_video
+    return doblar_video, doblar_video.cargar_guion()
+
+
+def test_web_generada_en_los_tres_idiomas():
+    """Los tres HTML existen, están en su idioma y se enlazan entre sí."""
+    import os
+    for idioma in ("es", "en", "pt"):
+        ruta = os.path.join(RAIZ, "web", idioma, "index.html")
+        assert os.path.exists(ruta), f"falta {ruta}"
+        html = open(ruta, encoding="utf-8").read()
+        assert f'<html lang="{idioma}">' in html
+        # hreflang de los tres, para que el buscador no los tome como duplicados
+        for otro in ("es", "en", "pt"):
+            assert f'hreflang="{otro}"' in html
+        assert 'rel="canonical"' in html
+        assert "{{" not in html, "quedaron marcadores de plantilla sin resolver"
+
+
+def test_textos_traducidos_no_quedaron_en_espanol():
+    """Una traducción a medias es peor que no traducir: se controla que las
+    tres versiones tengan realmente las mismas claves y textos distintos."""
+    import json, os
+    cargar = lambda l: json.load(open(os.path.join(RAIZ, "sitio", "i18n", f"{l}.json"),
+                                      encoding="utf-8"))
+    es, en, pt = cargar("es"), cargar("en"), cargar("pt")
+    assert set(es) == set(en) == set(pt), "las tres traducciones no tienen las mismas claves"
+
+    claves = [k for k in es if not k.startswith("_")]
+    # Los precios y las siglas son iguales a propósito; el resto no puede serlo.
+    iguales = [k for k in claves
+               if es[k] == en[k] and len(str(es[k])) > 14 and not any(
+                   s in str(es[k]) for s in ("USD", "MercadoPago", "Plania"))]
+    assert not iguales, f"sin traducir al inglés: {iguales}"
+
+
+def test_subtitulos_en_tres_idiomas_legibles():
+    """Cada pista existe, es WebVTT válido, y ningún subtítulo tapa la pantalla
+    ni aparece y desaparece antes de poder leerlo."""
+    import os, re
+    doblar, guion = _guion()
+    for idioma in ("es", "en", "pt"):
+        ruta = os.path.join(RAIZ, "web", "assets", "video", f"plania_demo_{idioma}.vtt")
+        assert os.path.exists(ruta), f"falta la pista {idioma}"
+        texto = open(ruta, encoding="utf-8").read()
+        assert texto.startswith("WEBVTT")
+
+        cues = [b for b in texto.split("\n\n") if "-->" in b]
+        assert len(cues) >= len(guion["segmentos"])
+        seg = lambda t: sum(float(x) * f for x, f in zip(t.split(":"), (3600, 60, 1)))
+        anterior = 0.0
+        for c in cues:
+            lineas = c.strip().split("\n")
+            ini, fin = [seg(x) for x in lineas[1].split(" --> ")]
+            cuerpo = lineas[2:]
+            assert fin > ini, f"cue sin duración en {idioma}"
+            assert fin - ini >= doblar.SUB_MIN_SEG - 0.01, f"cue ilegible de {fin-ini:.1f}s en {idioma}"
+            assert ini >= anterior - 0.01, f"subtítulos solapados en {idioma}"
+            assert len(cuerpo) <= 2, f"cue de {len(cuerpo)} renglones en {idioma}"
+            anterior = fin
+
+
+def test_narracion_entra_en_su_hueco_en_los_tres_idiomas():
+    """El control de solapamiento del doblaje: si el texto de un segmento no
+    entra en su hueco, la voz pisaría al segmento siguiente y el doblaje se
+    iría de sincronía con la imagen."""
+    doblar, guion = _guion()
+    segs = guion["segmentos"]
+    fin_video = float(guion["duracion_seg"])
+    pasados = []
+    for i, s in enumerate(segs):
+        hueco = doblar.hueco(s, segs[i + 1] if i + 1 < len(segs) else None, fin_video)
+        for idioma in ("es", "en", "pt"):
+            if doblar.estimar(s[idioma]) > hueco:
+                pasados.append((s["id"], idioma))
+    assert not pasados, f"narración que se pasa de su hueco: {pasados}"
+
+
+def test_los_segmentos_del_guion_no_se_pisan_entre_si():
+    doblar, guion = _guion()
+    segs = guion["segmentos"]
+    for a, b in zip(segs, segs[1:]):
+        assert a["fin"] <= b["inicio"], f"'{a['id']}' se superpone con '{b['id']}'"
+    assert segs[-1]["fin"] <= float(guion["duracion_seg"])

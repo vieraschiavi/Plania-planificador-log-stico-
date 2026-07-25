@@ -1,0 +1,157 @@
+"""
+Plania · Generador de la web trilingüe
+======================================
+Toma `sitio/plantilla.html` + `sitio/i18n/{es,en,pt}.json` y escribe la web
+lista para Vercel en `web/`:
+
+    web/index.html      redirección al idioma del navegador
+    web/es/index.html   español
+    web/en/index.html   inglés
+    web/pt/index.html   portugués
+
+Por qué generar HTML estático por idioma en vez de traducir con JavaScript
+en el navegador (que es lo que hace la landing de Kobra):
+
+  1. **Sin parpadeo**: con i18n por JS el visitante ve medio segundo el texto
+     en el idioma equivocado antes de que corra el script. Acá el HTML ya
+     llega traducido.
+  2. **SEO real**: Google indexa tres páginas con su `hreflang` y su
+     `<meta description>` propia. Con i18n por JS indexa una sola.
+  3. **Funciona sin JavaScript**: el contenido se lee igual.
+
+El costo es tener que correr este script cuando cambia un texto — barato
+comparado con mantener tres HTML a mano y que se desincronicen.
+
+Uso:
+    python3 sitio/build.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SITIO = os.path.join(RAIZ, "sitio")
+SALIDA = os.path.join(RAIZ, "web")
+
+IDIOMAS = ["es", "en", "pt"]
+IDIOMA_DEFECTO = "es"
+
+# Enlaces externos: se centralizan acá para que los tres idiomas no se
+# desincronicen si mañana cambia el repo o el dominio de la app.
+ENLACES = {
+    "_releases": "https://github.com/vieraschiavi/Plania-planificador-log-stico-/releases",
+    "_app": "https://plania.uy/app",
+}
+
+
+def cargar(idioma: str) -> dict:
+    with open(os.path.join(SITIO, "i18n", f"{idioma}.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def hreflang(actual: str) -> str:
+    """Etiquetas que le dicen al buscador que las tres páginas son la misma
+    en distintos idiomas. Sin esto, Google las trata como contenido duplicado."""
+    lineas = [f'<link rel="alternate" hreflang="{l}" href="https://plania.uy/{l}/">'
+              for l in IDIOMAS]
+    lineas.append(f'<link rel="alternate" hreflang="x-default" '
+                  f'href="https://plania.uy/{IDIOMA_DEFECTO}/">')
+    return "\n".join(lineas)
+
+
+def botones_idioma(actual: str, textos: dict) -> str:
+    """Selector de idioma: son enlaces reales a /es/ /en/ /pt/, no botones de
+    JavaScript, para que se puedan abrir en otra pestaña y los indexe el
+    buscador."""
+    partes = []
+    for l in IDIOMAS:
+        clase = ' class="on"' if l == actual else ""
+        etiqueta = {"es": "ES", "en": "EN", "pt": "PT"}[l]
+        nombre = cargar(l)["_meta"]["nombre"]
+        partes.append(f'<a href="/{l}/" hreflang="{l}" lang="{l}" '
+                      f'title="{nombre}"{clase}>{etiqueta}</a>')
+    return "".join(partes)
+
+
+def render(plantilla: str, textos: dict, idioma: str) -> str:
+    valores = {k: v for k, v in textos.items() if not k.startswith("_")}
+    valores.update(ENLACES)
+    valores["_lang"] = idioma
+    valores["_locale"] = textos["_meta"]["locale"]
+    valores["_hreflang"] = hreflang(idioma)
+    valores["_langbtns"] = botones_idioma(idioma, textos)
+
+    def sustituir(m):
+        clave = m.group(1)
+        if clave not in valores:
+            raise KeyError(f"falta la clave '{clave}' en i18n/{idioma}.json")
+        return str(valores[clave])
+
+    html = re.sub(r"\{\{(\w+)\}\}", sustituir, plantilla)
+    sobrantes = re.findall(r"\{\{(\w+)\}\}", html)
+    if sobrantes:
+        raise RuntimeError(f"quedaron marcadores sin resolver: {sobrantes}")
+    return html
+
+
+REDIRECCION = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Plania</title>
+<link rel="canonical" href="https://plania.uy/es/">
+{hreflang}
+<meta name="robots" content="noindex">
+<script>
+// Manda al visitante al idioma de su navegador. El <noscript> de abajo y el
+// <meta refresh> cubren el caso de que el JavaScript esté bloqueado: nadie
+// queda en una página en blanco.
+(function(){{
+  var idiomas = {idiomas};
+  var pedido = (navigator.language || navigator.userLanguage || "es").slice(0,2).toLowerCase();
+  var destino = idiomas.indexOf(pedido) >= 0 ? pedido : "{defecto}";
+  window.location.replace("/" + destino + "/" + window.location.hash);
+}})();
+</script>
+<meta http-equiv="refresh" content="1;url=/{defecto}/">
+</head>
+<body>
+<p>Redirigiendo… · Redirecting… · Redirecionando…</p>
+<p><a href="/es/">Español</a> · <a href="/en/">English</a> · <a href="/pt/">Português</a></p>
+</body>
+</html>
+"""
+
+
+def main() -> None:
+    with open(os.path.join(SITIO, "plantilla.html"), encoding="utf-8") as f:
+        plantilla = f.read()
+
+    for idioma in IDIOMAS:
+        textos = cargar(idioma)
+        destino = os.path.join(SALIDA, idioma)
+        os.makedirs(destino, exist_ok=True)
+        html = render(plantilla, textos, idioma)
+        with open(os.path.join(destino, "index.html"), "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"[web] /{idioma}/index.html  ({len(html):,} bytes)")
+
+    with open(os.path.join(SALIDA, "index.html"), "w", encoding="utf-8") as f:
+        f.write(REDIRECCION.format(hreflang=hreflang(IDIOMA_DEFECTO),
+                                   idiomas=json.dumps(IDIOMAS),
+                                   defecto=IDIOMA_DEFECTO))
+    print("[web] /index.html (redirección por idioma del navegador)")
+
+    # Ícono de marca reutilizado del programa de escritorio.
+    icono = os.path.join(RAIZ, "assets", "brand", "plania_icon.png")
+    if os.path.exists(icono):
+        os.makedirs(os.path.join(SALIDA, "assets"), exist_ok=True)
+        shutil.copy(icono, os.path.join(SALIDA, "assets", "plania_icon.png"))
+        print("[web] /assets/plania_icon.png")
+
+
+if __name__ == "__main__":
+    main()

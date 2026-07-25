@@ -1,0 +1,223 @@
+/* ==========================================================================
+   Plania · hoja de estilo de la web pública
+   Estilo heredado de la landing de MV Kobra AI: hero navy con acento ámbar,
+   secciones claras alternadas, tarjetas con borde fino.
+
+   REGLA ANTI-SOLAPAMIENTO (el pedido explícito): en ningún lado se usan
+   alturas fijas para texto, ni posicionamiento absoluto sobre contenido que
+   crece. Los tres idiomas tienen largos distintos —el portugués y el inglés
+   estiran hasta 30% más que el español— así que todo contenedor de texto
+   crece con su contenido y todo item de grid/flex lleva `min-width:0` para
+   que pueda encogerse en vez de desbordar al vecino.
+   ========================================================================== */
+
+:root{
+  --navy:#081527; --navy2:#0c2137; --hero-a:#0d2440; --hero-b:#081324;
+  --amber:#f2b441; --amber2:#e39a2e; --amber-ink:#1c1305;
+  --ink:#eaf1fb; --muted:#9db0c8; --faint:#6c7f99;
+  --line:#1d3149; --line2:#2a4160;
+  --paper:#ffffff; --ink-d:#122238; --muted-d:#586a80; --line-d:#e6ebf2; --tint:#f4f7fb;
+  --blue:#2f74c0; --green:#00c896; --rojo:#c0392b;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --radio:12px;
+  --ancho:1120px;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; font-family:var(--sans); color:var(--ink-d); background:var(--paper);
+  line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+/* Nada de texto que desborde su caja, en ningún idioma. */
+h1,h2,h3,p,li,td,th,a,button,label{overflow-wrap:break-word; hyphens:auto}
+img,video{max-width:100%; height:auto; display:block}
+
+.wrap{width:100%; max-width:var(--ancho); margin:0 auto; padding:0 20px}
+.wrap.estrecho{max-width:720px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.saltar{position:absolute;left:-9999px;top:0;background:var(--amber);color:var(--amber-ink);padding:10px 16px;z-index:100}
+.saltar:focus{left:0}
+
+/* ---------- barra superior ---------- */
+.top{position:sticky; top:0; z-index:50; background:rgba(8,21,39,.92);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--line)}
+.top-in{display:flex; align-items:center; gap:16px; min-height:62px; flex-wrap:wrap; padding-top:8px; padding-bottom:8px}
+.marca{font-weight:800; font-size:1.25rem; letter-spacing:.14em; color:#fff; text-decoration:none; flex:0 0 auto}
+.marca span{color:var(--blue)}
+.nav{display:flex; gap:6px; flex-wrap:wrap; flex:1 1 auto; min-width:0}
+.nav a{color:var(--muted); text-decoration:none; font-size:.88rem; font-weight:600;
+  padding:7px 10px; border-radius:8px; white-space:nowrap}
+.nav a:hover{color:#fff; background:rgba(255,255,255,.07)}
+.top-acc{display:flex; align-items:center; gap:10px; flex:0 0 auto; flex-wrap:wrap}
+
+.lang{display:flex; gap:2px; background:rgba(255,255,255,.06);
+  border:1px solid var(--line2); border-radius:8px; padding:3px}
+.lang a{background:none; border:0; color:var(--faint); font-size:11.5px; font-weight:800;
+  padding:5px 9px; border-radius:6px; text-decoration:none; line-height:1}
+.lang a:hover{color:var(--ink)}
+.lang a.on{background:var(--amber); color:var(--amber-ink)}
+
+/* ---------- botones ---------- */
+.btn{display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  padding:13px 24px; border-radius:10px; border:0; cursor:pointer;
+  font-family:inherit; font-size:1rem; font-weight:700; text-decoration:none;
+  transition:transform .12s ease, filter .12s ease; text-align:center}
+.btn:hover{filter:brightness(1.06); transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn-sm{padding:9px 16px; font-size:.88rem}
+.btn-amber{background:var(--amber); color:var(--amber-ink)}
+.btn-ghost{background:transparent; color:#fff; border:2px solid rgba(255,255,255,.5)}
+.btn-green{background:var(--green); color:#04231a}
+.btn-dark{background:var(--navy2); color:#fff}
+.btn-mp{background:#009EE3; color:#fff; width:100%}
+
+/* ---------- hero ---------- */
+.hero{background:linear-gradient(160deg,var(--hero-a) 0%,var(--hero-b) 100%);
+  color:var(--ink); padding:72px 0 64px; text-align:center}
+.hero-in{display:flex; flex-direction:column; align-items:center; gap:0}
+.badge{display:inline-block; background:rgba(255,255,255,.09); border:1px solid var(--line2);
+  border-radius:20px; padding:7px 18px; font-size:.82rem; color:var(--muted);
+  margin:0 0 24px; max-width:100%}
+.hero h1{font-size:clamp(2rem,5.2vw,3.4rem); line-height:1.15; margin:0 0 20px;
+  letter-spacing:-.02em; color:#fff; max-width:15ch}
+.grad{background:linear-gradient(90deg,var(--amber),#ffd98a);
+  -webkit-background-clip:text; background-clip:text; color:transparent}
+.hero .sub{font-size:clamp(1rem,2.2vw,1.18rem); color:var(--muted);
+  max-width:62ch; margin:0 auto 28px}
+.hero .sub b{color:#fff}
+.cta-row{display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-bottom:16px}
+.nota{font-size:.85rem; color:var(--faint); margin:0 0 36px; max-width:60ch}
+
+.kpis{list-style:none; display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:18px; padding:0; margin:0; width:100%; max-width:820px}
+.kpis li{display:flex; flex-direction:column; gap:4px; min-width:0;
+  background:rgba(255,255,255,.04); border:1px solid var(--line);
+  border-radius:var(--radio); padding:16px 12px}
+.kpis b{font-size:1.5rem; color:var(--amber); line-height:1.2}
+.kpis span{font-size:.8rem; color:var(--muted); line-height:1.35}
+
+/* ---------- secciones ---------- */
+section{padding:64px 0}
+.panel{background:var(--navy); color:var(--ink)}
+.claro{background:var(--paper)}
+.claro.tint{background:var(--tint)}
+.cta-panel{background:linear-gradient(160deg,var(--navy2),var(--navy)); color:var(--ink); text-align:center}
+
+h2{font-size:clamp(1.5rem,3.4vw,2.1rem); line-height:1.25; margin:0 0 12px; letter-spacing:-.01em}
+.panel h2,.cta-panel h2{color:#fff; text-align:center}
+h2.c{text-align:center; color:var(--ink-d)}
+.sub-c{text-align:center; max-width:66ch; margin:0 auto 34px; color:var(--muted-d)}
+.panel .sub-c,.cta-panel .sub-c{color:var(--muted)}
+.nota-c{text-align:center; font-size:.85rem; color:var(--faint); margin:20px auto 0; max-width:62ch}
+
+/* ---------- video ---------- */
+.vid-lang{display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-bottom:20px}
+.vid-lang button{background:rgba(255,255,255,.06); border:1px solid var(--line2);
+  color:var(--muted); font-family:inherit; font-size:.85rem; font-weight:700;
+  padding:8px 16px; border-radius:8px; cursor:pointer}
+.vid-lang button:hover{color:#fff}
+.vid-lang button.on{background:var(--amber); color:var(--amber-ink); border-color:var(--amber)}
+.vid-box{max-width:900px; margin:0 auto; border-radius:var(--radio); overflow:hidden;
+  border:1px solid var(--line2); background:#000; box-shadow:0 18px 50px rgba(0,0,0,.4)}
+.vid-box video{width:100%; display:block; background:#0E1117; aspect-ratio:16/10}
+
+/* ---------- tarjetas ---------- */
+.grid-f{display:grid; grid-template-columns:repeat(auto-fit,minmax(258px,1fr)); gap:20px}
+.grid-d{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:20px}
+.card{background:var(--paper); border:1px solid var(--line-d); border-radius:var(--radio);
+  padding:24px; min-width:0; display:flex; flex-direction:column; gap:10px}
+.claro.tint .card{background:var(--paper)}
+.card h3{margin:0; font-size:1.05rem; color:var(--blue); line-height:1.35}
+.card p{margin:0; font-size:.94rem; color:var(--muted-d); flex:1 1 auto}
+.card .btn{align-self:flex-start; margin-top:6px}
+
+/* ---------- comparativa ---------- */
+.tabla-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;
+  border:1px solid var(--line-d); border-radius:var(--radio); background:var(--paper)}
+table.vs{border-collapse:collapse; width:100%; min-width:660px}
+table.vs th,table.vs td{padding:13px 14px; font-size:.9rem; text-align:center;
+  border-bottom:1px solid var(--line-d)}
+table.vs thead th{background:var(--navy2); color:#fff; font-weight:700; position:sticky; top:0}
+table.vs thead th.dest{background:var(--blue)}
+table.vs tbody td:first-child,table.vs thead th:first-child{
+  text-align:left; font-weight:600; color:var(--ink-d); min-width:230px}
+table.vs td.dest{background:rgba(47,116,192,.06); font-weight:700}
+table.vs .si{color:var(--green); font-weight:800}
+table.vs .no{color:var(--rojo)}
+table.vs tbody tr:last-child td{border-bottom:0}
+
+/* ---------- precios ---------- */
+.grid-p{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:22px; align-items:stretch}
+.plan{background:var(--paper); border:1px solid var(--line-d); border-radius:16px;
+  padding:30px 24px 24px; text-align:center; display:flex; flex-direction:column;
+  gap:8px; min-width:0; position:relative}
+.plan.destacado{border:2px solid var(--blue); box-shadow:0 10px 34px rgba(47,116,192,.16)}
+/* El tag va en flujo dentro del padding superior, no absoluto sobre el título:
+   así nunca se solapa con el nombre del plan por más largo que sea. */
+.plan .tag{display:inline-block; align-self:center; background:var(--blue); color:#fff;
+  border-radius:20px; padding:4px 14px; font-size:.72rem; font-weight:700;
+  letter-spacing:.04em; margin-bottom:4px}
+.plan h3{margin:0; font-size:1.2rem; color:var(--ink-d)}
+.precio{font-size:2.1rem; font-weight:800; color:var(--blue); margin:6px 0 10px; line-height:1.1}
+.precio small{font-size:.95rem; font-weight:600; color:var(--muted-d)}
+.precio-txt{font-size:1.6rem}
+.plan ul{list-style:none; padding:0; margin:0 0 20px; text-align:left; flex:1 1 auto}
+.plan li{padding:7px 0 7px 24px; font-size:.92rem; color:var(--muted-d); position:relative}
+.plan li::before{content:"✓"; position:absolute; left:0; top:7px; color:var(--green); font-weight:800}
+
+/* ---------- formularios ---------- */
+.form-demo{display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin:0 auto; max-width:540px}
+.form-demo input{flex:1 1 240px; min-width:0; padding:13px 15px; border-radius:10px;
+  border:1px solid var(--line2); background:rgba(255,255,255,.95); color:var(--ink-d);
+  font-family:inherit; font-size:1rem}
+.form-cont{display:flex; flex-direction:column; gap:6px; text-align:left}
+.form-cont label{font-size:.85rem; font-weight:600; color:var(--muted-d); margin-top:8px}
+.form-cont input,.form-cont textarea{width:100%; padding:12px 14px; border-radius:10px;
+  border:1px solid var(--line-d); font-family:inherit; font-size:1rem; color:var(--ink-d);
+  background:var(--paper); resize:vertical}
+.form-cont .btn{margin-top:18px; align-self:flex-start}
+.f2{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px}
+.f2>div{min-width:0; display:flex; flex-direction:column; gap:6px}
+.f2 label{margin-top:0}
+
+/* ---------- pie ---------- */
+.pie{background:var(--navy); color:var(--muted); padding:44px 0 26px; border-top:1px solid var(--line)}
+.pie-in{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:28px; align-items:start}
+.pie-in>*{min-width:0}
+.marca-pie{font-size:1.15rem; margin:0 0 6px; color:#fff}
+.pie-tag{font-size:.86rem; margin:0; color:var(--faint)}
+.pie-h{font-size:.78rem; text-transform:uppercase; letter-spacing:.09em;
+  color:var(--faint); margin:0 0 10px; font-weight:700}
+.pie nav a{display:block; color:var(--muted); text-decoration:none; font-size:.9rem; padding:4px 0}
+.pie nav a:hover{color:#fff}
+.pie-legal{font-size:.78rem; color:var(--faint); margin:30px 0 0;
+  padding-top:20px; border-top:1px solid var(--line)}
+
+/* ---------- responsive ---------- */
+@media (max-width:860px){
+  .nav{order:3; width:100%; justify-content:flex-start; gap:2px}
+  .nav a{padding:6px 8px; font-size:.82rem}
+  .top-acc{margin-left:auto}
+}
+@media (max-width:560px){
+  section{padding:48px 0}
+  .hero{padding:52px 0 46px}
+  .btn{width:100%}
+  .cta-row{flex-direction:column; width:100%; max-width:340px}
+  .card .btn,.form-cont .btn{width:auto}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  /* El botón a ancho completo es lo que se quiere en el cuerpo, pero en el
+     encabezado empujaba el selector de idioma a un renglón propio y el menú
+     a otro: el encabezado se comía 450 de los 780 píxeles de alto de un
+     celular antes de que empezara el contenido. Acá vuelve a ser chico y
+     entra al lado de la marca. */
+  .top .btn{width:auto; padding:9px 13px; font-size:.82rem}
+  .top-in{gap:10px}
+  .lang a{padding:5px 7px}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .btn{transition:none}
+}
