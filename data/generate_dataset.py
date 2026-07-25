@@ -2,7 +2,7 @@
 Plania · Generador de dataset demo (Uruguay)
 ============================================
 Genera un negocio de distribución/comercio sintético pero realista para la
-demo comercial de 3 días: productos, clientes (con zona y tipo de negocio) y
+demo comercial de 7 días: productos, clientes (con zona y tipo de negocio) y
 12 meses de ventas. Además arma una base SQLite (`data/erp_demo.db`) que
 simula el ERP del cliente — así el conector universal, el copiloto y las
 sugerencias se demuestran contra una "base real" sin depender de nadie.

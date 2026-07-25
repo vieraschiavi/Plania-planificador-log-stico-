@@ -81,4 +81,4 @@ jobs:
             | `Plania_portable.zip` | Bundle PyInstaller (doble clic en `Plania.exe`) | ninguno |
             | `Plania_BAT.zip` | Código + `INICIAR_PLANIA.bat` autoinstalable | Python 3.11+ |
 
-            Demo de 3 días con todas las funciones al primer arranque, sin tarjeta.
+            Demo de 7 días con todas las funciones al primer arranque, sin tarjeta.

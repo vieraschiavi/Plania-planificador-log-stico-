@@ -4,7 +4,7 @@
 
 | Plan | Precio | Duración | Cupo/mes | Features |
 |---|---|---|---|---|
-| **Trial** | $0 | **3 días** | 300 consultas | TODO habilitado (copiloto, ERP, exportes, rutas) |
+| **Trial** | $0 | **7 días** | 300 consultas | TODO habilitado (copiloto, ERP, exportes, rutas) |
 | **Starter** | USD 59 | 30 días | 500 | copiloto, erp, exportes |
 | **Pro** | USD 129 | 30 días | 2.000 | + rutas, excedente |
 | **Enterprise** | a medida | 30 días | sin tope | + white_label, sso, multi_sucursal |
@@ -15,7 +15,7 @@ el motor local de intenciones y toda la analítica son ilimitados.
 ## Circuito de venta (100% automático)
 
 1. **Landing** (`landing/index.html`) → botón demo → `POST /licencias/trial`
-   (una por email) → licencia JWT de 3 días full en pantalla/mail.
+   (una por email) → licencia JWT de 7 días full en pantalla/mail.
 2. Prospecto instala el programa PC (`packaging/`) o entra a la web, pega la
    licencia (o la demo local arranca sola al primer uso).
 3. Vence la demo → la app bloquea las pantallas de trabajo pero conserva

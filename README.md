@@ -12,7 +12,7 @@ que responde consultas sobre los datos reales y exporta todo a
 | | |
 |---|---|
 | ![Inicio](assets/capturas/inicio.png) | ![Copiloto](assets/capturas/copiloto.png) |
-| *Inicio: demo 3 días full + resumen en pesos* | *Copiloto: consultas reales + export PDF/Word/Excel* |
+| *Inicio: demo 7 días full + resumen en pesos* | *Copiloto: consultas reales + export PDF/Word/Excel* |
 | ![Panel](assets/capturas/panel.png) | ![Ofertas](assets/capturas/ofertas.png) |
 | *Panel ejecutivo* | *Ofertas y sugerencias accionables* |
 
@@ -47,10 +47,11 @@ pip install -r requirements.txt
 python3 data/generate_dataset.py     # base demo: 320 productos, 260 clientes, 12 meses de ventas
 streamlit run app/app.py             # la aplicación (web / la misma que empaqueta el .exe)
 uvicorn backend_venta.app:app --port 8100   # backend de venta (licencias + MercadoPago)
-python3 -m pytest tests/             # 24 tests
+python3 -m pytest tests/             # 39 tests
+python3 -m plania.verificacion       # verificación end-to-end del producto
 ```
 
-Al primer arranque se activa sola la **demo de 3 días con todo habilitado**.
+Al primer arranque se activa sola la **demo de 7 días con todo habilitado**.
 
 ## Qué lo diferencia
 
@@ -61,26 +62,71 @@ Al primer arranque se activa sola la **demo de 3 días con todo habilitado**.
 | 🏷️ **Sugerencias accionables**: ofertas por sobrestock (piso costo+8%), reposición antes del quiebre, ajustes de precio, venta cruzada por zona, recupero de clientes | `plania/sugerencias.py` |
 | 📄 **Exportes profesionales** PDF / Word / Excel de cualquier análisis o respuesta del copiloto | `plania/exportes.py` |
 | 🚛 **Rutas de reparto** optimizadas (vecino más cercano + 2-opt, con o sin GPS) | `plania/rutas.py` |
-| 🎁 **Demo 3 días full** sin tarjeta, autoactivada; licencias JWT por plan | `plania/licencia.py` |
+| 🎁 **Demo 7 días full** sin tarjeta, autoactivada; licencias JWT por plan | `plania/licencia.py` |
 | 💳 **Venta automática con MercadoPago**: checkout + webhook verificado + emisión de licencia + descarga del instalador | `backend_venta/` |
 | 💻 **Programa PC**: PyInstaller + Inno Setup → `Plania_Setup.exe` y ZIP portable | `packaging/` |
 
 Más detalle comercial: [`docs/COMPARATIVA_COMPETENCIA.md`](docs/COMPARATIVA_COMPETENCIA.md)
 y [`docs/MODELO_COMERCIAL.md`](docs/MODELO_COMERCIAL.md).
 
+## Para el dueño del negocio (versión owner)
+
+Aplicación separada, en otro puerto y con token propio — el cliente nunca la ve:
+
+```bash
+PLANIA_OWNER_TOKEN=tu-token streamlit run app/owner.py --server.port 8600
+```
+
+| Sección | Qué resuelve |
+|---|---|
+| Estado del negocio | Demos, conversión, MRR/ARR, costo de IA, margen y clientes en riesgo — leídos del log de auditoría y la base de uso, no cargados a mano |
+| Clientes y licencias | Historial de licencias, consumo por cliente y emisión manual para ventas fuera de MercadoPago |
+| Proyección de rentabilidad | Los 3 escenarios en vivo: equilibrio, mes en que supera un sueldo, caja mínima, LTV/CAC |
+| Mercado y competencia | TAM/SAM/SOM en Uruguay, LATAM y el mundo, más sensibilidad |
+| Contenido para redes | Posts, guiones, prospección, calendario y pauta generados sobre datos reales |
+| Verificación del producto | Corre la cadena completa y da un puntaje sobre 10 |
+
+## Verificación end-to-end
+
+En vez de afirmar que funciona, se comprueba ejecutando cada pieza:
+
+```bash
+python3 -m plania.verificacion
+```
+
+Devuelve OK / ADVERTENCIA / FALLA por componente (datos, auto-mapeo, analítica,
+sugerencias, copiloto, exportes, rutas, licencias, backend, MercadoPago,
+contenido, negocio y distribución) y un puntaje. Sale con código 1 si hay
+alguna falla, así que sirve en CI o antes de una demo con un cliente.
+
+## Análisis de negocio
+
+[`docs/ANALISIS_NEGOCIO.md`](docs/ANALISIS_NEGOCIO.md) — rentabilidad neta en 3
+escenarios a 1/3/6/12/18 meses con y sin inversión en redes, mercado potencial
+en Uruguay/LATAM/mundo, competencia, plan de escalado de vender solo a tener
+equipo, y riesgos. Los números salen de `plania/negocio.py` y se recalculan:
+
+```bash
+python3 -c "from plania import negocio; print(negocio.comparativa_escenarios())"
+```
+
 ## Arquitectura
 
 ```
 app/app.py            Dashboard Streamlit (12 pantallas, menú profesional) — web y PC
+app/owner.py          Panel del dueño (versión owner) — puerto y token aparte
 plania/               Núcleo: conectores, analítica, sugerencias, copiloto,
-                      exportes, rutas, licencia, config segura, auditoría
-backend_venta/        FastAPI: planes, trial 3 días, checkout MercadoPago,
+                      exportes, rutas, licencia, config segura, auditoría,
+                      negocio (modelo financiero), contenido (redes),
+                      owner (datos del negocio), verificacion (end-to-end)
+backend_venta/        FastAPI: planes, trial 7 días, checkout MercadoPago,
                       webhook de pago, gateway IA medido, descarga instalador
 data/                 Generador de base demo + ERP SQLite de ejemplo
 packaging/            Launcher, spec PyInstaller, instalador Inno Setup, build
 landing/index.html    Landing de venta (demo + checkout MercadoPago)
-tests/                24 tests (conectores, analítica, sugerencias, copiloto,
-                      exportes, rutas, licencias, backend)
+tests/                39 tests (conectores, analítica, sugerencias, copiloto,
+                      exportes, rutas, licencias, backend, negocio, contenido,
+                      verificación end-to-end)
 ```
 
 ## Construir el programa PC (Windows)
