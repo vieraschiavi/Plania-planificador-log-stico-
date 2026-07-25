@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Plania</title>
+<link rel="canonical" href="https://plania.uy/es/">
+<link rel="alternate" hreflang="es" href="https://plania.uy/es/">
+<link rel="alternate" hreflang="en" href="https://plania.uy/en/">
+<link rel="alternate" hreflang="pt" href="https://plania.uy/pt/">
+<link rel="alternate" hreflang="x-default" href="https://plania.uy/es/">
+<meta name="robots" content="noindex">
+<script>
+// Manda al visitante al idioma de su navegador. El <noscript> de abajo y el
+// <meta refresh> cubren el caso de que el JavaScript esté bloqueado: nadie
+// queda en una página en blanco.
+(function(){
+  var idiomas = ["es", "en", "pt"];
+  var pedido = (navigator.language || navigator.userLanguage || "es").slice(0,2).toLowerCase();
+  var destino = idiomas.indexOf(pedido) >= 0 ? pedido : "es";
+  window.location.replace("/" + destino + "/" + window.location.hash);
+})();
+</script>
+<meta http-equiv="refresh" content="1;url=/es/">
+</head>
+<body>
+<p>Redirigiendo… · Redirecting… · Redirecionando…</p>
+<p><a href="/es/">Español</a> · <a href="/en/">English</a> · <a href="/pt/">Português</a></p>
+</body>
+</html>

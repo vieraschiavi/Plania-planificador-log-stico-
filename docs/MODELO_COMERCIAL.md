@@ -14,7 +14,7 @@ el motor local de intenciones y toda la analítica son ilimitados.
 
 ## Circuito de venta (100% automático)
 
-1. **Landing** (`landing/index.html`) → botón demo → `POST /licencias/trial`
+1. **Web** (`web/{es,en,pt}/`) → botón demo → `POST /licencias/trial`
    (una por email) → licencia JWT de 7 días full en pantalla/mail.
 2. Prospecto instala el programa PC (`packaging/`) o entra a la web, pega la
    licencia (o la demo local arranca sola al primer uso).

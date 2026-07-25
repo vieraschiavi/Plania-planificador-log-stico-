@@ -1,0 +1,66 @@
+{
+  "_nota": [
+    "Guion del video de demostración, en los tres idiomas.",
+    "",
+    "Los tiempos están sincronizados con las escenas de sitio/grabar_demo.py.",
+    "Cada segmento se sintetiza por separado y se coloca en su marca de tiempo",
+    "exacta: así el doblaje queda en sincronía en los tres idiomas aunque el",
+    "inglés y el portugués tarden distinto que el español en decir lo mismo.",
+    "",
+    "Regla de duración: el texto de cada segmento tiene que entrar en su hueco.",
+    "sitio/doblar_video.py mide el audio real y avisa si un segmento se pasa e",
+    "invadiría al siguiente."
+  ],
+  "video": "plania_demo_es.mp4",
+  "duracion_seg": 86,
+  "segmentos": [
+    {
+      "id": "intro",
+      "inicio": 1.0,
+      "fin": 13.0,
+      "es": "Esto es Plania. No reemplaza tu sistema de gestión: se conecta al que ya tenés y te dice qué hacer con esos datos el lunes a la mañana.",
+      "en": "This is Plania. It does not replace your management system: it connects to the one you already run and tells you what to do with that data on Monday morning.",
+      "pt": "Isto é a Plania. Ela não substitui o seu sistema de gestão: conecta-se ao que você já usa e diz o que fazer com esses dados na segunda de manhã."
+    },
+    {
+      "id": "panel",
+      "inicio": 13.5,
+      "fin": 24.0,
+      "es": "El panel arranca con lo que importa: cuánto vendiste, con qué margen, cuánto capital tenés inmovilizado y cuánta venta está en riesgo.",
+      "en": "The dashboard opens with what matters: how much you sold, at what margin, how much capital is tied up and how much revenue is at risk.",
+      "pt": "O painel começa com o que importa: quanto você vendeu, com qual margem, quanto capital está parado e quanta venda está em risco."
+    },
+    {
+      "id": "ofertas",
+      "inicio": 24.5,
+      "fin": 37.0,
+      "es": "Acá están las decisiones del día: qué ofertar y con qué descuento, sin bajar nunca del costo más ocho por ciento. Qué reponer, y qué precios dejan margen.",
+      "en": "Here are today's decisions: what to discount and by how much, never below cost plus eight percent. What to restock, and which prices leak margin.",
+      "pt": "Aqui estão as decisões do dia: o que ofertar e com qual desconto, nunca abaixo do custo mais oito por cento. O que repor, e quais preços perdem margem."
+    },
+    {
+      "id": "copiloto",
+      "inicio": 37.5,
+      "fin": 69.0,
+      "es": "Y si preferís preguntar, preguntá. El copiloto responde calculando sobre tus datos, no sobre generalidades. Le preguntamos qué ofertas armar esta semana y contesta con el capital inmovilizado exacto, los productos que no rotan y el descuento sugerido para cada uno. Debajo está la tabla que usó, así podés verificarla. Y sale en PDF, Word o Excel.",
+      "en": "And if you would rather ask, just ask. The copilot answers by computing on your data, not on generalities. We ask which items to discount this week and it replies with the exact tied-up capital, the products that stopped moving and the suggested discount for each. Below sits the table it used, so you can check it. And it exports to PDF, Word or Excel.",
+      "pt": "E se você preferir perguntar, pergunte. O copiloto responde calculando sobre os seus dados, não sobre generalidades. Perguntamos quais ofertas montar esta semana e ele responde com o capital parado exato, os produtos que pararam de girar e o desconto sugerido para cada um. Abaixo está a tabela que ele usou. E exporta em PDF, Word ou Excel."
+    },
+    {
+      "id": "rutas",
+      "inicio": 69.5,
+      "fin": 77.0,
+      "es": "Las rutas del reparto se arman solas, por vehículo y minimizando kilómetros.",
+      "en": "Delivery routes build themselves, vehicle by vehicle, minimising kilometres.",
+      "pt": "As rotas de entrega se montam sozinhas, por veículo e minimizando quilômetros."
+    },
+    {
+      "id": "cierre",
+      "inicio": 77.5,
+      "fin": 85.5,
+      "es": "Conectás tu base en minutos. Siete días con todo habilitado, sin tarjeta. Plania punto u y.",
+      "en": "You connect your database in minutes. Seven days with everything unlocked, no card required. Plania dot u y.",
+      "pt": "Você conecta a sua base em minutos. Sete dias com tudo liberado, sem cartão. Plania ponto u y."
+    }
+  ]
+}

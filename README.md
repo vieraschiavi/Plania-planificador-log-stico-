@@ -86,6 +86,42 @@ PLANIA_OWNER_TOKEN=tu-token streamlit run app/owner.py --server.port 8600
 | Contenido para redes | Posts, guiones, prospección, calendario y pauta generados sobre datos reales |
 | Verificación del producto | Corre la cadena completa y da un puntaje sobre 10 |
 
+## Web pública (español · inglés · portugués)
+
+La web de venta vive en `web/` y se publica en Vercel apuntando la *Root
+Directory* a esa carpeta. No se edita a mano: los textos están en
+`sitio/i18n/{es,en,pt}.json` y la maqueta en `sitio/plantilla.html`.
+
+```bash
+python3 sitio/build.py              # genera /es/ /en/ /pt/ + redirección por idioma
+python3 sitio/doblar_video.py       # subtítulos de las tres pistas + informe de calce
+python3 sitio/verificar_layout.py   # comprueba que nada se solapa
+```
+
+Tres decisiones que explican el resto:
+
+- **Un HTML por idioma**, no traducción por JavaScript: sin parpadeo de texto
+  sin traducir, con `hreflang` real y funcionando aunque el visitante tenga el
+  JavaScript bloqueado.
+- **El video es el producto de verdad**, grabado manejando la aplicación con un
+  navegador (`sitio/grabar_demo.py`), no una animación.
+- **La misma voz en los tres idiomas**: `eleven_multilingual_v2` hace hablar un
+  único `voice_id` en español, inglés y portugués. Cada segmento se sintetiza
+  por separado y se coloca en su marca de tiempo, así el doblaje no se corre de
+  la imagen. Requiere `ELEVENLABS_API_KEY` y el `voice_id`:
+
+  ```bash
+  ELEVENLABS_API_KEY=... PLANIA_VOICE_ID=... python3 sitio/doblar_video.py --doblar
+  ```
+
+  Sin esas dos cosas el video igual se entiende en los tres idiomas: los
+  subtítulos se generan sin ninguna credencial.
+
+`sitio/verificar_layout.py` mide en el navegador —no a ojo— que en 3 idiomas x
+3 anchos (360, 768 y 1440 px) no haya scroll horizontal, elementos fuera de
+pantalla, texto recortado ni elementos pisándose. Hace falta porque el mismo
+texto en portugués e inglés corre entre 15% y 35% más largo que en español.
+
 ## Verificación end-to-end
 
 En vez de afirmar que funciona, se comprueba ejecutando cada pieza:
@@ -123,7 +159,10 @@ backend_venta/        FastAPI: planes, trial 7 días, checkout MercadoPago,
                       webhook de pago, gateway IA medido, descarga instalador
 data/                 Generador de base demo + ERP SQLite de ejemplo
 packaging/            Launcher, spec PyInstaller, instalador Inno Setup, build
-landing/index.html    Landing de venta (demo + checkout MercadoPago)
+sitio/                Fuentes de la web: textos por idioma, plantilla,
+                      generador, grabación del video, doblaje y control de
+                      maquetación
+web/                  Web pública generada (Vercel): /es/ /en/ /pt/
 tests/                39 tests (conectores, analítica, sugerencias, copiloto,
                       exportes, rutas, licencias, backend, negocio, contenido,
                       verificación end-to-end)

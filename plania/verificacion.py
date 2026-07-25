@@ -296,7 +296,7 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
             "splash React": "desktop/renderer/app.js",
             "lanzador BAT": "INICIAR_PLANIA.bat",
             "workflow de Release": ".github/workflows/release.yml",
-            "landing de venta": "landing/index.html",
+            "web de venta (español)": "web/es/index.html",
         }
         faltan = [n for n, p in piezas.items() if not os.path.exists(os.path.join(RAIZ, p))]
         if faltan:
@@ -304,6 +304,37 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
         return OK, f"{len(piezas)} vías de distribución presentes (exe, portable, BAT, web)"
 
     resultados.append(_control("Distribución", "Empaquetado PC y web", _empaquetado))
+
+    # --- 12. Web pública trilingüe -----------------------------------------
+    def _web():
+        """La web es la puerta de entrada de la venta: si le falta un idioma o
+        una pista de subtítulos, hay visitantes que se van sin entender qué es
+        Plania. Se controla que estén las tres versiones y las tres pistas."""
+        faltan = []
+        for idioma in ("es", "en", "pt"):
+            if not os.path.exists(os.path.join(RAIZ, "web", idioma, "index.html")):
+                faltan.append(f"web/{idioma}/index.html")
+            if not os.path.exists(os.path.join(RAIZ, "web", "assets", "video",
+                                               f"plania_demo_{idioma}.vtt")):
+                faltan.append(f"subtítulos {idioma}")
+        if faltan:
+            return FALLA, f"falta en la web pública: {faltan}"
+
+        video = os.path.join(RAIZ, "web", "assets", "video", "plania_demo_es.mp4")
+        if not os.path.exists(video):
+            return FALLA, "falta el video de demostración (sitio/grabar_demo.py)"
+
+        doblados = [i for i in ("en", "pt")
+                    if os.path.exists(os.path.join(RAIZ, "web", "assets", "video",
+                                                   f"plania_demo_{i}.mp4"))]
+        if len(doblados) < 2:
+            return (ADVERTENCIA,
+                    "web en 3 idiomas con subtítulos en 3 idiomas, pero el audio "
+                    "doblado todavía no está: requiere ELEVENLABS_API_KEY y el "
+                    "voice_id (sitio/doblar_video.py --doblar)")
+        return OK, "web y video en español, inglés y portugués"
+
+    resultados.append(_control("Web", "Sitio público trilingüe", _web))
 
     return resultados
 

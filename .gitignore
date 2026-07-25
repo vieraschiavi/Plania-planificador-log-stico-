@@ -12,3 +12,12 @@ data/auditoria.log*
 *.lock
 desktop/node_modules/
 desktop/dist_electron/
+
+# Web: intermedios de la grabación y el doblaje del video.
+# El mp4 y los .vtt sí se versionan (son lo que se publica); esto no.
+web/assets/video/_crudo/
+web/assets/video/_voz_*/
+web/assets/video/plania_demo_base.mp4
+# Capturas de sitio/verificar_layout.py: se regeneran en cada corrida y pesan
+# 8 MB, no tiene sentido versionarlas.
+sitio/capturas/

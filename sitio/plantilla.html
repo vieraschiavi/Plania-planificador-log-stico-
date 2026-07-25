@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="{{_lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<link rel="icon" type="image/png" href="/assets/plania_icon.png">
+<link rel="canonical" href="https://plania.uy/{{_lang}}/">
+{{_hreflang}}
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{title}}">
+<meta property="og:description" content="{{description}}">
+<meta property="og:locale" content="{{_locale}}">
+<link rel="stylesheet" href="/assets/plania.css">
+</head>
+<body>
+
+<a class="saltar" href="#contenido">{{nav_producto}}</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="marca" href="/{{_lang}}/">PLAN<span>IA</span></a>
+    <nav class="nav" aria-label="{{nav_producto}}">
+      <a href="#plataforma">{{nav_producto}}</a>
+      <a href="#video">{{nav_video}}</a>
+      <a href="#precios">{{nav_precios}}</a>
+      <a href="#descargas">{{nav_descargas}}</a>
+      <a href="#contacto">{{nav_contacto}}</a>
+    </nav>
+    <div class="top-acc">
+      <div class="lang" role="group" aria-label="Idioma / Language">
+        {{_langbtns}}
+      </div>
+      <a class="btn btn-amber btn-sm" href="#demo">{{nav_cta}}</a>
+    </div>
+  </div>
+</header>
+
+<main id="contenido">
+
+<section class="hero">
+  <div class="wrap hero-in">
+    <p class="badge">{{hero_badge}}</p>
+    <h1>{{hero_h1_a}}<br><span class="grad">{{hero_h1_b}}</span></h1>
+    <p class="sub">{{hero_sub}}</p>
+    <div class="cta-row">
+      <a class="btn btn-amber" href="#demo">{{hero_cta1}}</a>
+      <a class="btn btn-ghost" href="#video">{{hero_cta2}}</a>
+    </div>
+    <p class="nota">{{hero_nota}}</p>
+    <ul class="kpis">
+      <li><b>{{kpi1_n}}</b><span>{{kpi1_t}}</span></li>
+      <li><b>{{kpi2_n}}</b><span>{{kpi2_t}}</span></li>
+      <li><b>{{kpi3_n}}</b><span>{{kpi3_t}}</span></li>
+      <li><b>{{kpi4_n}}</b><span>{{kpi4_t}}</span></li>
+    </ul>
+  </div>
+</section>
+
+<section id="video" class="panel">
+  <div class="wrap">
+    <h2>{{video_h}}</h2>
+    <p class="sub-c">{{video_sub}}</p>
+    <div class="vid-lang" role="group" aria-label="{{video_h}}">
+      <button type="button" data-vlang="es" class="on">Español</button>
+      <button type="button" data-vlang="en">English</button>
+      <button type="button" data-vlang="pt">Português</button>
+    </div>
+    <div class="vid-box">
+      <video id="demo-video" controls preload="metadata" playsinline poster="/assets/video/poster.jpg">
+        <source src="/assets/video/plania_demo_es.mp4" type="video/mp4">
+        <track kind="subtitles" src="/assets/video/plania_demo_es.vtt" srclang="es" label="Español" default>
+        <track kind="subtitles" src="/assets/video/plania_demo_en.vtt" srclang="en" label="English">
+        <track kind="subtitles" src="/assets/video/plania_demo_pt.vtt" srclang="pt" label="Português">
+        {{video_no_soporta}}
+      </video>
+    </div>
+    <p class="nota-c" id="demo-video-aviso" role="status"></p>
+    <p class="nota-c">{{video_nota}}</p>
+  </div>
+</section>
+
+<section id="plataforma" class="claro">
+  <div class="wrap">
+    <h2 class="c">{{plat_h}}</h2>
+    <p class="sub-c">{{plat_sub}}</p>
+    <div class="grid-f">
+      <article class="card"><h3>{{f1_t}}</h3><p>{{f1_d}}</p></article>
+      <article class="card"><h3>{{f2_t}}</h3><p>{{f2_d}}</p></article>
+      <article class="card"><h3>{{f3_t}}</h3><p>{{f3_d}}</p></article>
+      <article class="card"><h3>{{f4_t}}</h3><p>{{f4_d}}</p></article>
+      <article class="card"><h3>{{f5_t}}</h3><p>{{f5_d}}</p></article>
+      <article class="card"><h3>{{f6_t}}</h3><p>{{f6_d}}</p></article>
+      <article class="card"><h3>{{f7_t}}</h3><p>{{f7_d}}</p></article>
+      <article class="card"><h3>{{f8_t}}</h3><p>{{f8_d}}</p></article>
+    </div>
+  </div>
+</section>
+
+<section id="comparativa" class="claro tint">
+  <div class="wrap">
+    <h2 class="c">{{vs_h}}</h2>
+    <div class="tabla-scroll">
+      <table class="vs">
+        <thead><tr><th></th><th class="dest">{{vs_col1}}</th><th>{{vs_col2}}</th><th>{{vs_col3}}</th><th>{{vs_col4}}</th></tr></thead>
+        <tbody>
+          <tr><td>{{vs_r1}}</td><td class="dest si">✓</td><td class="no">✗</td><td>{{vs_parcial}}</td><td class="no">✗</td></tr>
+          <tr><td>{{vs_r2}}</td><td class="dest si">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+          <tr><td>{{vs_r3}}</td><td class="dest si">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+          <tr><td>{{vs_r4}}</td><td class="dest si">✓</td><td>{{vs_modulo}}</td><td class="no">✗</td><td class="no">✗</td></tr>
+          <tr><td>{{vs_r5}}</td><td class="dest si">✓</td><td>{{vs_parcial}}</td><td>{{vs_parcial}}</td><td>{{vs_manual}}</td></tr>
+          <tr><td>{{vs_r6}}</td><td class="dest si">✓ {{vs_7dias}}</td><td class="no">✗</td><td>{{vs_limitada}}</td><td>—</td></tr>
+          <tr><td>{{vs_r7}}</td><td class="dest si">✓</td><td>{{vs_segun}}</td><td>{{vs_soloweb}}</td><td>{{vs_local}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="precios" class="claro">
+  <div class="wrap">
+    <h2 class="c">{{precios_h}}</h2>
+    <p class="sub-c">{{precios_sub}}</p>
+    <div class="grid-p">
+      <article class="plan">
+        <h3>{{p1_t}}</h3>
+        <p class="precio">{{p1_p}}<small>{{p_mes}}</small></p>
+        <ul><li>{{p1_1}}</li><li>{{p1_2}}</li><li>{{p1_3}}</li><li>{{p1_4}}</li></ul>
+        <button type="button" class="btn btn-mp" data-plan="starter">{{p_cta}}</button>
+      </article>
+      <article class="plan destacado">
+        <span class="tag">{{p_pop}}</span>
+        <h3>{{p2_t}}</h3>
+        <p class="precio">{{p2_p}}<small>{{p_mes}}</small></p>
+        <ul><li>{{p2_1}}</li><li>{{p2_2}}</li><li>{{p2_3}}</li><li>{{p2_4}}</li></ul>
+        <button type="button" class="btn btn-mp" data-plan="pro">{{p_cta}}</button>
+      </article>
+      <article class="plan">
+        <h3>{{p3_t}}</h3>
+        <p class="precio precio-txt">{{p3_p}}</p>
+        <ul><li>{{p3_1}}</li><li>{{p3_2}}</li><li>{{p3_3}}</li><li>{{p3_4}}</li></ul>
+        <a class="btn btn-dark" href="#contacto">{{p_cta_ent}}</a>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="demo" class="cta-panel">
+  <div class="wrap estrecho">
+    <h2>{{demo_h}}</h2>
+    <p class="sub-c">{{demo_sub}}</p>
+    <form class="form-demo" id="form-demo" novalidate>
+      <label class="sr" for="demo-email">{{demo_email}}</label>
+      <input id="demo-email" type="email" placeholder="{{demo_email}}" autocomplete="email" required>
+      <button type="submit" class="btn btn-green">{{demo_cta}}</button>
+    </form>
+    <p class="nota-c" id="demo-msg">{{demo_nota}}</p>
+  </div>
+</section>
+
+<section id="descargas" class="claro tint">
+  <div class="wrap">
+    <h2 class="c">{{desc_h}}</h2>
+    <p class="sub-c">{{desc_sub}}</p>
+    <div class="grid-d">
+      <article class="card"><h3>{{d1_t}}</h3><p>{{d1_d}}</p><a class="btn btn-dark btn-sm" href="{{_releases}}">{{d1_b}}</a></article>
+      <article class="card"><h3>{{d2_t}}</h3><p>{{d2_d}}</p><a class="btn btn-dark btn-sm" href="{{_releases}}">{{d2_b}}</a></article>
+      <article class="card"><h3>{{d3_t}}</h3><p>{{d3_d}}</p><a class="btn btn-dark btn-sm" href="{{_app}}">{{d3_b}}</a></article>
+    </div>
+  </div>
+</section>
+
+<section id="contacto" class="claro">
+  <div class="wrap estrecho">
+    <h2 class="c">{{cont_h}}</h2>
+    <p class="sub-c">{{cont_sub}}</p>
+    <form class="form-cont" id="form-cont" novalidate>
+      <div class="f2">
+        <div><label for="c-nombre">{{cont_nombre}}</label><input id="c-nombre" type="text" autocomplete="name"></div>
+        <div><label for="c-email">{{cont_email}}</label><input id="c-email" type="email" autocomplete="email"></div>
+      </div>
+      <label for="c-empresa">{{cont_empresa}}</label>
+      <input id="c-empresa" type="text" autocomplete="organization">
+      <label for="c-msg">{{cont_msg}}</label>
+      <textarea id="c-msg" rows="4"></textarea>
+      <button type="submit" class="btn btn-amber">{{cont_cta}}</button>
+    </form>
+    <p class="nota-c" id="cont-msg"></p>
+  </div>
+</section>
+
+</main>
+
+<footer class="pie">
+  <div class="wrap pie-in">
+    <div>
+      <p class="marca marca-pie">PLAN<span>IA</span></p>
+      <p class="pie-tag">{{foot_tag}}</p>
+    </div>
+    <nav aria-label="{{foot_prod}}">
+      <p class="pie-h">{{foot_prod}}</p>
+      <a href="#plataforma">{{nav_producto}}</a>
+      <a href="#precios">{{nav_precios}}</a>
+      <a href="#descargas">{{nav_descargas}}</a>
+    </nav>
+    <nav aria-label="{{foot_emp}}">
+      <p class="pie-h">{{foot_emp}}</p>
+      <a href="#contacto">{{nav_contacto}}</a>
+      <a href="/es/">Español</a>
+      <a href="/en/">English</a>
+      <a href="/pt/">Português</a>
+    </nav>
+  </div>
+  <div class="wrap"><p class="pie-legal">{{foot_legal}}</p></div>
+</footer>
+
+<script>window.PLANIA_LANG="{{_lang}}";</script>
+<script src="/assets/plania.js" defer></script>
+</body>
+</html>
