@@ -105,17 +105,24 @@ Tres decisiones que explican el resto:
   JavaScript bloqueado.
 - **El video es el producto de verdad**, grabado manejando la aplicación con un
   navegador (`sitio/grabar_demo.py`), no una animación.
-- **La misma voz en los tres idiomas**: `eleven_multilingual_v2` hace hablar un
-  único `voice_id` en español, inglés y portugués. Cada segmento se sintetiza
-  por separado y se coloca en su marca de tiempo, así el doblaje no se corre de
-  la imagen. Requiere `ELEVENLABS_API_KEY` y el `voice_id`:
+- **La misma voz en los tres idiomas**, clonada y sin pagar por carácter. El
+  motor es [VoiceBox](https://voicebox.sh/), que corre local: clona una voz a
+  partir de una muestra y después la hace hablar los tres idiomas. La muestra
+  está en el repo (`sitio/narracion/voz_referencia.wav`, quince segundos de la
+  narración original), así que el timbre es el mismo en las tres versiones.
 
   ```bash
-  ELEVENLABS_API_KEY=... PLANIA_VOICE_ID=... python3 sitio/doblar_video.py --doblar
+  python3 sitio/doblar_video.py --crear-voz "Plania"   # una vez
+  python3 sitio/doblar_video.py --doblar --voz <id>
   ```
 
-  Sin esas dos cosas el video igual se entiende en los tres idiomas: los
-  subtítulos se generan sin ninguna credencial.
+  Cada segmento se sintetiza por separado y se coloca en su marca de tiempo,
+  así el doblaje no se corre de la imagen. Como corre local y es gratis,
+  re-doblar después de cambiar una línea del guion no cuesta nada.
+
+  Queda `--motor elevenlabs` como alternativa (cobra por carácter y necesita
+  `ELEVENLABS_API_KEY`). Sin ningún motor levantado el video igual se entiende
+  en los tres idiomas: los subtítulos se generan sin nada instalado.
 
 `sitio/verificar_layout.py` mide en el navegador —no a ojo— que en 3 idiomas x
 3 anchos (360, 768 y 1440 px) no haya scroll horizontal, elementos fuera de

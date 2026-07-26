@@ -6,16 +6,28 @@ narrados —español, inglés y portugués— **con la misma voz** en los tres, 
 en tres pistas de subtítulos.
 
     python3 sitio/doblar_video.py                 # subtítulos + informe de calce
+    python3 sitio/doblar_video.py --listar-voces  # perfiles de voz disponibles
+    python3 sitio/doblar_video.py --crear-voz "Plania"   # clona la voz de referencia
     python3 sitio/doblar_video.py --doblar        # además sintetiza el audio
     python3 sitio/doblar_video.py --doblar --ajustar   # y encoge lo que no entra
 
 Dos cosas que conviene entender antes de tocarlo:
 
 **Por qué la voz puede ser la misma en los tres idiomas.**
-ElevenLabs `eleven_multilingual_v2` toma un `voice_id` y lo hace hablar
-cualquiera de los idiomas que soporta. No es una voz por idioma: es la
-misma voz. Por eso el doblaje conserva el timbre de la versión original en
-inglés y portugués, en vez de sonar a tres locutores distintos.
+El motor por defecto es **VoiceBox**, que corre local en la máquina: clona
+una voz a partir de una muestra de audio y después la hace hablar cualquiera
+de los idiomas que soporta. No es una voz por idioma: es la misma voz. Por
+eso el doblaje conserva el timbre del video original en inglés y portugués,
+en vez de sonar a tres locutores distintos.
+
+La muestra ya está en el repo: `sitio/narracion/voz_referencia.wav`, quince
+segundos sacados de la narración del video de Kobra. Con eso se crea el
+perfil una vez (`--crear-voz`) y después se reusa por id.
+
+VoiceBox corre local y no cobra por carácter, así que re-doblar sale gratis:
+si se cambia una línea del guion, se vuelve a generar y listo. Queda además
+`--motor elevenlabs` como alternativa por si se prefiere una voz de ahí, pero
+esa sí cobra y necesita `ELEVENLABS_API_KEY`.
 
 **Por qué se sintetiza segmento por segmento y no el guion entero.**
 Si se sintetizara todo de una, el inglés y el portugués —que tardan
@@ -30,10 +42,10 @@ más largo que su hueco, pisaría al segmento siguiente. El script lo mide y
 avisa; con `--ajustar` lo encoge hasta 1.15x (más que eso se nota y suena a
 locutor apurado) y, si aun así no entra, lo dice en vez de disimularlo.
 
-Sin `ELEVENLABS_API_KEY` el script igual sirve: genera los subtítulos —que
+Sin ningún motor levantado el script igual sirve: genera los subtítulos —que
 ya hacen entendible el video en los tres idiomas— y estima el calce de cada
 segmento por longitud de texto, para poder corregir el guion antes de
-gastar créditos de síntesis.
+sintetizar nada.
 """
 from __future__ import annotations
 
@@ -54,8 +66,14 @@ GRABADO = os.path.join(VIDEO_DIR, "plania_demo_es.mp4")  # lo que deja grabar_de
 IDIOMAS = ["es", "en", "pt"]
 NOMBRE = {"es": "Español", "en": "English", "pt": "Português"}
 
-MODELO = "eleven_multilingual_v2"   # el que habla los tres idiomas con la misma voz
-API = "https://api.elevenlabs.io/v1"
+# VoiceBox: estudio de voz local y de código abierto (voicebox.sh). Levanta una
+# API REST en la máquina; no hay clave ni costo por carácter.
+VOICEBOX_URL = os.environ.get("PLANIA_VOICEBOX_URL", "http://localhost:17493")
+REFERENCIA = os.path.join(RAIZ, "sitio", "narracion", "voz_referencia.wav")
+
+# ElevenLabs queda como alternativa. Cobra por carácter y necesita clave.
+ELEVEN_MODELO = "eleven_multilingual_v2"   # habla los tres idiomas con la misma voz
+ELEVEN_API = "https://api.elevenlabs.io/v1"
 
 # Velocidad de locución para la estimación sin API. Medida sobre narración
 # comercial en español rioplatense: ~14 caracteres por segundo a ritmo
@@ -326,21 +344,120 @@ def informe_estimado(guion: dict) -> int:
 # ---------------------------------------------------------------------------
 # Síntesis
 # ---------------------------------------------------------------------------
-def sintetizar(texto: str, voice_id: str, api_key: str, destino: str,
-               estabilidad: float = 0.45, similaridad: float = 0.80) -> bool:
-    """Un segmento de narración a MP3. Devuelve si salió bien.
+def _guardar_audio(r, destino: str) -> bool:
+    """Guarda lo que devolvió el motor, venga como audio o como JSON.
 
-    `estabilidad` algo baja (0.45) da una lectura con más intención, que es
-    lo que se busca en un video de venta; subirla la vuelve plana.
+    Los motores locales no coinciden en esto: algunos devuelven los bytes del
+    audio, otros un JSON con la ruta del archivo que acaban de escribir o con
+    el audio en base64. Se cubren los tres casos en vez de atarse a uno.
     """
+    import base64
+    import shutil as _sh
+
+    tipo = (r.headers.get("content-type") or "").lower()
+    if "json" not in tipo:
+        with open(destino, "wb") as f:
+            f.write(r.content)
+        return True
+
+    d = r.json()
+    if isinstance(d, dict):
+        for clave in ("audio_base64", "audio", "data"):
+            if isinstance(d.get(clave), str) and len(d[clave]) > 100:
+                with open(destino, "wb") as f:
+                    f.write(base64.b64decode(d[clave]))
+                return True
+        for clave in ("path", "file", "file_path", "output_path", "audio_path"):
+            ruta = d.get(clave)
+            if isinstance(ruta, str) and os.path.exists(ruta):
+                _sh.copy(ruta, destino)
+                return True
+    print(f"    el motor respondió JSON sin audio reconocible: {str(d)[:200]}")
+    return False
+
+
+def voicebox_perfiles() -> list[dict]:
+    """Perfiles de voz cargados en VoiceBox."""
+    import requests
+
+    r = requests.get(f"{VOICEBOX_URL}/profiles", timeout=20)
+    r.raise_for_status()
+    d = r.json()
+    return d.get("profiles", d) if isinstance(d, dict) else d
+
+
+def voicebox_crear_perfil(nombre: str, muestra: str, idioma: str = "es") -> str:
+    """Clona la voz de `muestra` y devuelve el id del perfil creado.
+
+    Se intenta primero con multipart —que es como se sube un archivo— y si el
+    servidor lo rechaza se reintenta mandando la ruta en JSON. VoiceBox corre
+    en la misma máquina, así que pasarle una ruta local es válido; el
+    multipart cubre el caso de que corra en otra.
+    """
+    import requests
+
+    if not os.path.exists(muestra):
+        raise SystemExit(f"No está la muestra de voz: {muestra}")
+
+    intentos = []
+    try:
+        with open(muestra, "rb") as f:
+            r = requests.post(f"{VOICEBOX_URL}/profiles",
+                              data={"name": nombre, "language": idioma},
+                              files={"file": (os.path.basename(muestra), f, "audio/wav")},
+                              timeout=300)
+        if r.ok:
+            d = r.json()
+            return str(d.get("profile_id") or d.get("id") or d)
+        intentos.append(f"multipart -> {r.status_code} {r.text[:150]}")
+    except Exception as e:
+        intentos.append(f"multipart -> {str(e)[:150]}")
+
+    try:
+        r = requests.post(f"{VOICEBOX_URL}/profiles",
+                          json={"name": nombre, "language": idioma,
+                                "sample_path": os.path.abspath(muestra)},
+                          timeout=300)
+        if r.ok:
+            d = r.json()
+            return str(d.get("profile_id") or d.get("id") or d)
+        intentos.append(f"json -> {r.status_code} {r.text[:150]}")
+    except Exception as e:
+        intentos.append(f"json -> {str(e)[:150]}")
+
+    raise SystemExit(
+        "No se pudo crear el perfil de voz por API:\n  " + "\n  ".join(intentos) +
+        f"\n\nCreálo a mano en VoiceBox importando {muestra}, y pasá el id con "
+        f"--voz. El contrato exacto de la API está en {VOICEBOX_URL}/docs.")
+
+
+def sintetizar_voicebox(texto: str, perfil: str, idioma: str, destino: str) -> bool:
+    import requests
+
+    try:
+        r = requests.post(f"{VOICEBOX_URL}/generate",
+                          json={"text": texto, "profile_id": perfil, "language": idioma},
+                          timeout=600)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"    error de síntesis: {str(e)[:200]}")
+        return False
+    return _guardar_audio(r, destino)
+
+
+def sintetizar_elevenlabs(texto: str, voice_id: str, api_key: str, destino: str,
+                          estabilidad: float = 0.45, similaridad: float = 0.80) -> bool:
+    """Alternativa paga. `estabilidad` algo baja (0.45) da una lectura con más
+    intención, que es lo que se busca en un video de venta; subirla la vuelve
+    plana."""
     import requests
 
     try:
         r = requests.post(
-            f"{API}/text-to-speech/{voice_id}",
+            f"{ELEVEN_API}/text-to-speech/{voice_id}",
             headers={"xi-api-key": api_key, "content-type": "application/json",
                      "accept": "audio/mpeg"},
-            json={"text": texto, "model_id": MODELO,
+            json={"text": texto, "model_id": ELEVEN_MODELO,
                   "voice_settings": {"stability": estabilidad,
                                      "similarity_boost": similaridad}},
             timeout=120,
@@ -349,9 +466,7 @@ def sintetizar(texto: str, voice_id: str, api_key: str, destino: str,
     except Exception as e:
         print(f"    error de síntesis: {str(e)[:200]}")
         return False
-    with open(destino, "wb") as f:
-        f.write(r.content)
-    return True
+    return _guardar_audio(r, destino)
 
 
 def mezclar(base: str, piezas: list[tuple[str, float, float]], destino: str,
@@ -394,7 +509,7 @@ def mezclar(base: str, piezas: list[tuple[str, float, float]], destino: str,
         raise SystemExit(f"ffmpeg falló al mezclar:\n{(r.stderr or '')[-1500:]}")
 
 
-def doblar(guion: dict, idioma: str, voice_id: str, api_key: str,
+def doblar(guion: dict, idioma: str, voz: str, motor: str, api_key: str,
            ajustar: bool) -> int:
     """Sintetiza, controla solapamientos y deja plania_demo_<idioma>.mp4.
 
@@ -408,12 +523,14 @@ def doblar(guion: dict, idioma: str, voice_id: str, api_key: str,
 
     piezas: list[tuple[str, float, float]] = []
     pisados = 0
-    print(f"\n[{idioma}] narrando con la voz {voice_id} · {MODELO}")
+    print(f"\n[{idioma}] narrando con la voz {voz} · motor {motor}")
 
     for i, s in enumerate(segs):
         h = hueco(s, segs[i + 1] if i + 1 < len(segs) else None, fin_video)
-        archivo = os.path.join(tmp, f"{i:02d}_{s['id']}.mp3")
-        if not sintetizar(s[idioma], voice_id, api_key, archivo):
+        archivo = os.path.join(tmp, f"{i:02d}_{s['id']}.audio")
+        ok = (sintetizar_voicebox(s[idioma], voz, idioma, archivo) if motor == "voicebox"
+              else sintetizar_elevenlabs(s[idioma], voz, api_key, archivo))
+        if not ok:
             shutil.rmtree(tmp, ignore_errors=True)
             raise SystemExit(f"[{idioma}] no se pudo sintetizar '{s['id']}'.")
 
@@ -436,11 +553,16 @@ def doblar(guion: dict, idioma: str, voice_id: str, api_key: str,
         print(f"  {s['id']:<10} {real:5.1f}s / {h:5.1f}s{nota}")
         piezas.append((archivo, s["inicio"], tempo))
 
-    destino = os.path.join(VIDEO_DIR, f"plania_demo_{idioma}.mp4")
+    # Un doblaje con segmentos pisándose no puede reemplazar al que ya está
+    # publicado: se escribe aparte, con un nombre que no sirve para publicar,
+    # para poder escucharlo y decidir qué acortar.
+    nombre = f"plania_demo_{idioma}" + (".REVISAR.mp4" if pisados else ".mp4")
+    destino = os.path.join(VIDEO_DIR, nombre)
     mezclar(BASE, piezas, destino, fin_video)
     shutil.rmtree(tmp, ignore_errors=True)
     print(f"  -> {os.path.relpath(destino, RAIZ)} "
-          f"({os.path.getsize(destino) / 1_048_576:.1f} MB)")
+          f"({os.path.getsize(destino) / 1_048_576:.1f} MB)"
+          + ("  (no se publica: hay solapamientos)" if pisados else ""))
     return pisados
 
 
@@ -470,14 +592,36 @@ def duracion_tiene_audio(path: str) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Doblaje trilingüe del video de Plania")
-    ap.add_argument("--doblar", action="store_true",
-                    help="sintetizar la voz (requiere ELEVENLABS_API_KEY)")
+    ap.add_argument("--doblar", action="store_true", help="sintetizar la voz")
     ap.add_argument("--ajustar", action="store_true",
                     help="encoger hasta 1.15x los segmentos que no entren")
+    ap.add_argument("--motor", default=os.environ.get("PLANIA_MOTOR_VOZ", "voicebox"),
+                    choices=["voicebox", "elevenlabs"],
+                    help="voicebox corre local y es gratis; elevenlabs cobra por carácter")
     ap.add_argument("--voz", default=os.environ.get("PLANIA_VOICE_ID", ""),
-                    help="voice_id de ElevenLabs (o variable PLANIA_VOICE_ID)")
+                    help="id del perfil de voz (o variable PLANIA_VOICE_ID)")
+    ap.add_argument("--listar-voces", action="store_true",
+                    help="mostrar los perfiles de voz cargados en VoiceBox")
+    ap.add_argument("--crear-voz", metavar="NOMBRE",
+                    help="clonar sitio/narracion/voz_referencia.wav como perfil nuevo")
     ap.add_argument("--idiomas", default=",".join(IDIOMAS))
     args = ap.parse_args()
+
+    if args.listar_voces:
+        perfiles = voicebox_perfiles()
+        if not perfiles:
+            print(f"VoiceBox no tiene perfiles cargados ({VOICEBOX_URL}).")
+            print(f"Creá uno con: python3 sitio/doblar_video.py --crear-voz \"Plania\"")
+            return 1
+        for p in perfiles:
+            print(f"  {p.get('id') or p.get('profile_id')}  {p.get('name', '')}")
+        return 0
+
+    if args.crear_voz:
+        perfil = voicebox_crear_perfil(args.crear_voz, REFERENCIA)
+        print(f"Perfil creado: {perfil}")
+        print(f"Usalo así:\n  python3 sitio/doblar_video.py --doblar --voz {perfil}")
+        return 0
 
     guion = cargar_guion()
     idiomas = [i.strip() for i in args.idiomas.split(",") if i.strip() in IDIOMAS]
@@ -488,32 +632,52 @@ def main() -> int:
         ruta = escribir_vtt(guion, idioma)
         print(f"  {os.path.relpath(ruta, RAIZ)}")
 
-    problemas = informe_estimado(guion)
+    informe_estimado(guion)
 
     if not args.doblar:
         print("\nSubtítulos listos: el video ya se entiende en los tres idiomas.")
-        print("Para la voz: ELEVENLABS_API_KEY=... PLANIA_VOICE_ID=... "
-              "python3 sitio/doblar_video.py --doblar")
+        print("Para la voz, con VoiceBox corriendo:\n"
+              "  python3 sitio/doblar_video.py --crear-voz \"Plania\"\n"
+              "  python3 sitio/doblar_video.py --doblar --voz <id>")
         return 0
 
-    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
-    if len(api_key) < 10:
-        print("\nFalta ELEVENLABS_API_KEY: no se sintetiza nada.")
-        return 1
-    if not args.voz:
-        print("\nFalta el voice_id. Para que la voz sea la misma que en el video "
-              "original hay que pasar la de ese video:\n"
-              "  PLANIA_VOICE_ID=<voice_id> python3 sitio/doblar_video.py --doblar")
+    api_key = ""
+    if args.motor == "elevenlabs":
+        api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+        if len(api_key) < 10:
+            print("\nFalta ELEVENLABS_API_KEY. VoiceBox no la necesita: "
+                  "--motor voicebox")
+            return 1
+
+    voz = args.voz
+    if not voz and args.motor == "voicebox":
+        # Con un solo perfil cargado no tiene sentido obligar a copiar el id.
+        try:
+            perfiles = voicebox_perfiles()
+        except Exception as e:
+            print(f"\nNo se pudo hablar con VoiceBox en {VOICEBOX_URL}: {str(e)[:150]}\n"
+                  "Levantá VoiceBox (voicebox.sh) o indicá otra dirección en "
+                  "PLANIA_VOICEBOX_URL.")
+            return 1
+        if len(perfiles) == 1:
+            voz = str(perfiles[0].get("id") or perfiles[0].get("profile_id"))
+            print(f"[voz] único perfil cargado: {voz}")
+    if not voz:
+        print("\nFalta el perfil de voz. Para que sea la misma voz del video "
+              "original:\n"
+              "  python3 sitio/doblar_video.py --crear-voz \"Plania\"\n"
+              "  python3 sitio/doblar_video.py --listar-voces")
         return 1
 
     preparar_base()
-    pisados = sum(doblar(guion, i, args.voz, api_key, args.ajustar) for i in idiomas)
+    pisados = sum(doblar(guion, i, voz, args.motor, api_key, args.ajustar)
+                  for i in idiomas)
     if pisados:
         print(f"\n! {pisados} segmento(s) siguen pisando al siguiente. "
               "Acortá esos textos en sitio/narracion/guion.json y volvé a correr.")
         return 2
     print("\nListo: tres videos narrados con la misma voz y sin solapamientos.")
-    return 0 if problemas == 0 else 0
+    return 0
 
 
 if __name__ == "__main__":
