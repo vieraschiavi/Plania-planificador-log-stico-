@@ -479,10 +479,13 @@ def sintetizar_local(texto: str, referencia: str, idioma: str, destino: str) -> 
         import torchaudio
         modelo = _cargar_modelo_local()
         wav = modelo.generate(texto, language_id=idioma, audio_prompt_path=referencia)
-        # El formato va explícito: los segmentos se guardan con una extensión
-        # genérica (la misma para los tres motores) y torchaudio no puede
-        # deducirlo del nombre. ffmpeg después lo detecta por contenido.
-        torchaudio.save(destino, wav, modelo.sr, format="wav")
+        # torchaudio deduce el formato de la extensión y no acepta que se lo
+        # digan por parámetro, así que se escribe como .wav y se renombra: los
+        # segmentos llevan una extensión genérica, la misma para los tres
+        # motores, y ffmpeg después detecta el formato por contenido.
+        temporal = destino + ".wav"
+        torchaudio.save(temporal, wav, modelo.sr)
+        os.replace(temporal, destino)
     except Exception as e:
         print(f"    error de síntesis local: {str(e)[:200]}")
         return False
