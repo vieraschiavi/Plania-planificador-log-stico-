@@ -104,18 +104,28 @@ python3 sitio/doblar_video.py       # subtítulos + informe de calce
 ```
 
 Eso ya deja el video entendible en los tres idiomas. Para el **audio
-doblado con la misma voz** en los tres:
+doblado con la misma voz** en los tres, con [VoiceBox](https://voicebox.sh/)
+levantado (es local, gratis y no pide clave):
 
 ```bash
-ELEVENLABS_API_KEY=... PLANIA_VOICE_ID=<voice_id> \
-  python3 sitio/doblar_video.py --doblar
+python3 sitio/doblar_video.py --crear-voz "Plania"   # clona la voz, una sola vez
+python3 sitio/doblar_video.py --listar-voces         # para ver el id
+python3 sitio/doblar_video.py --doblar --voz <id>
 ```
 
-`eleven_multilingual_v2` hace hablar el mismo `voice_id` en español, inglés
-y portugués: no son tres locutores, es la misma voz. El script sintetiza
-segmento por segmento y lo coloca en su marca de tiempo exacta, así el
-doblaje no se va corriendo de la imagen; si un segmento no entra en su
-hueco avisa cuál y cuánto se pasa, en vez de dejarlo pisando al siguiente.
+La muestra que se clona es `sitio/narracion/voz_referencia.wav`: quince
+segundos de la narración del video original. Clonada una vez, ese perfil
+habla español, inglés y portugués — no son tres locutores, es la misma voz.
+
+El script sintetiza segmento por segmento y lo coloca en su marca de tiempo
+exacta, así el doblaje no se va corriendo de la imagen. Si un segmento no
+entra en su hueco avisa cuál y cuánto se pasa, y **no publica ese video**:
+lo deja como `plania_demo_<idioma>.REVISAR.mp4` para escucharlo, sin tocar
+el que está publicado. `--ajustar` intenta encogerlo hasta 1.15x antes de
+darlo por perdido.
+
+Si VoiceBox corre en otra máquina o en otro puerto: `PLANIA_VOICEBOX_URL`.
+Alternativa paga: `--motor elevenlabs` con `ELEVENLABS_API_KEY`.
 
 ## 4. Programa PC (Windows)
 
@@ -138,8 +148,8 @@ Deja `dist\Plania_Setup_v1.0.0.exe` (si Inno Setup 6 está instalado) y
        Vercel. Probar `/es/`, `/en/` y `/pt/`, y que `/` mande al idioma del
        navegador.
 4. [ ] `python3 sitio/verificar_layout.py` en verde (nada se solapa).
-5. [ ] Video grabado, con las tres pistas de subtítulos. El audio doblado
-       queda pendiente hasta tener `ELEVENLABS_API_KEY` y el `voice_id`.
+5. [ ] Video grabado, con las tres pistas de subtítulos, y doblado con
+       VoiceBox (`--doblar` sin avisos de solapamiento).
 6. [ ] `Plania_Setup.exe` construido y subido.
 7. [ ] Compra de prueba end-to-end: web → MP sandbox → webhook → licencia
        recibida → activada en la app → descarga del instalador.

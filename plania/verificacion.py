@@ -328,10 +328,12 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
                     if os.path.exists(os.path.join(RAIZ, "web", "assets", "video",
                                                    f"plania_demo_{i}.mp4"))]
         if len(doblados) < 2:
+            referencia = os.path.join(RAIZ, "sitio", "narracion", "voz_referencia.wav")
+            falta = "" if os.path.exists(referencia) else " (falta la muestra de voz)"
             return (ADVERTENCIA,
                     "web en 3 idiomas con subtítulos en 3 idiomas, pero el audio "
-                    "doblado todavía no está: requiere ELEVENLABS_API_KEY y el "
-                    "voice_id (sitio/doblar_video.py --doblar)")
+                    "doblado todavía no está: correr sitio/doblar_video.py --doblar "
+                    f"con VoiceBox levantado{falta}")
         return OK, "web y video en español, inglés y portugués"
 
     resultados.append(_control("Web", "Sitio público trilingüe", _web))

@@ -496,3 +496,73 @@ def test_los_segmentos_del_guion_no_se_pisan_entre_si():
     for a, b in zip(segs, segs[1:]):
         assert a["fin"] <= b["inicio"], f"'{a['id']}' se superpone con '{b['id']}'"
     assert segs[-1]["fin"] <= float(guion["duracion_seg"])
+
+
+def test_cliente_de_voz_habla_el_contrato_de_voicebox():
+    """Prueba el cliente de doblaje contra un servidor que imita VoiceBox.
+
+    No se puede levantar VoiceBox en CI, pero sí fijar que el cliente pide lo
+    que corresponde (/generate con text, profile_id e idioma) y que sabe
+    guardar la respuesta. Si mañana alguien cambia el cliente y rompe el
+    contrato, esto lo detecta sin necesidad de instalar nada.
+    """
+    import http.server, json, os, socketserver, sys, tempfile, threading
+
+    pedidos = []
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            cuerpo = json.dumps({"profiles": [{"id": "pl-01", "name": "Plania"}]}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(cuerpo)))
+            self.end_headers()
+            self.wfile.write(cuerpo)
+
+        def do_POST(self):
+            n = int(self.headers.get("content-length") or 0)
+            pedidos.append((self.path, json.loads(self.rfile.read(n))))
+            audio = b"RIFF" + b"\0" * 200          # audio de mentira, alcanza
+            self.send_response(200)
+            self.send_header("content-type", "audio/wav")
+            self.send_header("content-length", str(len(audio)))
+            self.end_headers()
+            self.wfile.write(audio)
+
+    socketserver.TCPServer.allow_reuse_address = True
+    srv = socketserver.TCPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    puerto = srv.server_address[1]
+
+    sys.path.insert(0, os.path.join(RAIZ, "sitio"))
+    import importlib
+    os.environ["PLANIA_VOICEBOX_URL"] = f"http://127.0.0.1:{puerto}"
+    doblar = importlib.reload(importlib.import_module("doblar_video"))
+    try:
+        assert doblar.voicebox_perfiles()[0]["id"] == "pl-01"
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            destino = f.name
+        assert doblar.sintetizar_voicebox("Hola", "pl-01", "pt", destino) is True
+        assert open(destino, "rb").read().startswith(b"RIFF")
+        os.unlink(destino)
+
+        ruta, cuerpo = pedidos[-1]
+        assert ruta == "/generate"
+        assert cuerpo == {"text": "Hola", "profile_id": "pl-01", "language": "pt"}
+    finally:
+        srv.shutdown()
+        os.environ.pop("PLANIA_VOICEBOX_URL", None)
+
+
+def test_hay_muestra_de_voz_para_clonar():
+    """Sin la muestra no se puede reproducir la misma voz del video original."""
+    import os
+    ruta = os.path.join(RAIZ, "sitio", "narracion", "voz_referencia.wav")
+    assert os.path.exists(ruta), "falta sitio/narracion/voz_referencia.wav"
+    # VoiceBox clona desde 3 segundos; menos que eso da un timbre pobre.
+    doblar, _ = _guion()
+    assert doblar.duracion(ruta) >= 3.0

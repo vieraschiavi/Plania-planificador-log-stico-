@@ -21,3 +21,6 @@ web/assets/video/plania_demo_base.mp4
 # Capturas de sitio/verificar_layout.py: se regeneran en cada corrida y pesan
 # 8 MB, no tiene sentido versionarlas.
 sitio/capturas/
+# Doblajes con segmentos que se pisan: se escriben aparte para poder
+# escucharlos, nunca reemplazan al video publicado.
+web/assets/video/*.REVISAR.mp4
