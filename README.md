@@ -105,24 +105,24 @@ Tres decisiones que explican el resto:
   JavaScript bloqueado.
 - **El video es el producto de verdad**, grabado manejando la aplicación con un
   navegador (`sitio/grabar_demo.py`), no una animación.
-- **La misma voz en los tres idiomas**, clonada y sin pagar por carácter. El
-  motor es [VoiceBox](https://voicebox.sh/), que corre local: clona una voz a
-  partir de una muestra y después la hace hablar los tres idiomas. La muestra
-  está en el repo (`sitio/narracion/voz_referencia.wav`, quince segundos de la
-  narración original), así que el timbre es el mismo en las tres versiones.
+- **La misma voz en los tres idiomas**, clonada, sin cuenta y sin pagar por
+  carácter. Se clona la voz de `sitio/narracion/voz_referencia.wav` —quince
+  segundos de la narración original— y se la hace hablar los tres idiomas, así
+  que el timbre es el mismo en las tres versiones.
 
   ```bash
-  python3 sitio/doblar_video.py --crear-voz "Plania"   # una vez
-  python3 sitio/doblar_video.py --doblar --voz <id>
+  pip install chatterbox-tts
+  python3 sitio/doblar_video.py --doblar
   ```
 
   Cada segmento se sintetiza por separado y se coloca en su marca de tiempo,
-  así el doblaje no se corre de la imagen. Como corre local y es gratis,
-  re-doblar después de cambiar una línea del guion no cuesta nada.
+  así el doblaje no se corre de la imagen. Es gratis, o sea que re-doblar
+  después de cambiar una línea del guion no cuesta nada.
 
-  Queda `--motor elevenlabs` como alternativa (cobra por carácter y necesita
-  `ELEVENLABS_API_KEY`). Sin ningún motor levantado el video igual se entiende
-  en los tres idiomas: los subtítulos se generan sin nada instalado.
+  Alternativas: `--motor voicebox` (la app de escritorio
+  [VoiceBox](https://voicebox.sh/), por su API local) y `--motor elevenlabs`
+  (pago). Sin ningún motor instalado el video igual se entiende en los tres
+  idiomas: los subtítulos se generan sin nada.
 
 `sitio/verificar_layout.py` mide en el navegador —no a ojo— que en 3 idiomas x
 3 anchos (360, 768 y 1440 px) no haya scroll horizontal, elementos fuera de

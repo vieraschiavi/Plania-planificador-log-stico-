@@ -416,6 +416,41 @@ def _guion():
     return doblar_video, doblar_video.cargar_guion()
 
 
+def test_vercel_publica_la_carpeta_correcta():
+    """El vercel.json de la raíz es lo que hace que importar el repo en Vercel
+    no requiera configurar nada. Si apunta a otro lado, el deploy sale vacío."""
+    import json, os
+    cfg = json.load(open(os.path.join(RAIZ, "vercel.json"), encoding="utf-8"))
+    assert cfg["outputDirectory"] == "web"
+    assert cfg["buildCommand"] is None, "el sitio ya viene generado, no se construye"
+    assert not os.path.exists(os.path.join(RAIZ, "web", "vercel.json")), \
+        "dos vercel.json se desincronizan; va uno solo, en la raíz"
+
+
+def test_la_web_no_finge_vender_sin_backend():
+    """Sin backend configurado, la web no puede declarar PLANIA_BACKEND: el
+    JavaScript mostraría un checkout que fallaría en vez de la vía de
+    contacto."""
+    import os, subprocess, sys
+    entorno = {k: v for k, v in os.environ.items() if not k.startswith("PLANIA_")}
+    entorno["PATH"] = os.environ["PATH"]
+    subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
+                   check=True, capture_output=True, env=entorno, cwd=RAIZ)
+    html = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
+    assert "PLANIA_BACKEND" not in html
+
+    entorno["PLANIA_BACKEND"] = "https://api.ejemplo.uy"
+    subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
+                   check=True, capture_output=True, env=entorno, cwd=RAIZ)
+    html = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
+    assert 'PLANIA_BACKEND="https://api.ejemplo.uy"' in html
+
+    # Se deja como estaba para no ensuciar el árbol de trabajo.
+    del entorno["PLANIA_BACKEND"]
+    subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
+                   check=True, capture_output=True, env=entorno, cwd=RAIZ)
+
+
 def test_web_generada_en_los_tres_idiomas():
     """Los tres HTML existen, están en su idioma y se enlazan entre sí."""
     import os
