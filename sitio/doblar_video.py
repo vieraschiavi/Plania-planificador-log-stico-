@@ -196,14 +196,24 @@ def _envolver(texto: str) -> str:
     return f"{a}\n{b}"
 
 
-# El guion está escrito para que lo LEA una voz sintética, así que el dominio
-# va deletreado ("Plania punto u y") — si no, el TTS lee "plania.uy" como una
-# sola palabra impronunciable. En el subtítulo eso quedaría ridículo, así que
-# se escribe como se escribe.
+# El guion está escrito para que lo LEA una voz sintética, y eso obliga a
+# escribir dos cosas distinto de como se muestran:
+#
+#   1. **La marca.** Plania es PLAN + IA (inteligencia artificial) en español
+#      y portugués, y PLAN + AI en inglés. Si se escribe "Plania" la voz lo
+#      lee como una palabra sola y el juego de palabras —que es el nombre del
+#      producto— se pierde. Va separado para que lo pronuncie.
+#   2. **El dominio.** "plania.uy" leído literal sale impronunciable.
+#
+# En el subtítulo las dos cosas quedarían ridículas, así que se muestran como
+# se escriben. El orden importa: primero las formas largas, que contienen a
+# las cortas.
 PARA_LEER = {
-    "Plania punto u y": "plania.uy",
-    "Plania dot u y": "plania.uy",
-    "Plania ponto u y": "plania.uy",
+    "Plan I A punto uy": "plania.uy",
+    "Plan A I dot uy": "plania.uy",
+    "Plan I A ponto uy": "plania.uy",
+    "Plan I A": "Plania",
+    "Plan A I": "Plania",
 }
 
 
