@@ -209,11 +209,16 @@ def _envolver(texto: str) -> str:
 # se escriben. El orden importa: primero las formas largas, que contienen a
 # las cortas.
 PARA_LEER = {
-    "Plan I A punto uy": "plania.uy",
-    "Plan A I dot uy": "plania.uy",
-    "Plan I A ponto uy": "plania.uy",
-    "Plan I A": "Plania",
-    "Plan A I": "Plania",
+    # Dominio
+    "Plan ia punto uy": "plania.uy",
+    "Plan ay eye dot uy": "plania.uy",
+    "Plan ia ponto uy": "plania.uy",
+    "Plania punto u y": "plania.uy",
+    "Plania dot u y": "plania.uy",
+    "Plania ponto u y": "plania.uy",
+    # Marca
+    "Plan ia": "Plania",
+    "Plan ay eye": "Plania",
 }
 
 

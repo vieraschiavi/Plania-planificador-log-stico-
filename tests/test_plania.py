@@ -601,3 +601,24 @@ def test_hay_muestra_de_voz_para_clonar():
     # VoiceBox clona desde 3 segundos; menos que eso da un timbre pobre.
     doblar, _ = _guion()
     assert doblar.duracion(ruta) >= 3.0
+
+
+def test_los_subtitulos_no_muestran_la_escritura_para_la_voz():
+    """El guion se escribe para que lo lea una voz sintética: la marca va
+    separada y el dominio deletreado. Eso nunca puede llegar al subtítulo.
+
+    Este control existe porque ya pasó: se cambió la forma de escribir la marca
+    en el guion sin agregarla al mapeo, y el cierre del video pasó a subtitular
+    "Plania punto u y." en vez de "plania.uy".
+    """
+    import os
+    doblar, guion = _guion()
+    for idioma in ("es", "en", "pt"):
+        ruta = os.path.join(RAIZ, "web", "assets", "video", f"plania_demo_{idioma}.vtt")
+        texto = open(ruta, encoding="utf-8").read()
+        for hablado in doblar.PARA_LEER:
+            assert hablado not in texto, \
+                f"'{hablado}' es escritura para la voz y quedó en el subtítulo {idioma}"
+        # Y al revés: si el guion nombra el dominio, el subtítulo lo muestra escrito.
+        if any("uy" in s[idioma] for s in guion["segmentos"]):
+            assert "plania.uy" in texto
