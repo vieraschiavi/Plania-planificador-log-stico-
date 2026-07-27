@@ -416,6 +416,41 @@ def _guion():
     return doblar_video, doblar_video.cargar_guion()
 
 
+def test_vercel_publica_la_carpeta_correcta():
+    """El vercel.json de la raíz es lo que hace que importar el repo en Vercel
+    no requiera configurar nada. Si apunta a otro lado, el deploy sale vacío."""
+    import json, os
+    cfg = json.load(open(os.path.join(RAIZ, "vercel.json"), encoding="utf-8"))
+    assert cfg["outputDirectory"] == "web"
+    assert cfg["buildCommand"] is None, "el sitio ya viene generado, no se construye"
+    assert not os.path.exists(os.path.join(RAIZ, "web", "vercel.json")), \
+        "dos vercel.json se desincronizan; va uno solo, en la raíz"
+
+
+def test_la_web_no_finge_vender_sin_backend():
+    """Sin backend configurado, la web no puede declarar PLANIA_BACKEND: el
+    JavaScript mostraría un checkout que fallaría en vez de la vía de
+    contacto."""
+    import os, subprocess, sys
+    entorno = {k: v for k, v in os.environ.items() if not k.startswith("PLANIA_")}
+    entorno["PATH"] = os.environ["PATH"]
+    subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
+                   check=True, capture_output=True, env=entorno, cwd=RAIZ)
+    html = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
+    assert "PLANIA_BACKEND" not in html
+
+    entorno["PLANIA_BACKEND"] = "https://api.ejemplo.uy"
+    subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
+                   check=True, capture_output=True, env=entorno, cwd=RAIZ)
+    html = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
+    assert 'PLANIA_BACKEND="https://api.ejemplo.uy"' in html
+
+    # Se deja como estaba para no ensuciar el árbol de trabajo.
+    del entorno["PLANIA_BACKEND"]
+    subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
+                   check=True, capture_output=True, env=entorno, cwd=RAIZ)
+
+
 def test_web_generada_en_los_tres_idiomas():
     """Los tres HTML existen, están en su idioma y se enlazan entre sí."""
     import os
@@ -566,3 +601,24 @@ def test_hay_muestra_de_voz_para_clonar():
     # VoiceBox clona desde 3 segundos; menos que eso da un timbre pobre.
     doblar, _ = _guion()
     assert doblar.duracion(ruta) >= 3.0
+
+
+def test_los_subtitulos_no_muestran_la_escritura_para_la_voz():
+    """El guion se escribe para que lo lea una voz sintética: la marca va
+    separada y el dominio deletreado. Eso nunca puede llegar al subtítulo.
+
+    Este control existe porque ya pasó: se cambió la forma de escribir la marca
+    en el guion sin agregarla al mapeo, y el cierre del video pasó a subtitular
+    "Plania punto u y." en vez de "plania.uy".
+    """
+    import os
+    doblar, guion = _guion()
+    for idioma in ("es", "en", "pt"):
+        ruta = os.path.join(RAIZ, "web", "assets", "video", f"plania_demo_{idioma}.vtt")
+        texto = open(ruta, encoding="utf-8").read()
+        for hablado in doblar.PARA_LEER:
+            assert hablado not in texto, \
+                f"'{hablado}' es escritura para la voz y quedó en el subtítulo {idioma}"
+        # Y al revés: si el guion nombra el dominio, el subtítulo lo muestra escrito.
+        if any("uy" in s[idioma] for s in guion["segmentos"]):
+            assert "plania.uy" in texto

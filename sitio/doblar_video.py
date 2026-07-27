@@ -6,28 +6,32 @@ narrados —español, inglés y portugués— **con la misma voz** en los tres, 
 en tres pistas de subtítulos.
 
     python3 sitio/doblar_video.py                 # subtítulos + informe de calce
-    python3 sitio/doblar_video.py --listar-voces  # perfiles de voz disponibles
-    python3 sitio/doblar_video.py --crear-voz "Plania"   # clona la voz de referencia
     python3 sitio/doblar_video.py --doblar        # además sintetiza el audio
     python3 sitio/doblar_video.py --doblar --ajustar   # y encoge lo que no entra
 
 Dos cosas que conviene entender antes de tocarlo:
 
 **Por qué la voz puede ser la misma en los tres idiomas.**
-El motor por defecto es **VoiceBox**, que corre local en la máquina: clona
-una voz a partir de una muestra de audio y después la hace hablar cualquiera
-de los idiomas que soporta. No es una voz por idioma: es la misma voz. Por
-eso el doblaje conserva el timbre del video original en inglés y portugués,
-en vez de sonar a tres locutores distintos.
+Se clona una voz a partir de una muestra de audio y después se la hace hablar
+los tres idiomas. No es una voz por idioma: es la misma voz. Por eso el
+doblaje conserva el timbre del video original en inglés y portugués, en vez
+de sonar a tres locutores distintos.
 
 La muestra ya está en el repo: `sitio/narracion/voz_referencia.wav`, quince
-segundos sacados de la narración del video de Kobra. Con eso se crea el
-perfil una vez (`--crear-voz`) y después se reusa por id.
+segundos sacados de la narración del video original.
 
-VoiceBox corre local y no cobra por carácter, así que re-doblar sale gratis:
-si se cambia una línea del guion, se vuelve a generar y listo. Queda además
-`--motor elevenlabs` como alternativa por si se prefiere una voz de ahí, pero
-esa sí cobra y necesita `ELEVENLABS_API_KEY`.
+Hay tres motores, y el de por defecto no necesita ni cuenta ni servidor:
+
+  --motor local       Chatterbox Multilingual corriendo en la misma máquina.
+                      Es lo que usa VoiceBox por dentro, sin la aplicación de
+                      escritorio, así que sirve desde una terminal o desde CI.
+                      Instalar con: pip install chatterbox-tts
+  --motor voicebox    La aplicación de escritorio VoiceBox (voicebox.sh), por
+                      su API local. Útil si ya se la usa para otras cosas.
+  --motor elevenlabs  Servicio pago. Cobra por carácter y pide una clave.
+
+Los dos primeros son gratis, así que re-doblar después de cambiar una línea
+del guion no cuesta nada.
 
 **Por qué se sintetiza segmento por segmento y no el guion entero.**
 Si se sintetizara todo de una, el inglés y el portugués —que tardan
@@ -192,14 +196,29 @@ def _envolver(texto: str) -> str:
     return f"{a}\n{b}"
 
 
-# El guion está escrito para que lo LEA una voz sintética, así que el dominio
-# va deletreado ("Plania punto u y") — si no, el TTS lee "plania.uy" como una
-# sola palabra impronunciable. En el subtítulo eso quedaría ridículo, así que
-# se escribe como se escribe.
+# El guion está escrito para que lo LEA una voz sintética, y eso obliga a
+# escribir dos cosas distinto de como se muestran:
+#
+#   1. **La marca.** Plania es PLAN + IA (inteligencia artificial) en español
+#      y portugués, y PLAN + AI en inglés. Si se escribe "Plania" la voz lo
+#      lee como una palabra sola y el juego de palabras —que es el nombre del
+#      producto— se pierde. Va separado para que lo pronuncie.
+#   2. **El dominio.** "plania.uy" leído literal sale impronunciable.
+#
+# En el subtítulo las dos cosas quedarían ridículas, así que se muestran como
+# se escriben. El orden importa: primero las formas largas, que contienen a
+# las cortas.
 PARA_LEER = {
+    # Dominio
+    "Plan ia punto uy": "plania.uy",
+    "Plan ay eye dot uy": "plania.uy",
+    "Plan ia ponto uy": "plania.uy",
     "Plania punto u y": "plania.uy",
     "Plania dot u y": "plania.uy",
     "Plania ponto u y": "plania.uy",
+    # Marca
+    "Plan ia": "Plania",
+    "Plan ay eye": "Plania",
 }
 
 
@@ -445,6 +464,49 @@ def sintetizar_voicebox(texto: str, perfil: str, idioma: str, destino: str) -> b
     return _guardar_audio(r, destino)
 
 
+# --- Motor local sin servidor -------------------------------------------
+# Chatterbox Multilingual (MIT, de Resemble AI) clona una voz desde una
+# muestra de audio y habla 23 idiomas, entre ellos los tres que necesitamos.
+# Es el mismo motor que trae VoiceBox adentro; acá se usa directo, sin la
+# aplicación de escritorio, para poder doblar desde una terminal o desde CI.
+#
+# La licencia MIT importa: esto se usa para el video de un producto que se
+# vende. Otros modelos de clonación con calidad parecida (XTTS-v2, algunos
+# checkpoints de F5) son de uso no comercial y no servirían acá.
+_MODELO_LOCAL = None
+
+
+def _cargar_modelo_local():
+    global _MODELO_LOCAL
+    if _MODELO_LOCAL is None:
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+        import torch
+        dispositivo = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"  cargando el modelo de voz en {dispositivo} "
+              f"(la primera vez se descarga, tarda)…")
+        _MODELO_LOCAL = ChatterboxMultilingualTTS.from_pretrained(device=dispositivo)
+    return _MODELO_LOCAL
+
+
+def sintetizar_local(texto: str, referencia: str, idioma: str, destino: str) -> bool:
+    """Clona la voz de `referencia` y le hace decir `texto` en `idioma`."""
+    try:
+        import torchaudio
+        modelo = _cargar_modelo_local()
+        wav = modelo.generate(texto, language_id=idioma, audio_prompt_path=referencia)
+        # torchaudio deduce el formato de la extensión y no acepta que se lo
+        # digan por parámetro, así que se escribe como .wav y se renombra: los
+        # segmentos llevan una extensión genérica, la misma para los tres
+        # motores, y ffmpeg después detecta el formato por contenido.
+        temporal = destino + ".wav"
+        torchaudio.save(temporal, wav, modelo.sr)
+        os.replace(temporal, destino)
+    except Exception as e:
+        print(f"    error de síntesis local: {str(e)[:200]}")
+        return False
+    return True
+
+
 def sintetizar_elevenlabs(texto: str, voice_id: str, api_key: str, destino: str,
                           estabilidad: float = 0.45, similaridad: float = 0.80) -> bool:
     """Alternativa paga. `estabilidad` algo baja (0.45) da una lectura con más
@@ -528,8 +590,12 @@ def doblar(guion: dict, idioma: str, voz: str, motor: str, api_key: str,
     for i, s in enumerate(segs):
         h = hueco(s, segs[i + 1] if i + 1 < len(segs) else None, fin_video)
         archivo = os.path.join(tmp, f"{i:02d}_{s['id']}.audio")
-        ok = (sintetizar_voicebox(s[idioma], voz, idioma, archivo) if motor == "voicebox"
-              else sintetizar_elevenlabs(s[idioma], voz, api_key, archivo))
+        if motor == "local":
+            ok = sintetizar_local(s[idioma], voz, idioma, archivo)
+        elif motor == "voicebox":
+            ok = sintetizar_voicebox(s[idioma], voz, idioma, archivo)
+        else:
+            ok = sintetizar_elevenlabs(s[idioma], voz, api_key, archivo)
         if not ok:
             shutil.rmtree(tmp, ignore_errors=True)
             raise SystemExit(f"[{idioma}] no se pudo sintetizar '{s['id']}'.")
@@ -595,9 +661,10 @@ def main() -> int:
     ap.add_argument("--doblar", action="store_true", help="sintetizar la voz")
     ap.add_argument("--ajustar", action="store_true",
                     help="encoger hasta 1.15x los segmentos que no entren")
-    ap.add_argument("--motor", default=os.environ.get("PLANIA_MOTOR_VOZ", "voicebox"),
-                    choices=["voicebox", "elevenlabs"],
-                    help="voicebox corre local y es gratis; elevenlabs cobra por carácter")
+    ap.add_argument("--motor", default=os.environ.get("PLANIA_MOTOR_VOZ", "local"),
+                    choices=["local", "voicebox", "elevenlabs"],
+                    help="local: clona sin servidor ni cuenta (por defecto); "
+                         "voicebox: la app de escritorio; elevenlabs: pago")
     ap.add_argument("--voz", default=os.environ.get("PLANIA_VOICE_ID", ""),
                     help="id del perfil de voz (o variable PLANIA_VOICE_ID)")
     ap.add_argument("--listar-voces", action="store_true",
@@ -650,6 +717,12 @@ def main() -> int:
             return 1
 
     voz = args.voz
+    if args.motor == "local":
+        # Acá la 'voz' no es un id sino la muestra que se clona.
+        voz = voz or REFERENCIA
+        if not os.path.exists(voz):
+            print(f"\nNo está la muestra de voz: {voz}")
+            return 1
     if not voz and args.motor == "voicebox":
         # Con un solo perfil cargado no tiene sentido obligar a copiar el id.
         try:

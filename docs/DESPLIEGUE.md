@@ -61,17 +61,11 @@ y porque Google indexa tres páginas con su `hreflang` en vez de una sola.
 
 ### Deploy
 
-En Vercel: **New Project → Import** el repo, y
+En Vercel: **New Project → Import** el repo → **Deploy**. No hay nada que
+configurar: el `vercel.json` de la raíz ya declara que el sitio está en
+`web/` y que no hay build. Cada push a `main` vuelve a publicar solo.
 
-| Campo | Valor |
-|---|---|
-| Framework Preset | Other |
-| Root Directory | `web` |
-| Build Command | *(vacío — el sitio ya está generado)* |
-| Output Directory | *(vacío)* |
-
-`web/vercel.json` ya trae las cabeceras. Dos decisiones que conviene no
-cambiar sin pensarlo:
+Dos decisiones del `vercel.json` que conviene no cambiar sin pensarlo:
 
 - El video y el póster se cachean un año (`immutable`) porque cambian de
   nombre cuando cambian.
@@ -79,15 +73,37 @@ cambiar sin pensarlo:
   `must-revalidate`: si se cachearan un año, un arreglo de maquetación
   tardaría un año en llegarle a quien ya visitó el sitio.
 
-Antes de publicar, definí a qué backend apunta el alta de la demo y el
-checkout, agregando esto en `sitio/plantilla.html` antes de `plania.js`:
+### Apuntar la web al backend
 
-```html
-<script>window.PLANIA_BACKEND = "https://api.plania.uy";</script>
+El alta de la demo y el checkout necesitan saber dónde está el backend. Se
+configura en `sitio/sitio.json` (o por entorno) y se vuelve a generar:
+
+```json
+{
+  "dominio": "https://plania.uy",
+  "backend": "https://api.plania.uy"
+}
 ```
 
-Sin esa variable la web no simula nada: el formulario de demo muestra la
-dirección de contacto y los botones de plan llevan a "Hablar con ventas".
+```bash
+python3 sitio/build.py
+```
+
+Equivalente sin tocar archivos, útil en un pipeline:
+
+```bash
+PLANIA_BACKEND=https://api.plania.uy PLANIA_DOMINIO=https://plania.uy \
+  python3 sitio/build.py
+```
+
+`dominio` no es cosmético: de ahí salen las URLs canónicas y los `hreflang`.
+Si el sitio queda en `plania-xxxx.vercel.app` y `dominio` sigue diciendo
+`plania.uy`, Google va a indexar mal.
+
+**Con `backend` vacío la web informa pero no vende**: el formulario de demo
+muestra la dirección de contacto y los botones de plan llevan a "Hablar con
+ventas". Es a propósito — es preferible eso a simular un checkout que
+fallaría. El propio `build.py` lo dice en pantalla al terminar.
 
 ### Dominio
 
@@ -104,18 +120,20 @@ python3 sitio/doblar_video.py       # subtítulos + informe de calce
 ```
 
 Eso ya deja el video entendible en los tres idiomas. Para el **audio
-doblado con la misma voz** en los tres, con [VoiceBox](https://voicebox.sh/)
-levantado (es local, gratis y no pide clave):
+doblado con la misma voz** en los tres, sin cuenta ni clave:
 
 ```bash
-python3 sitio/doblar_video.py --crear-voz "Plania"   # clona la voz, una sola vez
-python3 sitio/doblar_video.py --listar-voces         # para ver el id
-python3 sitio/doblar_video.py --doblar --voz <id>
+pip install chatterbox-tts
+python3 sitio/doblar_video.py --doblar
 ```
 
 La muestra que se clona es `sitio/narracion/voz_referencia.wav`: quince
-segundos de la narración del video original. Clonada una vez, ese perfil
-habla español, inglés y portugués — no son tres locutores, es la misma voz.
+segundos de la narración del video original. Esa misma voz habla español,
+inglés y portugués — no son tres locutores.
+
+La primera corrida descarga el modelo (unos 3 GB) y en CPU tarda bastante;
+después queda en caché. Con GPU lo usa solo. Alternativas: `--motor voicebox`
+si ya se usa esa aplicación, o `--motor elevenlabs` (pago).
 
 El script sintetiza segmento por segmento y lo coloca en su marca de tiempo
 exacta, así el doblaje no se va corriendo de la imagen. Si un segmento no

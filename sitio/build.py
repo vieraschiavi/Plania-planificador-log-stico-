@@ -39,12 +39,38 @@ SALIDA = os.path.join(RAIZ, "web")
 IDIOMAS = ["es", "en", "pt"]
 IDIOMA_DEFECTO = "es"
 
-# Enlaces externos: se centralizan acá para que los tres idiomas no se
-# desincronicen si mañana cambia el repo o el dominio de la app.
-ENLACES = {
-    "_releases": "https://github.com/vieraschiavi/Plania-planificador-log-stico-/releases",
-    "_app": "https://plania.uy/app",
+# Configuración del sitio. Vive en sitio/sitio.json para no tener que editar
+# código al desplegar; lo de acá abajo son los valores por defecto.
+#
+# `backend` es el que decide si la web vende o solo informa: con el backend
+# puesto, el formulario emite la licencia de 7 días y los botones de plan
+# abren MercadoPago; vacío, el formulario muestra la dirección de contacto y
+# los planes llevan a "Hablar con ventas". Se deja vacío a propósito: es
+# preferible que la web diga la verdad a que simule un checkout que no existe.
+DEFECTOS = {
+    "dominio": "https://plania.uy",
+    "backend": "",
+    "releases": "https://github.com/vieraschiavi/Plania-planificador-log-stico-/releases",
+    "app": "https://plania.uy/app",
 }
+
+
+def config() -> dict:
+    """Valores por defecto, pisados por sitio/sitio.json y por el entorno.
+
+    El entorno gana para poder desplegar con `PLANIA_BACKEND=... build.py`
+    sin dejar la URL escrita en el repo.
+    """
+    valores = dict(DEFECTOS)
+    archivo = os.path.join(SITIO, "sitio.json")
+    if os.path.exists(archivo):
+        with open(archivo, encoding="utf-8") as f:
+            valores.update({k: v for k, v in json.load(f).items() if k in DEFECTOS})
+    for clave in DEFECTOS:
+        env = os.environ.get(f"PLANIA_{clave.upper()}")
+        if env:
+            valores[clave] = env
+    return valores
 
 
 def cargar(idioma: str) -> dict:
@@ -52,13 +78,13 @@ def cargar(idioma: str) -> dict:
         return json.load(f)
 
 
-def hreflang(actual: str) -> str:
+def hreflang(actual: str, dominio: str) -> str:
     """Etiquetas que le dicen al buscador que las tres páginas son la misma
     en distintos idiomas. Sin esto, Google las trata como contenido duplicado."""
-    lineas = [f'<link rel="alternate" hreflang="{l}" href="https://plania.uy/{l}/">'
+    lineas = [f'<link rel="alternate" hreflang="{l}" href="{dominio}/{l}/">'
               for l in IDIOMAS]
     lineas.append(f'<link rel="alternate" hreflang="x-default" '
-                  f'href="https://plania.uy/{IDIOMA_DEFECTO}/">')
+                  f'href="{dominio}/{IDIOMA_DEFECTO}/">')
     return "\n".join(lineas)
 
 
@@ -76,13 +102,19 @@ def botones_idioma(actual: str, textos: dict) -> str:
     return "".join(partes)
 
 
-def render(plantilla: str, textos: dict, idioma: str) -> str:
+def render(plantilla: str, textos: dict, idioma: str, cfg: dict) -> str:
     valores = {k: v for k, v in textos.items() if not k.startswith("_")}
-    valores.update(ENLACES)
+    valores["_releases"] = cfg["releases"]
+    valores["_app"] = cfg["app"]
+    valores["_dominio"] = cfg["dominio"]
     valores["_lang"] = idioma
     valores["_locale"] = textos["_meta"]["locale"]
-    valores["_hreflang"] = hreflang(idioma)
+    valores["_hreflang"] = hreflang(idioma, cfg["dominio"])
     valores["_langbtns"] = botones_idioma(idioma, textos)
+    # Sin backend no se define la variable: el JavaScript ya distingue ese
+    # caso y muestra la vía de contacto en vez de un checkout que fallaría.
+    valores["_backend"] = (f'\n<script>window.PLANIA_BACKEND="{cfg["backend"]}";</script>'
+                           if cfg["backend"] else "")
 
     def sustituir(m):
         clave = m.group(1)
@@ -102,7 +134,7 @@ REDIRECCION = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <title>Plania</title>
-<link rel="canonical" href="https://plania.uy/es/">
+<link rel="canonical" href="{dominio}/es/">
 {hreflang}
 <meta name="robots" content="noindex">
 <script>
@@ -127,6 +159,7 @@ REDIRECCION = """<!DOCTYPE html>
 
 
 def main() -> None:
+    cfg = config()
     with open(os.path.join(SITIO, "plantilla.html"), encoding="utf-8") as f:
         plantilla = f.read()
 
@@ -134,16 +167,19 @@ def main() -> None:
         textos = cargar(idioma)
         destino = os.path.join(SALIDA, idioma)
         os.makedirs(destino, exist_ok=True)
-        html = render(plantilla, textos, idioma)
+        html = render(plantilla, textos, idioma, cfg)
         with open(os.path.join(destino, "index.html"), "w", encoding="utf-8") as f:
             f.write(html)
         print(f"[web] /{idioma}/index.html  ({len(html):,} bytes)")
 
     with open(os.path.join(SALIDA, "index.html"), "w", encoding="utf-8") as f:
-        f.write(REDIRECCION.format(hreflang=hreflang(IDIOMA_DEFECTO),
+        f.write(REDIRECCION.format(hreflang=hreflang(IDIOMA_DEFECTO, cfg["dominio"]),
                                    idiomas=json.dumps(IDIOMAS),
-                                   defecto=IDIOMA_DEFECTO))
+                                   defecto=IDIOMA_DEFECTO,
+                                   dominio=cfg["dominio"]))
     print("[web] /index.html (redirección por idioma del navegador)")
+    print(f"[web] dominio: {cfg['dominio']} · backend: "
+          f"{cfg['backend'] or 'sin configurar (la web informa, no vende)'}")
 
     # Ícono de marca reutilizado del programa de escritorio.
     icono = os.path.join(RAIZ, "assets", "brand", "plania_icon.png")

@@ -6,7 +6,7 @@
 <title>{{title}}</title>
 <meta name="description" content="{{description}}">
 <link rel="icon" type="image/png" href="/assets/plania_icon.png">
-<link rel="canonical" href="https://plania.uy/{{_lang}}/">
+<link rel="canonical" href="{{_dominio}}/{{_lang}}/">
 {{_hreflang}}
 <meta property="og:type" content="website">
 <meta property="og:title" content="{{title}}">
@@ -215,7 +215,7 @@
   <div class="wrap"><p class="pie-legal">{{foot_legal}}</p></div>
 </footer>
 
-<script>window.PLANIA_LANG="{{_lang}}";</script>
+<script>window.PLANIA_LANG="{{_lang}}";</script>{{_backend}}
 <script src="/assets/plania.js" defer></script>
 </body>
 </html>
