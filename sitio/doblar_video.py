@@ -210,14 +210,14 @@ def _envolver(texto: str) -> str:
 # las cortas.
 PARA_LEER = {
     # Dominio
-    "Plan ia punto uy": "plania.uy",
+    "Planía punto uy": "plania.uy",
     "Plan ay eye dot uy": "plania.uy",
     "Plan iá ponto uy": "plania.uy",
     "Plania punto u y": "plania.uy",
     "Plania dot u y": "plania.uy",
     "Plania ponto u y": "plania.uy",
     # Marca
-    "Plan ia": "Plania",
+    "Planía": "Plania",
     "Plan ay eye": "Plania",
     "Plan iá": "Plania",
 }
