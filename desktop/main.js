@@ -46,7 +46,17 @@ function lanzarBackend(port) {
   // 1) bundle PyInstaller embebido (producción)
   const empaquetado = path.join(process.resourcesPath || "", "backend",
     process.platform === "win32" ? "Plania.exe" : "Plania");
-  if (app.isPackaged && fs.existsSync(empaquetado)) {
+  if (app.isPackaged) {
+    // En una instalación NO se cae nunca al python del sistema: el cliente no
+    // tiene Python, así que ese intento fallaba en silencio y la ventana se
+    // quedaba en el splash para siempre — "el instalador no funciona". Si el
+    // backend no está, es que el instalador se armó mal, y hay que decirlo.
+    if (!fs.existsSync(empaquetado)) {
+      throw new Error(
+        "La instalación está incompleta: falta el motor de Plania en\n" +
+        empaquetado + "\n\n" +
+        "Descargá el instalador de nuevo desde la página de Releases.");
+    }
     return spawn(empaquetado, [], { env, cwd: path.dirname(empaquetado) });
   }
 
@@ -89,21 +99,24 @@ async function crearVentana() {
   try {
     const port = await puertoLibre();
     backend = lanzarBackend(port);
+    backend.on("error", (err) => mostrarError(err.message));
     backend.on("exit", (code) => {
       if (win && !win.isDestroyed() && code !== 0 && code !== null) {
-        win.loadFile(path.join(__dirname, "renderer", "index.html"),
-          { query: { error: "1" } });
+        mostrarError(`El motor de Plania se cerró con código ${code}.`);
       }
     });
     const url = `http://127.0.0.1:${port}`;
     await esperarServidor(url);
     if (win && !win.isDestroyed()) await win.loadURL(url);
   } catch (e) {
-    if (win && !win.isDestroyed()) {
-      win.loadFile(path.join(__dirname, "renderer", "index.html"),
-        { query: { error: "1" } });
-    }
+    mostrarError(e.message);
   }
+}
+
+function mostrarError(motivo) {
+  if (!win || win.isDestroyed()) return;
+  win.loadFile(path.join(__dirname, "renderer", "index.html"),
+    { query: { error: "1", motivo: String(motivo || "").slice(0, 400) } });
 }
 
 app.whenReady().then(crearVentana);

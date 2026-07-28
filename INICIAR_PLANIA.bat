@@ -35,6 +35,18 @@ if not exist data\erp_demo.db (
 )
 
 echo [Plania] Iniciando... se abre solo en tu navegador.
-start "" http://localhost:8501
-python -m streamlit run app\app.py --server.port 8501 --server.headless true
+rem El arranque lo hace el mismo lanzador que usa el ejecutable instalado.
+rem Antes esto abria http://localhost:8501 a mano, y traia dos problemas:
+rem el 8501 es el puerto por defecto de cualquier app Streamlit, asi que si
+rem el usuario ya tenia otra corriendo se le abria ESA en vez de Plania; y
+rem el navegador se abria antes de que el servidor levantara. El lanzador
+rem elige un puerto libre, espera a que el servidor responda y recien ahi
+rem abre el navegador.
+python packaging\plania_launcher.py
+if errorlevel 1 (
+  echo.
+  echo [Plania] El programa termino con error. Copia el mensaje de arriba
+  echo          si necesitas soporte: ventas@plania.uy
+  pause
+)
 endlocal

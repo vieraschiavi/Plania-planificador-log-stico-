@@ -39,6 +39,25 @@ jobs:
           pip install -r requirements.txt pyinstaller
           python packaging/build_release.py
 
+      - name: Verificar que el motor quedo empaquetado
+        shell: pwsh
+        run: |
+          # electron-builder copia dist/Plania como recurso del instalador. Si
+          # PyInstaller falló, el instalador se arma igual pero sin motor: se
+          # instala, abre y se queda en la pantalla de carga. Mejor romper el
+          # build acá que publicar un instalador que no funciona.
+          if (-not (Test-Path "dist/Plania/Plania.exe")) {
+            Write-Error "No existe dist/Plania/Plania.exe - PyInstaller no dejo el motor."
+            exit 1
+          }
+          $mb = [math]::Round((Get-ChildItem dist/Plania -Recurse |
+                Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+          Write-Host "[release] motor empaquetado: $mb MB"
+          if ($mb -lt 80) {
+            Write-Error "El motor pesa $mb MB: falta contenido (deberia rondar los cientos de MB)."
+            exit 1
+          }
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -53,13 +72,32 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path stage/Plania -Force | Out-Null
-          $items = @("app","plania","backend_venta","data","packaging","landing",
+          $items = @("app","plania","backend_venta","data","packaging",
                      "docs","assets",".streamlit","tests","requirements.txt",
                      "run.sh","Procfile","README.md","INICIAR_PLANIA.bat")
           foreach ($i in $items) {
             if (Test-Path $i) { Copy-Item $i -Destination stage/Plania -Recurse -Force }
           }
           Compress-Archive -Path stage/Plania -DestinationPath dist/Plania_BAT.zip -Force
+
+      - name: Verificar que el instalador se genero
+        shell: pwsh
+        run: |
+          $exes = Get-ChildItem desktop/dist_electron/*.exe -ErrorAction SilentlyContinue
+          if (-not $exes) {
+            Write-Error "electron-builder no dejo ningun .exe."
+            exit 1
+          }
+          foreach ($e in $exes) {
+            $mb = [math]::Round($e.Length / 1MB, 1)
+            Write-Host "[release] $($e.Name)  $mb MB"
+            # Un instalador sin el motor embebido pesa ~80 MB (solo Electron).
+            # Con el motor supera los 250 MB.
+            if ($mb -lt 150) {
+              Write-Error "$($e.Name) pesa $mb MB: no tiene el motor adentro."
+              exit 1
+            }
+          }
 
       - name: Publicar release con las descargas
         uses: softprops/action-gh-release@v2

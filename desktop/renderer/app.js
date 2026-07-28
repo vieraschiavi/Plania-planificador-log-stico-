@@ -34,15 +34,21 @@ hoja.textContent = `@keyframes plania-barrido {
 document.head.appendChild(hoja);
 
 function Splash() {
-  const conError = new URLSearchParams(window.location.search).has("error");
+  const params = new URLSearchParams(window.location.search);
+  const conError = params.has("error");
+  // El motivo real viaja en la URL: un mensaje genérico obliga a adivinar si
+  // falta el backend, si el puerto está ocupado o si el servidor tardó de más.
+  const motivo = params.get("motivo");
   return e("div", { style: estilos.contenedor },
     e("div", { style: estilos.logo }, "PLAN", e("span", { style: estilos.logoAcento }, "IA")),
     e("div", { style: estilos.sub }, "Planificación logística y comercial inteligente"),
     conError
       ? e("div", { style: estilos.error },
-          "No se pudo iniciar el servidor de Plania. Verificá que la instalación esté completa ",
-          "(o, en modo desarrollo, que Python y las dependencias estén instaladas: ",
-          "pip install -r requirements.txt) y volvé a abrir el programa.")
+          e("b", null, "No se pudo iniciar Plania."),
+          e("div", { style: { marginTop: "8px", whiteSpace: "pre-wrap" } },
+            motivo || "El servidor no respondió."),
+          e("div", { style: { marginTop: "10px", opacity: .8, fontSize: "13px" } },
+            "Si el problema sigue, escribinos a ventas@plania.uy con este mensaje."))
       : e("div", { style: estilos.barra }, e("div", { style: estilos.progreso })),
   );
 }

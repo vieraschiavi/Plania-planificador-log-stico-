@@ -622,3 +622,113 @@ def test_los_subtitulos_no_muestran_la_escritura_para_la_voz():
         # Y al revés: si el guion nombra el dominio, el subtítulo lo muestra escrito.
         if any("uy" in s[idioma] for s in guion["segmentos"]):
             assert "plania.uy" in texto
+
+
+# ---------------------------------------------------------------------------
+# Arranque del programa PC: puertos e instalador
+# ---------------------------------------------------------------------------
+def _lanzador():
+    import sys, os
+    sys.path.insert(0, os.path.join(RAIZ, "packaging"))
+    import plania_launcher
+    return plania_launcher
+
+
+def test_nunca_se_elige_un_puerto_ocupado():
+    """El bug que reportó el usuario: Plania abría otro programa que ya tenía
+    corriendo. Pasaba porque el lanzador daba por libre un puerto ocupado —en
+    Windows un bind con SO_REUSEADDR tiene éxito aunque otro proceso esté
+    escuchando ahí.
+
+    El test no toca los puertos reales de Plania: se ocupan puertos que el
+    propio test reserva. Si usara los reales, fallaría cada vez que quien
+    corre los tests tenga Plania abierto, que es justo cuando no hay ningún
+    problema.
+    """
+    import http.server, socketserver, threading
+
+    L = _lanzador()
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+
+    servidores = []
+    ocupados = []
+    try:
+        for _ in range(3):
+            s = socketserver.TCPServer(("127.0.0.1", 0), _H)   # puerto efímero
+            threading.Thread(target=s.serve_forever, daemon=True).start()
+            servidores.append(s)
+            ocupados.append(s.server_address[1])
+
+        for p in ocupados:
+            assert L._ocupado(p) is True, f"no detectó que {p} está ocupado"
+
+        original = L.PUERTOS
+        try:
+            L.PUERTOS = tuple(ocupados)          # todos los candidatos ocupados
+            elegido = L._puerto_libre()
+        finally:
+            L.PUERTOS = original
+
+        assert elegido not in ocupados, f"eligió un puerto ocupado: {elegido}"
+        assert L._ocupado(elegido) is False
+    finally:
+        for s in servidores:
+            s.shutdown()
+
+
+def test_no_se_usa_el_puerto_por_defecto_de_streamlit():
+    """8501 es el puerto de cualquier app Streamlit. Usarlo garantiza chocar
+    con otra que el usuario tenga abierta — y que vea esa en vez de Plania."""
+    import os
+    L = _lanzador()
+    assert 8501 not in L.PUERTOS
+
+    bat = open(os.path.join(RAIZ, "INICIAR_PLANIA.bat"), encoding="utf-8",
+               errors="replace").read()
+    ejecutables = [l for l in bat.splitlines()
+                   if not l.strip().lower().startswith("rem")]
+    assert not any("8501" in l for l in ejecutables), \
+        "el lanzador .bat volvió a fijar el puerto 8501"
+    assert "plania_launcher.py" in bat, \
+        "el .bat tiene que arrancar por el lanzador, que elige puerto libre"
+
+
+def test_la_app_instalada_no_depende_del_python_del_usuario():
+    """Si el instalador quedó sin motor, la app tiene que decirlo. Antes caía
+    al python del sistema —que el cliente no tiene— y se quedaba para siempre
+    en la pantalla de carga: eso es 'el instalador no funciona'."""
+    import os
+    main = open(os.path.join(RAIZ, "desktop", "main.js"), encoding="utf-8").read()
+    empaquetado = main.split("if (app.isPackaged)")[1].split("// 2)")[0]
+    assert "throw new Error" in empaquetado, \
+        "empaquetado sin motor tiene que fallar con mensaje, no caer al python del sistema"
+    assert "spawn(python" not in empaquetado
+
+
+def test_el_release_no_publica_un_instalador_sin_motor():
+    import os
+    wf = open(os.path.join(RAIZ, ".github", "workflows", "release.yml"),
+              encoding="utf-8").read()
+    publicar = wf.index("Publicar release")
+    assert "dist/Plania/Plania.exe" in wf[:publicar], \
+        "falta verificar que PyInstaller dejó el motor antes de publicar"
+    assert "electron-builder no dejo ningun .exe" in wf[:publicar]
+
+
+def test_el_programa_no_se_publica_en_la_red_local():
+    """Streamlit escucha en 0.0.0.0 por defecto y anuncia una 'Network URL':
+    en una oficina, cualquiera en la misma red podría abrir el Plania de otro
+    y ver sus ventas, márgenes y clientes. Un programa de escritorio tiene que
+    escuchar solo en la máquina del usuario."""
+    import inspect
+    L = _lanzador()
+    fuente = inspect.getsource(L.main)
+    assert '"STREAMLIT_SERVER_ADDRESS", "127.0.0.1"' in fuente
+    assert "--server.address=" in fuente
