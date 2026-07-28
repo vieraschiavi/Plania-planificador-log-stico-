@@ -212,14 +212,13 @@ PARA_LEER = {
     # Dominio
     "Planía punto uy": "plania.uy",
     "Plan ay eye dot uy": "plania.uy",
-    "Plan iá ponto uy": "plania.uy",
+    "Planía ponto uy": "plania.uy",
     "Plania punto u y": "plania.uy",
     "Plania dot u y": "plania.uy",
     "Plania ponto u y": "plania.uy",
     # Marca
     "Planía": "Plania",
     "Plan ay eye": "Plania",
-    "Plan iá": "Plania",
 }
 
 
