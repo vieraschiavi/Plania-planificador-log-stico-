@@ -211,7 +211,7 @@ def _envolver(texto: str) -> str:
 PARA_LEER = {
     # Dominio
     "Planía punto uy": "plania.uy",
-    "Plania dot U Y": "plania.uy",
+    "Plah nia dot U Y": "plania.uy",
     "Planía ponto uy": "plania.uy",
     "Plania punto u y": "plania.uy",
     "Plania dot u y": "plania.uy",
