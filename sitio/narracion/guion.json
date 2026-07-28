@@ -18,9 +18,9 @@
       "id": "intro",
       "inicio": 1.0,
       "fin": 13.0,
-      "es": "Esto es Plania. No reemplaza tu sistema de gestión: se conecta al que ya tenés y te dice qué hacer con esos datos el lunes a la mañana.",
-      "en": "This is Plania. It does not replace your management system: it connects to the one you already run and tells you what to do with that data on Monday morning.",
-      "pt": "Isto é a Plania. Ela não substitui o seu sistema de gestão: conecta-se ao que você já usa e diz o que fazer com esses dados na segunda de manhã."
+      "es": "Esto es Plan ia. No reemplaza tu sistema de gestión: se conecta al que ya tenés y te dice qué hacer con esos datos el lunes a la mañana.",
+      "en": "This is Plan ay eye. It does not replace your management system: it connects to the one you already run and tells you what to do with that data on Monday morning.",
+      "pt": "Isto é o Plan iá. Ele não substitui o seu sistema de gestão: conecta-se ao que você já usa e diz o que fazer com esses dados na segunda de manhã."
     },
     {
       "id": "panel",
@@ -58,9 +58,9 @@
       "id": "cierre",
       "inicio": 77.5,
       "fin": 85.5,
-      "es": "Conectás tu base en minutos. Siete días con todo habilitado, sin tarjeta. Plania punto u y.",
-      "en": "You connect your database in minutes. Seven days with everything unlocked, no card required. Plania dot u y.",
-      "pt": "Você conecta a sua base em minutos. Sete dias com tudo liberado, sem cartão. Plania ponto u y."
+      "es": "Conectás tu base en minutos. Siete días con todo habilitado, sin tarjeta. Plan ia punto uy.",
+      "en": "You connect your database in minutes. Seven days with everything unlocked, no card required. Plan ay eye dot uy.",
+      "pt": "Você conecta a sua base em minutos. Sete dias com tudo liberado, sem cartão. Plan iá ponto uy."
     }
   ]
 }
