@@ -87,7 +87,12 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,          # muestra una consola con el log del server
+    # Con consola a propósito: hoy es la única forma que tiene el usuario de
+    # cerrar el programa (cerrar la ventana termina el proceso). Ver el
+    # docstring de packaging/plania_launcher.py — ahí además se duplica todo
+    # a un archivo de log, y el modo embebido en Electron (desktop/) oculta
+    # esta misma consola con `windowsHide` al lanzarla como subproceso.
+    console=True,
     icon=_icon,
 )
 coll = COLLECT(

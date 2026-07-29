@@ -732,3 +732,128 @@ def test_el_programa_no_se_publica_en_la_red_local():
     fuente = inspect.getsource(L.main)
     assert '"STREAMLIT_SERVER_ADDRESS", "127.0.0.1"' in fuente
     assert "--server.address=" in fuente
+
+
+def test_lanzador_elige_puerto_libre_valido():
+    pl = _lanzador()
+    p = pl._puerto_libre()
+    assert 0 < p < 65536
+    # tiene que poder bindearse de verdad, no solo devolver un número
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", p))
+
+
+def test_lanzador_tee_no_pierde_el_log_si_la_consola_falla():
+    """El .exe empaquetado a veces tiene una consola que no se comporta como
+    un archivo real. Si escribir ahí falla, el log en disco —que es lo que
+    de verdad sirve para diagnosticar un problema reportado después— no se
+    puede perder por eso."""
+    import tempfile
+
+    pl = _lanzador()
+
+    class ConsolaRota:
+        def write(self, t):
+            raise OSError("sin consola")
+
+        def flush(self):
+            raise OSError("sin consola")
+
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as buf:
+        tee = pl._Tee(ConsolaRota(), buf)
+        tee.write("hola\n")
+        tee.flush()
+        buf.seek(0)
+        assert buf.read() == "hola\n"
+    assert tee.isatty() is False
+
+
+def test_lanzador_carpeta_de_logs_en_datos_de_usuario():
+    """Los logs van a la carpeta de datos del usuario, no a Archivos de
+    programa: ahí un programa instalado no tiene permiso de escritura."""
+    import tempfile
+
+    pl = _lanzador()
+    tmp = tempfile.mkdtemp()
+    viejo = os.environ.get("LOCALAPPDATA")
+    os.environ["LOCALAPPDATA"] = tmp
+    try:
+        carpeta = pl._carpeta_logs()
+        assert carpeta.startswith(tmp)
+        assert os.path.isdir(carpeta)
+    finally:
+        if viejo is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = viejo
+
+
+# ---------------------------------------------------------------------------
+# Empaquetado del instalador Windows (packaging/)
+# ---------------------------------------------------------------------------
+def test_build_release_deja_una_copia_del_setup_sin_version_en_el_nombre(tmp_path, monkeypatch):
+    """backend_venta/app.py sirve dist/Plania_Setup.exe por defecto para la
+    descarga post-pago, pero Inno Setup compila con la versión en el nombre
+    (Plania_Setup_v1.0.0.exe). Sin la copia, esa ruta por defecto nunca
+    existe y /descargar/{token} queda roto hasta setear PLANIA_INSTALADOR_PATH
+    a mano — bug real que este test fija.
+    """
+    import importlib
+    sys.path.insert(0, os.path.join(RAIZ, "packaging"))
+    br = importlib.import_module("build_release")
+
+    monkeypatch.setattr(br, "DIST", str(tmp_path))
+    monkeypatch.setattr(br.shutil, "which", lambda _n: "/usr/bin/iscc-fake")
+
+    def _run_falso(cmd):
+        # Simula lo que hace ISCC de verdad: dejar el .exe compilado en DIST.
+        (tmp_path / "Plania_Setup_v1.0.0.exe").write_bytes(b"exe de mentira")
+
+    monkeypatch.setattr(br, "_run", _run_falso)
+
+    versionado = br.paso_instalador()
+    assert versionado == str(tmp_path / "Plania_Setup_v1.0.0.exe")
+
+    estable = tmp_path / "Plania_Setup.exe"
+    assert estable.exists(), "falta la copia sin versión que espera el backend"
+    assert estable.read_bytes() == (tmp_path / "Plania_Setup_v1.0.0.exe").read_bytes()
+
+
+def test_backend_venta_busca_el_setup_en_la_ruta_que_build_release_genera():
+    """La ruta por defecto de /descargar/{token} y el nombre de archivo que
+    build_release.py deja como copia estable tienen que coincidir. Si alguien
+    cambia uno sin el otro, la descarga post-pago se rompe en silencio."""
+    with open(os.path.join(RAIZ, "backend_venta", "app.py"), encoding="utf-8") as f:
+        backend = f.read()
+    with open(os.path.join(RAIZ, "packaging", "build_release.py"), encoding="utf-8") as f:
+        build = f.read()
+    assert '"Plania_Setup.exe"' in backend
+    assert '"Plania_Setup.exe"' in build
+
+
+def test_instalador_deja_elegir_carpeta_y_no_rompe_con_plania_abierto():
+    """Control de sanidad del .iss: no se puede compilar con ISCC en Linux,
+    así que se valida por texto que las propiedades que pidió el usuario
+    —elegir dónde instalar, y no romperse por archivos bloqueados— están."""
+    with open(os.path.join(RAIZ, "packaging", "instalador.iss"), encoding="utf-8") as f:
+        iss = f.read()
+    assert "DisableDirPage=no" in iss
+    assert "InitializeSetup" in iss and "InitializeUninstall" in iss
+    assert "MinVersion=" in iss
+    assert "AppPublisherURL=" in iss
+
+
+def test_lanzador_pc_console_true_documentado_y_electron_lo_oculta():
+    """console=True es intencional (ver docstring del lanzador) — un cambio
+    accidental a False rompería la única forma de cerrar la versión
+    standalone sin agregar antes una bandeja del sistema. Y del lado de
+    Electron, windowsHide tiene que estar para no mostrar esa consola
+    igual como una ventana suelta."""
+    with open(os.path.join(RAIZ, "packaging", "plania.spec"), encoding="utf-8") as f:
+        spec = f.read()
+    assert "console=True" in spec
+
+    with open(os.path.join(RAIZ, "desktop", "main.js"), encoding="utf-8") as f:
+        main_js = f.read()
+    assert "windowsHide: true" in main_js

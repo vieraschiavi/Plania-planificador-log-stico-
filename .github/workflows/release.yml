@@ -2,11 +2,15 @@ name: Release
 # Construye los ejecutables descargables de Plania y los publica en la
 # página de Releases del repo:
 #
-#   - Plania Setup X.exe        instalador Windows (Electron + React, backend
-#                               Python embebido — el cliente no necesita nada)
-#   - Plania X.exe              versión portable (sin instalación)
-#   - Plania_portable.zip       bundle PyInstaller puro (sin Electron)
-#   - Plania_BAT.zip            código + INICIAR_PLANIA.bat (requiere Python)
+#   - Plania Setup X.exe         instalador Windows (Electron + React, backend
+#                                Python embebido — el cliente no necesita nada)
+#   - Plania X.exe               versión portable de la de Electron (sin instalación)
+#   - Plania_Setup_vX.exe        instalador Windows liviano (Inno Setup, sin
+#                                Electron/Chromium — abre en el navegador).
+#                                Es el mismo archivo que sirve el backend de
+#                                venta en /descargar/{token} tras el pago.
+#   - Plania_portable.zip        bundle PyInstaller puro (sin Electron)
+#   - Plania_BAT.zip             código + INICIAR_PLANIA.bat (requiere Python)
 #
 # Cómo generar una release: pestaña Actions → Release → "Run workflow"
 # (o pushear un tag v1.0.0). Requiere que GitHub Actions tenga runners
@@ -33,6 +37,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Inno Setup (para el instalador liviano, sin Electron)
+        # No viene preinstalado en la imagen windows-latest actual (Windows
+        # Server 2025) — solo estaba en la 2022. Sin este paso,
+        # build_release.py no encuentra ISCC.exe, lo saltea en silencio, y
+        # dist/Plania_Setup_v*.exe (el mismo archivo que sirve el backend de
+        # venta post-pago) nunca se genera.
+        run: choco install innosetup --no-progress -y
+        shell: pwsh
 
       - name: Backend autocontenido (PyInstaller)
         run: |
@@ -107,6 +120,7 @@ jobs:
           fail_on_unmatched_files: false
           files: |
             desktop/dist_electron/*.exe
+            dist/Plania_Setup_v*.exe
             dist/Plania_portable.zip
             dist/Plania_BAT.zip
           body: |
@@ -114,9 +128,10 @@ jobs:
 
             | Archivo | Qué es | Requisitos |
             |---|---|---|
-            | `Plania Setup *.exe` | Instalador Windows (Electron + React, todo incluido) | ninguno |
-            | `Plania *.exe` (portable) | Igual al instalador pero sin instalar | ninguno |
-            | `Plania_portable.zip` | Bundle PyInstaller (doble clic en `Plania.exe`) | ninguno |
+            | `Plania Setup *.exe` | Instalador Windows (Electron + React, todo incluido, ventana propia) | ninguno |
+            | `Plania *.exe` (portable) | Igual al instalador de Electron pero sin instalar | ninguno |
+            | `Plania_Setup_v*.exe` | Instalador Windows liviano (sin Electron, se abre en el navegador). Elegís dónde instalar. | ninguno |
+            | `Plania_portable.zip` | Igual que el anterior pero sin instalar (doble clic en `Plania.exe`) | ninguno |
             | `Plania_BAT.zip` | Código + `INICIAR_PLANIA.bat` autoinstalable | Python 3.11+ |
 
             Demo de 7 días con todas las funciones al primer arranque, sin tarjeta.

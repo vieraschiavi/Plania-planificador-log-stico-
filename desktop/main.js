@@ -57,7 +57,14 @@ function lanzarBackend(port) {
         empaquetado + "\n\n" +
         "Descargá el instalador de nuevo desde la página de Releases.");
     }
-    return spawn(empaquetado, [], { env, cwd: path.dirname(empaquetado) });
+    // Plania.exe se compila CON consola (packaging/plania.spec: console=True)
+    // porque en el instalador standalone esa ventana es la forma de cerrar
+    // el programa. Acá, embebido en Electron, esa consola sería una segunda
+    // ventana negra flotando detrás de la nuestra — windowsHide la evita sin
+    // tocar el build compartido con el instalador standalone.
+    return spawn(empaquetado, [], {
+      env, cwd: path.dirname(empaquetado), windowsHide: true,
+    });
   }
 
   // 2) desarrollo: python del sistema contra el repo
@@ -66,7 +73,7 @@ function lanzarBackend(port) {
   return spawn(python,
     ["-m", "streamlit", "run", path.join("app", "app.py"),
      `--server.port=${port}`, "--server.headless=true"],
-    { env, cwd: raiz });
+    { env, cwd: raiz, windowsHide: true });
 }
 
 function esperarServidor(url, intentos = 120) {

@@ -154,9 +154,25 @@ pip install -r requirements.txt pyinstaller
 python packaging\build_release.py
 ```
 
-Deja `dist\Plania_Setup_v1.0.0.exe` (si Inno Setup 6 está instalado) y
-`dist\Plania_portable.zip` (siempre). Publicá el Setup donde apunte
-`PLANIA_INSTALADOR_PATH` del backend para habilitar la descarga post-pago.
+Deja, si Inno Setup 6 está instalado:
+- `dist\Plania_Setup_v1.0.0.exe` — el instalador, con versión en el nombre.
+- `dist\Plania_Setup.exe` — copia idéntica sin versión en el nombre: es la
+  ruta que `backend_venta/app.py` sirve por defecto en `/descargar/{token}`
+  (la descarga post-pago). Si preferís servir otra ruta, seteá
+  `PLANIA_INSTALADOR_PATH` y listo — no hace falta renombrar nada.
+
+Y siempre, tenga o no Inno Setup: `dist\Plania_portable.zip`.
+
+Este instalador **permite elegir dónde instalar** (`DisableDirPage=no` en
+`packaging/instalador.iss`, explícito) y no se rompe si Plania está abierto
+al instalar o desinstalar encima: detecta el proceso y pide cerrarlo antes
+de seguir, en vez de fallar a mitad de camino con archivos bloqueados.
+
+En el workflow de Release (`.github/workflows/release.yml`) hay que instalar
+Inno Setup a mano antes de construir: la imagen `windows-latest` actual
+(Windows Server 2025) no lo trae preinstalado — sí lo traía la 2022. El
+workflow ya tiene el paso (`choco install innosetup`); si algún día GitHub
+lo agrega a la imagen por defecto, ese paso queda siendo un no-op inofensivo.
 
 ## Checklist de salida a producción
 
