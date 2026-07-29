@@ -6,7 +6,9 @@ Arma el programa instalable a partir del repo:
   1. Genera la base demo (para que el instalador traiga datos de ejemplo).
   2. Corre PyInstaller con `packaging/plania.spec` → dist/Plania/ (onedir).
   3. Si Inno Setup (ISCC.exe) está instalado, compila el instalador
-     → dist/Plania_Setup_vX.exe.
+     → dist/Plania_Setup_vX.exe, y deja una copia sin versión en el nombre
+     en dist/Plania_Setup.exe (es la ruta por defecto que sirve
+     backend_venta/app.py en la descarga post-pago).
   4. Siempre deja también un ZIP portable (dist/Plania_portable.zip) que
      corre con doble clic en Plania.exe, sin instalar nada.
 
@@ -61,10 +63,18 @@ def paso_instalador() -> str | None:
               "(el ZIP portable igual se genera).")
         return None
     _run([iscc, os.path.join("packaging", "instalador.iss")])
-    for f in os.listdir(DIST):
-        if f.startswith("Plania_Setup") and f.endswith(".exe"):
-            return os.path.join(DIST, f)
-    return None
+    versionado = next((os.path.join(DIST, f) for f in os.listdir(DIST)
+                       if f.startswith("Plania_Setup_v") and f.endswith(".exe")), None)
+    if not versionado:
+        return None
+    # backend_venta/app.py sirve PLANIA_INSTALADOR_PATH, y si no está seteada
+    # cae a dist/Plania_Setup.exe (sin versión) — sin esta copia esa ruta por
+    # defecto nunca existe y la descarga post-pago queda rota hasta que
+    # alguien setee la variable a mano. Con la copia, funciona apenas se
+    # corre este script, y ANTES ya queda el .exe versionado para archivar.
+    estable = os.path.join(DIST, "Plania_Setup.exe")
+    shutil.copy2(versionado, estable)
+    return versionado
 
 
 def paso_zip(carpeta: str) -> str:
@@ -85,8 +95,12 @@ def main() -> None:
     print("\n[build] Listo:")
     for p in filter(None, [setup, zpath]):
         print(f"  {p}\n    sha256: {_sha256(p)}")
-    print("\nPublicá el Setup.exe donde apunte PLANIA_INSTALADOR_PATH del "
-          "backend de venta para habilitar la descarga post-pago.")
+    if setup:
+        print(f"  {os.path.join(DIST, 'Plania_Setup.exe')}  (copia sin versión "
+              f"en el nombre — es la que sirve PLANIA_INSTALADOR_PATH por defecto)")
+    print("\nEl backend de venta sirve dist/Plania_Setup.exe por defecto para "
+          "la descarga post-pago (/descargar/{token}); para publicar desde "
+          "otra ruta, seteá PLANIA_INSTALADOR_PATH.")
 
 
 if __name__ == "__main__":

@@ -26,10 +26,19 @@ que responde consultas sobre los datos reales y exporta todo a
    [Python 3.11+](https://www.python.org/downloads/) instalado con
    "Add to PATH"); las siguientes abre directo.
 
-**Ejecutables .exe (Electron + React, sin requisitos):** se generan con el
-workflow **Release** (pestaña Actions → Release → *Run workflow*) y quedan
-publicados en [Releases](../../releases): instalador `Plania Setup.exe`,
-`.exe` portable, bundle PyInstaller y ZIP con la versión .BAT.
+**Ejecutables .exe, sin requisitos:** se generan con el workflow **Release**
+(pestaña Actions → Release → *Run workflow*) y quedan publicados en
+[Releases](../../releases). Hay dos instaladores Windows, no uno solo:
+
+| Archivo | Es | Elegís carpeta de instalación |
+|---|---|---|
+| `Plania Setup *.exe` | Electron + React — ventana propia, todo embebido | sí |
+| `Plania_Setup_v*.exe` | Liviano (Inno Setup), se abre en el navegador — es el que se descarga después de pagar | sí |
+
+Los dos son instaladores completos: no hace falta tener Python ni nada
+instalado. También está `Plania_portable.zip` (el liviano, sin instalar) y
+`Plania_BAT.zip` (requiere Python).
+
 *Nota: requiere GitHub Actions habilitado para el repo — ver la nota en
 `.github/workflows/ci.yml`.* También se pueden construir localmente en
 Windows (`python packaging/build_release.py` y `desktop/ → npm run dist`).

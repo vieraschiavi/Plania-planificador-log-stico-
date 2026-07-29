@@ -622,3 +622,238 @@ def test_los_subtitulos_no_muestran_la_escritura_para_la_voz():
         # Y al revés: si el guion nombra el dominio, el subtítulo lo muestra escrito.
         if any("uy" in s[idioma] for s in guion["segmentos"]):
             assert "plania.uy" in texto
+
+
+# ---------------------------------------------------------------------------
+# Arranque del programa PC: puertos e instalador
+# ---------------------------------------------------------------------------
+def _lanzador():
+    import sys, os
+    sys.path.insert(0, os.path.join(RAIZ, "packaging"))
+    import plania_launcher
+    return plania_launcher
+
+
+def test_nunca_se_elige_un_puerto_ocupado():
+    """El bug que reportó el usuario: Plania abría otro programa que ya tenía
+    corriendo. Pasaba porque el lanzador daba por libre un puerto ocupado —en
+    Windows un bind con SO_REUSEADDR tiene éxito aunque otro proceso esté
+    escuchando ahí.
+
+    El test no toca los puertos reales de Plania: se ocupan puertos que el
+    propio test reserva. Si usara los reales, fallaría cada vez que quien
+    corre los tests tenga Plania abierto, que es justo cuando no hay ningún
+    problema.
+    """
+    import http.server, socketserver, threading
+
+    L = _lanzador()
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+
+    servidores = []
+    ocupados = []
+    try:
+        for _ in range(3):
+            s = socketserver.TCPServer(("127.0.0.1", 0), _H)   # puerto efímero
+            threading.Thread(target=s.serve_forever, daemon=True).start()
+            servidores.append(s)
+            ocupados.append(s.server_address[1])
+
+        for p in ocupados:
+            assert L._ocupado(p) is True, f"no detectó que {p} está ocupado"
+
+        original = L.PUERTOS
+        try:
+            L.PUERTOS = tuple(ocupados)          # todos los candidatos ocupados
+            elegido = L._puerto_libre()
+        finally:
+            L.PUERTOS = original
+
+        assert elegido not in ocupados, f"eligió un puerto ocupado: {elegido}"
+        assert L._ocupado(elegido) is False
+    finally:
+        for s in servidores:
+            s.shutdown()
+
+
+def test_no_se_usa_el_puerto_por_defecto_de_streamlit():
+    """8501 es el puerto de cualquier app Streamlit. Usarlo garantiza chocar
+    con otra que el usuario tenga abierta — y que vea esa en vez de Plania."""
+    import os
+    L = _lanzador()
+    assert 8501 not in L.PUERTOS
+
+    bat = open(os.path.join(RAIZ, "INICIAR_PLANIA.bat"), encoding="utf-8",
+               errors="replace").read()
+    ejecutables = [l for l in bat.splitlines()
+                   if not l.strip().lower().startswith("rem")]
+    assert not any("8501" in l for l in ejecutables), \
+        "el lanzador .bat volvió a fijar el puerto 8501"
+    assert "plania_launcher.py" in bat, \
+        "el .bat tiene que arrancar por el lanzador, que elige puerto libre"
+
+
+def test_la_app_instalada_no_depende_del_python_del_usuario():
+    """Si el instalador quedó sin motor, la app tiene que decirlo. Antes caía
+    al python del sistema —que el cliente no tiene— y se quedaba para siempre
+    en la pantalla de carga: eso es 'el instalador no funciona'."""
+    import os
+    main = open(os.path.join(RAIZ, "desktop", "main.js"), encoding="utf-8").read()
+    empaquetado = main.split("if (app.isPackaged)")[1].split("// 2)")[0]
+    assert "throw new Error" in empaquetado, \
+        "empaquetado sin motor tiene que fallar con mensaje, no caer al python del sistema"
+    assert "spawn(python" not in empaquetado
+
+
+def test_el_release_no_publica_un_instalador_sin_motor():
+    import os
+    wf = open(os.path.join(RAIZ, ".github", "workflows", "release.yml"),
+              encoding="utf-8").read()
+    publicar = wf.index("Publicar release")
+    assert "dist/Plania/Plania.exe" in wf[:publicar], \
+        "falta verificar que PyInstaller dejó el motor antes de publicar"
+    assert "electron-builder no dejo ningun .exe" in wf[:publicar]
+
+
+def test_el_programa_no_se_publica_en_la_red_local():
+    """Streamlit escucha en 0.0.0.0 por defecto y anuncia una 'Network URL':
+    en una oficina, cualquiera en la misma red podría abrir el Plania de otro
+    y ver sus ventas, márgenes y clientes. Un programa de escritorio tiene que
+    escuchar solo en la máquina del usuario."""
+    import inspect
+    L = _lanzador()
+    fuente = inspect.getsource(L.main)
+    assert '"STREAMLIT_SERVER_ADDRESS", "127.0.0.1"' in fuente
+    assert "--server.address=" in fuente
+
+
+def test_lanzador_elige_puerto_libre_valido():
+    pl = _lanzador()
+    p = pl._puerto_libre()
+    assert 0 < p < 65536
+    # tiene que poder bindearse de verdad, no solo devolver un número
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", p))
+
+
+def test_lanzador_tee_no_pierde_el_log_si_la_consola_falla():
+    """El .exe empaquetado a veces tiene una consola que no se comporta como
+    un archivo real. Si escribir ahí falla, el log en disco —que es lo que
+    de verdad sirve para diagnosticar un problema reportado después— no se
+    puede perder por eso."""
+    import tempfile
+
+    pl = _lanzador()
+
+    class ConsolaRota:
+        def write(self, t):
+            raise OSError("sin consola")
+
+        def flush(self):
+            raise OSError("sin consola")
+
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as buf:
+        tee = pl._Tee(ConsolaRota(), buf)
+        tee.write("hola\n")
+        tee.flush()
+        buf.seek(0)
+        assert buf.read() == "hola\n"
+    assert tee.isatty() is False
+
+
+def test_lanzador_carpeta_de_logs_en_datos_de_usuario():
+    """Los logs van a la carpeta de datos del usuario, no a Archivos de
+    programa: ahí un programa instalado no tiene permiso de escritura."""
+    import tempfile
+
+    pl = _lanzador()
+    tmp = tempfile.mkdtemp()
+    viejo = os.environ.get("LOCALAPPDATA")
+    os.environ["LOCALAPPDATA"] = tmp
+    try:
+        carpeta = pl._carpeta_logs()
+        assert carpeta.startswith(tmp)
+        assert os.path.isdir(carpeta)
+    finally:
+        if viejo is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = viejo
+
+
+# ---------------------------------------------------------------------------
+# Empaquetado del instalador Windows (packaging/)
+# ---------------------------------------------------------------------------
+def test_build_release_deja_una_copia_del_setup_sin_version_en_el_nombre(tmp_path, monkeypatch):
+    """backend_venta/app.py sirve dist/Plania_Setup.exe por defecto para la
+    descarga post-pago, pero Inno Setup compila con la versión en el nombre
+    (Plania_Setup_v1.0.0.exe). Sin la copia, esa ruta por defecto nunca
+    existe y /descargar/{token} queda roto hasta setear PLANIA_INSTALADOR_PATH
+    a mano — bug real que este test fija.
+    """
+    import importlib
+    sys.path.insert(0, os.path.join(RAIZ, "packaging"))
+    br = importlib.import_module("build_release")
+
+    monkeypatch.setattr(br, "DIST", str(tmp_path))
+    monkeypatch.setattr(br.shutil, "which", lambda _n: "/usr/bin/iscc-fake")
+
+    def _run_falso(cmd):
+        # Simula lo que hace ISCC de verdad: dejar el .exe compilado en DIST.
+        (tmp_path / "Plania_Setup_v1.0.0.exe").write_bytes(b"exe de mentira")
+
+    monkeypatch.setattr(br, "_run", _run_falso)
+
+    versionado = br.paso_instalador()
+    assert versionado == str(tmp_path / "Plania_Setup_v1.0.0.exe")
+
+    estable = tmp_path / "Plania_Setup.exe"
+    assert estable.exists(), "falta la copia sin versión que espera el backend"
+    assert estable.read_bytes() == (tmp_path / "Plania_Setup_v1.0.0.exe").read_bytes()
+
+
+def test_backend_venta_busca_el_setup_en_la_ruta_que_build_release_genera():
+    """La ruta por defecto de /descargar/{token} y el nombre de archivo que
+    build_release.py deja como copia estable tienen que coincidir. Si alguien
+    cambia uno sin el otro, la descarga post-pago se rompe en silencio."""
+    with open(os.path.join(RAIZ, "backend_venta", "app.py"), encoding="utf-8") as f:
+        backend = f.read()
+    with open(os.path.join(RAIZ, "packaging", "build_release.py"), encoding="utf-8") as f:
+        build = f.read()
+    assert '"Plania_Setup.exe"' in backend
+    assert '"Plania_Setup.exe"' in build
+
+
+def test_instalador_deja_elegir_carpeta_y_no_rompe_con_plania_abierto():
+    """Control de sanidad del .iss: no se puede compilar con ISCC en Linux,
+    así que se valida por texto que las propiedades que pidió el usuario
+    —elegir dónde instalar, y no romperse por archivos bloqueados— están."""
+    with open(os.path.join(RAIZ, "packaging", "instalador.iss"), encoding="utf-8") as f:
+        iss = f.read()
+    assert "DisableDirPage=no" in iss
+    assert "InitializeSetup" in iss and "InitializeUninstall" in iss
+    assert "MinVersion=" in iss
+    assert "AppPublisherURL=" in iss
+
+
+def test_lanzador_pc_console_true_documentado_y_electron_lo_oculta():
+    """console=True es intencional (ver docstring del lanzador) — un cambio
+    accidental a False rompería la única forma de cerrar la versión
+    standalone sin agregar antes una bandeja del sistema. Y del lado de
+    Electron, windowsHide tiene que estar para no mostrar esa consola
+    igual como una ventana suelta."""
+    with open(os.path.join(RAIZ, "packaging", "plania.spec"), encoding="utf-8") as f:
+        spec = f.read()
+    assert "console=True" in spec
+
+    with open(os.path.join(RAIZ, "desktop", "main.js"), encoding="utf-8") as f:
+        main_js = f.read()
+    assert "windowsHide: true" in main_js
