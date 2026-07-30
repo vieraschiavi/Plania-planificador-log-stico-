@@ -195,6 +195,35 @@ def test_trial_es_7_dias():
     assert licencias.PLANES["trial"]["precio"] == 0.0
 
 
+def test_eula_no_se_acepta_sola():
+    """La EULA (LICENSE-EULA.md) tiene que aceptarse una vez por instalación
+    antes de que la app deje pasar a cualquier pantalla con datos."""
+    from plania import config as pconfig
+    from plania import licencia
+
+    pconfig.guardar_extra("EULA_ACEPTADA", "")
+    assert licencia.eula_aceptada() is False
+
+    licencia.aceptar_eula()
+    assert licencia.eula_aceptada() is True
+
+    # queda guardada la versión, no un booleano — si el texto cambia y
+    # EULA_VERSION sube, una aceptación vieja no puede seguir contando.
+    pconfig.guardar_extra("EULA_ACEPTADA", "0.1-version-vieja")
+    assert licencia.eula_aceptada() is False
+
+    pconfig.guardar_extra("EULA_ACEPTADA", "")  # no afectar otros tests
+
+
+def test_existe_el_archivo_de_la_eula():
+    ruta = os.path.join(RAIZ, "LICENSE-EULA.md")
+    assert os.path.exists(ruta)
+    texto = open(ruta, encoding="utf-8").read()
+    # que sea la EULA de verdad y no un archivo vacío o un placeholder
+    assert "ingeniería inversa" in texto.lower()
+    assert "descompilar" in texto.lower()
+
+
 def test_backend_endpoints():
     from fastapi.testclient import TestClient
     from backend_venta.app import app
@@ -884,3 +913,91 @@ def test_narracion_en_ingles_dice_schedule_ai():
     intro_en = guion["segmentos"][0]["en"]
     assert "Schedule AI" in intro_en
     assert "Plania" not in intro_en
+
+
+# ---------------------------------------------------------------------------
+# Protección del código de negocio (Cython) para la distribución
+# ---------------------------------------------------------------------------
+def test_proteger_codigo_compila_y_se_comporta_igual(tmp_path):
+    """Prueba real de packaging/proteger_codigo.py — no que "compile sin
+    tirar error", sino que lo compilado se comporte igual que el .py
+    original. Corre en un subproceso aparte, contra una carpeta temporal
+    propia, para no tocar ni el repo ni el estado de los demás tests.
+
+    Se salta si no hay Cython instalado: es una dependencia de build, no de
+    runtime, y no todos los entornos de test la tienen.
+    """
+    import shutil
+    import subprocess
+    import textwrap
+
+    pytest.importorskip("Cython")
+    if not shutil.which("gcc") and not shutil.which("cc"):
+        pytest.skip("no hay compilador de C disponible en este entorno")
+
+    destino = str(tmp_path / "protegido")
+    env = dict(os.environ, PLANIA_BUILD_FUENTE=destino)
+
+    r = subprocess.run(
+        [sys.executable, os.path.join(RAIZ, "packaging", "proteger_codigo.py")],
+        cwd=RAIZ, env=env, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, f"proteger_codigo.py falló:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}"
+
+    carpeta_plania = os.path.join(destino, "plania")
+    # No se puede hacer "from packaging import proteger_codigo": packaging/
+    # no tiene __init__.py (no es un paquete de Python, es la carpeta de
+    # empaquetado) y encima "packaging" es también el nombre de una
+    # biblioteca de PyPI instalada — el import ambiguo termina resolviendo
+    # a esa, no a este script. Se importa por ruta de archivo.
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location(
+        "proteger_codigo", os.path.join(RAIZ, "packaging", "proteger_codigo.py"))
+    proteger_codigo = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(proteger_codigo)
+    for modulo in proteger_codigo.MODULOS_PROTEGIDOS:
+        assert not os.path.exists(os.path.join(carpeta_plania, modulo)), \
+            f"{modulo} debería haberse borrado tras compilar"
+    binarios = [f for f in os.listdir(carpeta_plania) if f.endswith((".so", ".pyd"))]
+    assert len(binarios) == len(proteger_codigo.MODULOS_PROTEGIDOS)
+
+    # __init__.py y config.py SÍ tienen que seguir siendo .py — no son el
+    # diferenciador del producto (ver el porqué en proteger_codigo.py).
+    assert os.path.exists(os.path.join(carpeta_plania, "__init__.py"))
+    assert os.path.exists(os.path.join(carpeta_plania, "config.py"))
+
+    # Nada de bytecode legible de un módulo protegido en ningún __pycache__
+    # del árbol protegido.
+    for base, _dirs, files in os.walk(destino):
+        if os.path.basename(base) == "__pycache__":
+            for f in files:
+                nombre = f.split(".cpython")[0]
+                assert f"{nombre}.py" not in proteger_codigo.MODULOS_PROTEGIDOS, \
+                    f"quedó bytecode legible de un módulo protegido: {base}/{f}"
+
+    # Comportamiento: en un intérprete nuevo, con `destino` primero en el
+    # sys.path, ¿la versión compilada hace lo mismo que hace el .py? Se
+    # repite la misma aserción que test_ofertas_nunca_debajo_del_piso corre
+    # contra el código fuente.
+    script = textwrap.dedent(f"""
+        import sys
+        sys.path.insert(0, {RAIZ!r})
+        sys.path.insert(0, {destino!r})   # se inserta último -> queda primero -> gana
+        from plania import conectores, analitica, sugerencias
+        assert sugerencias.__file__.endswith((".so", ".pyd")), sugerencias.__file__
+
+        from data import generate_dataset
+        import os
+        if not os.path.exists(os.path.join({RAIZ!r}, "data", "erp_demo.db")):
+            generate_dataset.main(seed=42)
+        datos = conectores.cargar_datos()
+        v = analitica.enriquecer_ventas(datos["ventas"], datos["productos"], datos["clientes"])
+        of = sugerencias.ofertas_por_sobrestock(datos["productos"], v)
+        piso = of.merge(datos["productos"][["sku", "costo"]], on="sku")
+        assert len(of) > 0
+        assert (piso["precio_oferta"] >= piso["costo"] * 1.079).all()
+        print("OK: el binario compilado ofrece lo mismo que el .py original")
+    """)
+    r2 = subprocess.run([sys.executable, "-c", script], cwd=RAIZ,
+                        capture_output=True, text=True, timeout=60)
+    assert r2.returncode == 0, f"{r2.stdout}\n{r2.stderr}"
+    assert "OK:" in r2.stdout

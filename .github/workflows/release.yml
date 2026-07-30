@@ -47,9 +47,9 @@ jobs:
         run: choco install innosetup --no-progress -y
         shell: pwsh
 
-      - name: Backend autocontenido (PyInstaller)
+      - name: Backend autocontenido (PyInstaller, código protegido con Cython)
         run: |
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt pyinstaller cython
           python packaging/build_release.py
 
       - name: Verificar que el motor quedo empaquetado
@@ -82,12 +82,19 @@ jobs:
           npm run dist
 
       - name: Paquete BAT (codigo + lanzador, sin build)
+        # backend_venta NO va acá: es el servidor de venta del Licenciante
+        # (licencias, checkout de MercadoPago), nunca corre del lado del
+        # cliente — ver la nota en packaging/plania.spec. Este paquete es a
+        # propósito "código a la vista" (INICIAR_PLANIA.bat corre plania/ tal
+        # cual con el Python del usuario, sin compilar nada): quien lo baja
+        # ve el código de la app, nunca el del backend de venta.
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path stage/Plania -Force | Out-Null
-          $items = @("app","plania","backend_venta","data","packaging",
+          $items = @("app","plania","data","packaging","web",
                      "docs","assets",".streamlit","tests","requirements.txt",
-                     "run.sh","Procfile","README.md","INICIAR_PLANIA.bat")
+                     "run.sh","Procfile","README.md","LICENSE-EULA.md",
+                     "INICIAR_PLANIA.bat")
           foreach ($i in $items) {
             if (Test-Path $i) { Copy-Item $i -Destination stage/Plania -Recurse -Force }
           }
@@ -126,12 +133,13 @@ jobs:
           body: |
             ## Descargas de Plania
 
-            | Archivo | Qué es | Requisitos |
-            |---|---|---|
-            | `Plania Setup *.exe` | Instalador Windows (Electron + React, todo incluido, ventana propia) | ninguno |
-            | `Plania *.exe` (portable) | Igual al instalador de Electron pero sin instalar | ninguno |
-            | `Plania_Setup_v*.exe` | Instalador Windows liviano (sin Electron, se abre en el navegador). Elegís dónde instalar. | ninguno |
-            | `Plania_portable.zip` | Igual que el anterior pero sin instalar (doble clic en `Plania.exe`) | ninguno |
-            | `Plania_BAT.zip` | Código + `INICIAR_PLANIA.bat` autoinstalable | Python 3.11+ |
+            | Archivo | Qué es | Requisitos | Código de negocio |
+            |---|---|---|---|
+            | `Plania Setup *.exe` | Instalador Windows (Electron + React, todo incluido, ventana propia) | ninguno | compilado (Cython) |
+            | `Plania *.exe` (portable) | Igual al instalador de Electron pero sin instalar | ninguno | compilado (Cython) |
+            | `Plania_Setup_v*.exe` | Instalador Windows liviano (sin Electron, se abre en el navegador). Elegís dónde instalar. | ninguno | compilado (Cython) |
+            | `Plania_portable.zip` | Igual que el anterior pero sin instalar (doble clic en `Plania.exe`) | ninguno | compilado (Cython) |
+            | `Plania_BAT.zip` | Código + `INICIAR_PLANIA.bat` autoinstalable | Python 3.11+ | fuente a la vista |
 
             Demo de 7 días con todas las funciones al primer arranque, sin tarjeta.
+            Uso sujeto a [LICENSE-EULA.md](https://github.com/${{ github.repository }}/blob/main/LICENSE-EULA.md).

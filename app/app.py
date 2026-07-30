@@ -99,6 +99,27 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------
+# Aceptación de la EULA — antes de cualquier pantalla con datos, incluida la
+# demo. Se pide una sola vez por instalación (queda guardada en la config
+# segura, igual que la licencia) y de nuevo si EULA_VERSION sube.
+# ---------------------------------------------------------------------------
+if not licencia.eula_aceptada():
+    st.markdown("<div class='plania-logo'>PLAN<span>IA</span></div>", unsafe_allow_html=True)
+    st.subheader("Términos de uso")
+    st.caption("Hay que aceptarlos para continuar — es una sola vez.")
+    _eula_path = os.path.join(RAIZ, "LICENSE-EULA.md")
+    with st.container(height=420, border=True):
+        if os.path.exists(_eula_path):
+            st.markdown(open(_eula_path, encoding="utf-8").read())
+        else:
+            st.error("No se encontró LICENSE-EULA.md. Contactá a soporte antes de continuar.")
+    aceptar = st.checkbox("Leí y acepto los términos de uso de Plania.")
+    if st.button("Continuar", type="primary", disabled=not aceptar):
+        licencia.aceptar_eula()
+        st.rerun()
+    st.stop()
+
 
 # ---------------------------------------------------------------------------
 # Datos: ERP conectado o demo — cacheado

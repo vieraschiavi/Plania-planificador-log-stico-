@@ -23,6 +23,12 @@ FEATURES_DEMO = ["copiloto", "erp", "exportes", "rutas"]
 _CLAVE_DEMO = "DEMO_INICIO"
 _CLAVE_LICENCIA = "LICENCIA_JWT"
 
+# Aceptación de la EULA (LICENSE-EULA.md). Versionada: si el texto cambia de
+# forma sustancial, subir EULA_VERSION vuelve a pedir la aceptación en el
+# siguiente arranque en vez de asumir que un "sí" viejo cubre términos nuevos.
+EULA_VERSION = "1.0"
+_CLAVE_EULA = "EULA_ACEPTADA"
+
 
 def _ahora() -> datetime:
     return datetime.now(timezone.utc)
@@ -92,3 +98,12 @@ def estado() -> dict:
 
 def tiene(feature: str) -> bool:
     return feature in estado()["features"]
+
+
+def eula_aceptada() -> bool:
+    """Se consulta antes de dejar entrar a cualquier pantalla con datos."""
+    return pconfig.leer_extra(_CLAVE_EULA) == EULA_VERSION
+
+
+def aceptar_eula() -> None:
+    pconfig.guardar_extra(_CLAVE_EULA, EULA_VERSION)
