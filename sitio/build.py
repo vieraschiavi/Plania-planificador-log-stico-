@@ -39,15 +39,13 @@ SALIDA = os.path.join(RAIZ, "web")
 IDIOMAS = ["es", "en", "pt"]
 IDIOMA_DEFECTO = "es"
 
-# El nombre del producto no es el mismo en los tres idiomas. En español y
-# portugués es "Plania" (PLAN + IA). En inglés "Plan" no lleva ese doble
-# sentido con tanta fuerza, así que la marca en inglés es "Schedule AI"
-# (SCHEDULE + AI) — decisión del dueño del producto, no una traducción
-# literal. El dominio sigue siendo plania.uy en los tres idiomas: la marca
-# visible y el dominio no tienen por qué coincidir.
+# El nombre del producto es "Plania" (PLAN + IA) en los tres idiomas — el
+# juego de palabras se conserva igual en inglés (PLAN + AI). Lo que cambia
+# entre idiomas es solo cómo lo PRONUNCIA la voz sintética del video (ver
+# sitio/doblar_video.py), no el nombre escrito ni el logo.
 MARCAS = {
     "es": "PLAN<span>IA</span>",
-    "en": "SCHEDULE<span>AI</span>",
+    "en": "PLAN<span>IA</span>",
     "pt": "PLAN<span>IA</span>",
 }
 
