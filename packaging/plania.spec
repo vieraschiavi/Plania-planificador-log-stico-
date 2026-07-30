@@ -11,7 +11,18 @@ Construir (en Windows):
 import os
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
-ROOT = os.path.abspath(os.getcwd())
+# REPO es siempre el repositorio real: de ahí salen packaging/plania_launcher.py
+# y el ícono, y ahí corre pyinstaller (cwd).
+#
+# FUENTE es de dónde se toman app/, plania/, data/, assets/, docs/ para
+# empaquetar. Normalmente es el mismo REPO (build local, sin proteger). Para
+# la release oficial, packaging/build_release.py apunta FUENTE a la copia
+# "protegida" que deja packaging/proteger_codigo.py — donde el código de
+# negocio de plania/ ya no son archivos .py legibles sino extensiones
+# compiladas (.pyd), así el ejecutable que se distribuye no trae el código
+# fuente en texto plano. Ver packaging/proteger_codigo.py para el porqué.
+REPO = os.path.abspath(os.getcwd())
+ROOT = os.environ.get("PLANIA_BUILD_FUENTE", REPO)
 
 # --- Dependencias que necesitan recolección completa (datos + submódulos) ---
 _PAQUETES = [
@@ -41,15 +52,22 @@ def _dir(nombre):
     ruta = os.path.join(ROOT, nombre)
     return (ruta, nombre) if os.path.isdir(ruta) else None
 
-for _n in ["app", "plania", "backend_venta", "data", "assets", "docs"]:
+# backend_venta NO va acá a propósito: es el servidor de venta del
+# Licenciante (licencias, checkout de MercadoPago), no algo que el cliente
+# necesite ni deba recibir. Antes se empaquetaba sin razón — cada instalador
+# y cada demo descargada llevaba el código fuente del backend de venta
+# adentro. Ver proteger_codigo.py para el resto de lo que esto corrige.
+for _n in ["app", "plania", "data", "assets", "docs"]:
     par = _dir(_n)
     if par:
         datas.append(par)
 
-# README.md suelto: documentación embebida en la pantalla de Ayuda
-_readme = os.path.join(ROOT, "README.md")
-if os.path.isfile(_readme):
-    datas.append((_readme, "."))
+# README.md y la EULA sueltos: documentación embebida en la pantalla de Ayuda
+# y en la pantalla de aceptación de términos.
+for _archivo in ["README.md", "LICENSE-EULA.md"]:
+    _ruta = os.path.join(ROOT, _archivo)
+    if os.path.isfile(_ruta):
+        datas.append((_ruta, "."))
 
 hiddenimports += [
     "plania", "plania.analitica", "plania.auditoria", "plania.conectores",
@@ -64,8 +82,8 @@ _icon = _ICON if os.path.exists(_ICON) else None
 block_cipher = None
 
 a = Analysis(
-    [os.path.join(ROOT, "packaging", "plania_launcher.py")],
-    pathex=[ROOT],
+    [os.path.join(REPO, "packaging", "plania_launcher.py")],
+    pathex=[REPO],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

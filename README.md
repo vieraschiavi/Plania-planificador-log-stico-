@@ -187,9 +187,27 @@ tests/                39 tests (conectores, analítica, sugerencias, copiloto,
 ## Construir el programa PC (Windows)
 
 ```bash
-pip install -r requirements.txt pyinstaller
+pip install -r requirements.txt pyinstaller cython
 python packaging/build_release.py    # → dist/Plania_Setup_vX.exe + Plania_portable.zip
 ```
+
+El build compila `plania/` (el motor de negocio: sugerencias, copiloto,
+modelo financiero, rutas, licenciamiento) a extensiones nativas con Cython
+antes de armar el ejecutable, así el instalador y el portable no llevan el
+código fuente en texto plano — ver el porqué y los límites reales de esto
+en `packaging/proteger_codigo.py`. Para iterar rápido sin compilar nada:
+`python packaging/build_release.py --sin-proteger` (no usar ese build para
+distribuir).
+
+`backend_venta/` nunca viaja al cliente: es el servidor de venta del
+Licenciante, no algo que el comprador de una licencia deba recibir.
+
+## Licencia de uso (EULA)
+
+El uso de Plania —demo o pago— está sujeto a
+[`LICENSE-EULA.md`](LICENSE-EULA.md). La app pide aceptarla una sola vez
+por instalación, antes de cualquier pantalla con datos (`plania/licencia.py`:
+`eula_aceptada()` / `aceptar_eula()`).
 
 ## Configuración (pantalla ⚙️ o variables de entorno)
 

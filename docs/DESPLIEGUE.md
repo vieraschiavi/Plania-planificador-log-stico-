@@ -150,7 +150,7 @@ Alternativa paga: `--motor elevenlabs` con `ELEVENLABS_API_KEY`.
 En una máquina Windows con Python 3.11+:
 
 ```powershell
-pip install -r requirements.txt pyinstaller
+pip install -r requirements.txt pyinstaller cython
 python packaging\build_release.py
 ```
 
@@ -174,6 +174,24 @@ Inno Setup a mano antes de construir: la imagen `windows-latest` actual
 workflow ya tiene el paso (`choco install innosetup`); si algún día GitHub
 lo agrega a la imagen por defecto, ese paso queda siendo un no-op inofensivo.
 
+Antes de armar el ejecutable, el build compila `plania/` con Cython
+(`packaging/proteger_codigo.py`) a extensiones nativas — el .exe y el
+portable no llevan el código de negocio como `.py` legible. `--sin-proteger`
+salta ese paso para iterar rápido; no sirve para distribuir. Esto NO aplica
+a `Plania_BAT.zip` (release.yml): esa vía es a propósito "código a la
+vista" — corre con el Python del usuario, sin compilar nada — así que quien
+la baja ve el código de la app (nunca el de `backend_venta`, que no viaja
+ahí tampoco). Ver la comparativa completa en el cuerpo de cada release.
+
+## 5. Licencia de uso (EULA)
+
+`LICENSE-EULA.md` en la raíz del repo. Se distribuye con las cuatro vías
+(exe, portable, BAT, y como archivo en el propio repo para la web) y la app
+pide aceptarla una vez por instalación antes de dejar entrar a cualquier
+pantalla con datos (`plania/licencia.py`). Si el texto de la EULA cambia
+de forma sustancial, subir `EULA_VERSION` en ese módulo para que se vuelva
+a pedir la aceptación.
+
 ## Checklist de salida a producción
 
 1. [ ] Backend desplegado con los 7 secretos de arriba.
@@ -184,7 +202,10 @@ lo agrega a la imagen por defecto, ese paso queda siendo un no-op inofensivo.
 4. [ ] `python3 sitio/verificar_layout.py` en verde (nada se solapa).
 5. [ ] Video grabado, con las tres pistas de subtítulos, y doblado con
        VoiceBox (`--doblar` sin avisos de solapamiento).
-6. [ ] `Plania_Setup.exe` construido y subido.
+6. [ ] `Plania_Setup.exe` construido y subido — sin `--sin-proteger`, con
+       `plania/` compilado (confirmar que `dist/Plania/_internal/plania/`
+       tiene `.pyd`, no `.py`, y que no aparece `backend_venta` en ningún
+       lado del bundle).
 7. [ ] Compra de prueba end-to-end: web → MP sandbox → webhook → licencia
        recibida → activada en la app → descarga del instalador.
 8. [ ] App web desplegada (para demos sin instalar nada).

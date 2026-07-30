@@ -199,15 +199,21 @@ def _envolver(texto: str) -> str:
 # El guion está escrito para que lo LEA una voz sintética, y eso obliga a
 # escribir dos cosas distinto de como se muestran:
 #
-#   1. **La marca.** Plania es PLAN + IA (inteligencia artificial) en español
-#      y portugués, y PLAN + AI en inglés. Si se escribe "Plania" la voz lo
-#      lee como una palabra sola y el juego de palabras —que es el nombre del
-#      producto— se pierde. Va separado para que lo pronuncie.
-#   2. **El dominio.** "plania.uy" leído literal sale impronunciable.
+#   1. **El dominio.** "plania.uy" leído literal sale impronunciable en
+#      cualquier idioma, así que en el texto hablado va separado en letras.
+#      La forma exacta de cada idioma se eligió probando (sintetizando cada
+#      variante con la voz clonada y transcribiendo el resultado, repitiendo
+#      la prueba para no quedarse con un acierto de casualidad) — no se
+#      inventa a criterio.
+#   2. **La marca, pero solo en español y portugués.** Ahí sigue siendo
+#      "Planía" (PLAN + IA escrito para que el motor no la lea como una
+#      sola palabra). En inglés la marca es otro nombre, "Schedule AI" (ver
+#      MARCAS en sitio/build.py), que se lee bien tal cual está escrito —
+#      no necesita ningún truco fonético.
 #
-# En el subtítulo las dos cosas quedarían ridículas, así que se muestran como
-# se escriben. El orden importa: primero las formas largas, que contienen a
-# las cortas.
+# En el subtítulo ninguna de las dos formas habladas puede aparecer: se
+# muestran como se escriben. El orden importa: primero las formas largas,
+# que contienen a las cortas.
 PARA_LEER = {
     # Dominio
     "Planía punto uy": "plania.uy",
@@ -216,9 +222,8 @@ PARA_LEER = {
     "Plania punto u y": "plania.uy",
     "Plania dot u y": "plania.uy",
     "Plania ponto u y": "plania.uy",
-    # Marca
+    # Marca (español y portugués únicamente — ver el punto 2 de arriba)
     "Planía": "Plania",
-    "Plan ay eye": "Plania",
 }
 
 

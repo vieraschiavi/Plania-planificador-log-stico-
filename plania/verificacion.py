@@ -305,6 +305,22 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
 
     resultados.append(_control("Distribución", "Empaquetado PC y web", _empaquetado))
 
+    # --- 12. Protección del código y EULA -----------------------------------
+    def _proteccion():
+        piezas = {
+            "script de protección (Cython)": "packaging/proteger_codigo.py",
+            "EULA": "LICENSE-EULA.md",
+        }
+        faltan = [n for n, p in piezas.items() if not os.path.exists(os.path.join(RAIZ, p))]
+        if faltan:
+            return FALLA, f"falta: {faltan}"
+        if not hasattr(licencia, "eula_aceptada") or not hasattr(licencia, "aceptar_eula"):
+            return FALLA, "plania.licencia no tiene el gate de aceptación de la EULA"
+        return (OK, "EULA presente y con gate de aceptación; plania/ se compila "
+               "con Cython al armar la release (backend_venta no viaja al cliente)")
+
+    resultados.append(_control("Distribución", "Protección de código y EULA", _proteccion))
+
     # --- 12. Web pública trilingüe -----------------------------------------
     def _web():
         """La web es la puerta de entrada de la venta: si le falta un idioma o
