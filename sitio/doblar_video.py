@@ -205,25 +205,33 @@ def _envolver(texto: str) -> str:
 #      variante con la voz clonada y transcribiendo el resultado, repitiendo
 #      la prueba para no quedarse con un acierto de casualidad) — no se
 #      inventa a criterio.
-#   2. **La marca, pero solo en español y portugués.** Ahí sigue siendo
-#      "Planía" (PLAN + IA escrito para que el motor no la lea como una
-#      sola palabra). En inglés la marca es otro nombre, "Schedule AI" (ver
-#      MARCAS en sitio/build.py), que se lee bien tal cual está escrito —
-#      no necesita ningún truco fonético.
+#   2. **La marca.** El nombre escrito es "Plania" en los tres idiomas — no
+#      cambia. Lo que cambia es cómo se escribe en el guion para que la voz
+#      pronuncie el juego de palabras: "Planía" (con tilde) en español y
+#      portugués, para que el motor le ponga el acento en la í; "Plan A I"
+#      en inglés, deletreado, para que se oiga PLAN + AI en vez de leer
+#      "Plania" como una palabra inventada.
 #
 # En el subtítulo ninguna de las dos formas habladas puede aparecer: se
 # muestran como se escriben. El orden importa: primero las formas largas,
 # que contienen a las cortas.
 PARA_LEER = {
-    # Dominio
+    # Dominio — las formas con dominio van antes que las de marca sola: el
+    # reemplazo es secuencial, así que si "Plania"/"Planía" se resolviera
+    # primero, se comería el prefijo y la forma con dominio dejaría de
+    # matchear.
     "Planía punto uy": "plania.uy",
-    "Plah nia dot U Y": "plania.uy",
     "Planía ponto uy": "plania.uy",
+    "Plan A I dot U Y": "plania.uy",
     "Plania punto u y": "plania.uy",
     "Plania dot u y": "plania.uy",
     "Plania ponto u y": "plania.uy",
-    # Marca (español y portugués únicamente — ver el punto 2 de arriba)
+    # Marca. En español y portugués se escribe "Planía" (con tilde) para que
+    # el motor le ponga el acento en la í; en inglés se deletrea "Plan A I"
+    # para que la pronuncie como el juego de palabras PLAN + AI en vez de
+    # leerla como una palabra inventada.
     "Planía": "Plania",
+    "Plan A I": "Plania",
 }
 
 

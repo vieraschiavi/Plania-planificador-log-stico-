@@ -889,30 +889,26 @@ def test_lanzador_pc_console_true_documentado_y_electron_lo_oculta():
     assert "windowsHide: true" in main_js
 
 
-def test_marca_es_distinta_en_ingles():
-    """La marca en inglés es "Schedule AI", una decisión del dueño del
-    producto, no una traducción de "Plania". Se fija acá para que un cambio
-    futuro no la vuelva a mezclar con el español/portugués sin querer."""
+def test_la_marca_es_plania_en_los_tres_idiomas():
+    """El nombre del producto es "Plania" en español, inglés y portugués —
+    el juego de palabras PLAN + IA / PLAN + AI se conserva igual en los
+    tres. Lo único que cambia entre idiomas es cómo lo PRONUNCIA la voz del
+    video (ver PARA_LEER en doblar_video.py), nunca el nombre escrito."""
     import os
-    for idioma in ("es", "pt"):
+    for idioma in ("es", "en", "pt"):
         html = open(os.path.join(RAIZ, "web", idioma, "index.html"), encoding="utf-8").read()
         assert "PLAN<span>IA</span>" in html
-        assert "Schedule AI" not in html
-
-    html_en = open(os.path.join(RAIZ, "web", "en", "index.html"), encoding="utf-8").read()
-    assert "SCHEDULE<span>AI</span>" in html_en
-    # "Plania" sí puede aparecer en la URL del repo de GitHub (es su nombre
-    # real); lo que no puede es aparecer como texto de marca visible.
-    texto_visible = re.sub(r"<[^>]+>", " ", html_en)
-    assert "Plania" not in texto_visible, \
-        "el sitio en inglés no puede mostrar el nombre en español como marca"
+        assert "Schedule" not in html
 
 
-def test_narracion_en_ingles_dice_schedule_ai():
+def test_narracion_en_ingles_dice_plania():
     doblar, guion = _guion()
     intro_en = guion["segmentos"][0]["en"]
-    assert "Schedule AI" in intro_en
-    assert "Plania" not in intro_en
+    assert "Schedule" not in intro_en
+    # Se escribe deletreada para que la voz pronuncie el juego de palabras
+    # PLAN + AI en vez de leer "Plania" como una palabra inventada; el
+    # subtítulo (doblar.texto_subtitulo) la vuelve a mostrar como "Plania".
+    assert doblar.texto_subtitulo(intro_en).startswith("This is Plania.")
 
 
 # ---------------------------------------------------------------------------
