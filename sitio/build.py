@@ -39,6 +39,18 @@ SALIDA = os.path.join(RAIZ, "web")
 IDIOMAS = ["es", "en", "pt"]
 IDIOMA_DEFECTO = "es"
 
+# El nombre del producto no es el mismo en los tres idiomas. En español y
+# portugués es "Plania" (PLAN + IA). En inglés "Plan" no lleva ese doble
+# sentido con tanta fuerza, así que la marca en inglés es "Schedule AI"
+# (SCHEDULE + AI) — decisión del dueño del producto, no una traducción
+# literal. El dominio sigue siendo plania.uy en los tres idiomas: la marca
+# visible y el dominio no tienen por qué coincidir.
+MARCAS = {
+    "es": "PLAN<span>IA</span>",
+    "en": "SCHEDULE<span>AI</span>",
+    "pt": "PLAN<span>IA</span>",
+}
+
 # Configuración del sitio. Vive en sitio/sitio.json para no tener que editar
 # código al desplegar; lo de acá abajo son los valores por defecto.
 #
@@ -111,6 +123,7 @@ def render(plantilla: str, textos: dict, idioma: str, cfg: dict) -> str:
     valores["_locale"] = textos["_meta"]["locale"]
     valores["_hreflang"] = hreflang(idioma, cfg["dominio"])
     valores["_langbtns"] = botones_idioma(idioma, textos)
+    valores["_marca"] = MARCAS[idioma]
     # Sin backend no se define la variable: el JavaScript ya distingue ese
     # caso y muestra la vía de contacto en vez de un checkout que fallaría.
     valores["_backend"] = (f'\n<script>window.PLANIA_BACKEND="{cfg["backend"]}";</script>'

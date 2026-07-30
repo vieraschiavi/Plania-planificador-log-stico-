@@ -1,6 +1,7 @@
 """Tests de Plania: dataset, conectores, analítica, sugerencias, copiloto,
 exportes, rutas, licencias y backend de venta."""
 import os
+import re
 import sys
 
 import numpy as np
@@ -857,3 +858,29 @@ def test_lanzador_pc_console_true_documentado_y_electron_lo_oculta():
     with open(os.path.join(RAIZ, "desktop", "main.js"), encoding="utf-8") as f:
         main_js = f.read()
     assert "windowsHide: true" in main_js
+
+
+def test_marca_es_distinta_en_ingles():
+    """La marca en inglés es "Schedule AI", una decisión del dueño del
+    producto, no una traducción de "Plania". Se fija acá para que un cambio
+    futuro no la vuelva a mezclar con el español/portugués sin querer."""
+    import os
+    for idioma in ("es", "pt"):
+        html = open(os.path.join(RAIZ, "web", idioma, "index.html"), encoding="utf-8").read()
+        assert "PLAN<span>IA</span>" in html
+        assert "Schedule AI" not in html
+
+    html_en = open(os.path.join(RAIZ, "web", "en", "index.html"), encoding="utf-8").read()
+    assert "SCHEDULE<span>AI</span>" in html_en
+    # "Plania" sí puede aparecer en la URL del repo de GitHub (es su nombre
+    # real); lo que no puede es aparecer como texto de marca visible.
+    texto_visible = re.sub(r"<[^>]+>", " ", html_en)
+    assert "Plania" not in texto_visible, \
+        "el sitio en inglés no puede mostrar el nombre en español como marca"
+
+
+def test_narracion_en_ingles_dice_schedule_ai():
+    doblar, guion = _guion()
+    intro_en = guion["segmentos"][0]["en"]
+    assert "Schedule AI" in intro_en
+    assert "Plania" not in intro_en

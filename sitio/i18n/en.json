@@ -5,7 +5,7 @@
     "locale": "en-US",
     "dir": "ltr"
   },
-  "title": "Plania · Intelligent commercial and logistics planning",
+  "title": "Schedule AI · Intelligent commercial and logistics planning",
   "description": "Connect the ERP you already have and find out what to discount, what to restock, what to re-price and how to route deliveries. An AI copilot on your real data. 7-day full trial, no card required.",
 
   "nav_producto": "Product",
@@ -18,7 +18,7 @@
   "hero_badge": "For distributors, wholesalers and retailers in Uruguay and Latin America",
   "hero_h1_a": "Your data already knows",
   "hero_h1_b": "where the money is",
-  "hero_sub": "Plania connects to the ERP you <b>already have</b> and tells you what to discount, what to restock, what to re-price and how to route deliveries. With a copilot that answers using your real numbers and hands you the report in PDF, Word or Excel.",
+  "hero_sub": "Schedule AI connects to the ERP you <b>already have</b> and tells you what to discount, what to restock, what to re-price and how to route deliveries. With a copilot that answers using your real numbers and hands you the report in PDF, Word or Excel.",
   "hero_cta1": "Start the 7-day trial",
   "hero_cta2": "Watch the video",
   "hero_nota": "No card required. Every feature enabled. Your data never leaves your machine.",
@@ -32,7 +32,7 @@
   "kpi4_n": "0",
   "kpi4_t": "migrations required",
 
-  "video_h": "See Plania at work",
+  "video_h": "See Schedule AI at work",
   "video_sub": "A real walkthrough of the product: connecting the ERP, findings in hard currency, the copilot and the exports. Pick the video language above.",
   "video_nota": "Subtitles available in Spanish, English and Portuguese. If the dubbed audio has not been published yet, the video plays the original track with subtitles in your language.",
   "video_no_soporta": "Your browser does not support HTML5 video playback.",
@@ -59,7 +59,7 @@
   "f8_d": "Every analysis and every copilot answer comes out as PDF, Word and Excel, ready to send to the owner, the buyer or the sales rep on the route.",
 
   "vs_h": "Why what you already have is not enough",
-  "vs_col1": "Plania",
+  "vs_col1": "Schedule AI",
   "vs_col2": "Traditional ERP",
   "vs_col3": "Generic BI",
   "vs_col4": "Excel sheet",
@@ -131,7 +131,7 @@
   "cont_cta": "Send",
 
   "foot_tag": "Intelligent commercial and logistics planning",
-  "foot_legal": "Prices are stated in US dollars and billed through MercadoPago. Plania does not replace your ERP: it reads it.",
+  "foot_legal": "Prices are stated in US dollars and billed through MercadoPago. Schedule AI does not replace your ERP: it reads it.",
   "foot_prod": "Product",
   "foot_emp": "Company"
 }
