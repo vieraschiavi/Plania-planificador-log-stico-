@@ -200,7 +200,10 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
 
     def _planes():
         from backend_venta import licencias as lic
-        esperados = {"trial", "starter", "pro", "enterprise"}
+        # "owner" es un plan válido para emitir/validar (ver el control
+        # "Plan owner" más abajo) pero no de catálogo — por eso no está en
+        # PLANES_PUBLICOS y por eso sí tiene que estar en PLANES.
+        esperados = {"trial", "starter", "pro", "enterprise", "owner"}
         if set(lic.PLANES) != esperados:
             return FALLA, f"planes definidos: {set(lic.PLANES)}"
         emitida = lic.emitir_licencia("verificacion@plania.uy", "pro")
@@ -215,6 +218,75 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
                     "JWT emitido y validado")
 
     resultados.append(_control("Licencias", "Planes pagos y emisión JWT", _planes))
+
+    def _activacion_no_forjable():
+        """El control que prueba que se cerró el agujero real: activar una
+        licencia consulta al backend (única fuente que tiene el secreto de
+        firma) en vez de creerle a lo que el token dice de sí mismo. Antes de
+        este control, un token firmado con un secreto inventado se aceptaba
+        igual — quedó probado ejecutándolo, no es una hipótesis.
+
+        `activar_licencia` persiste la licencia activa de ESTA máquina, así
+        que probarlo tiene un efecto colateral real: si quien corre
+        `python3 -m plania.verificacion` tiene una licencia paga activada,
+        este control la pisaría con la de prueba. Se guarda el estado previo
+        y se restaura siempre, pase lo que pase — de ahí el try/finally, no
+        es opcional.
+        """
+        import jwt as pyjwt
+        from fastapi.testclient import TestClient
+
+        from backend_venta.app import app
+        from backend_venta import licencias as lic
+        from plania import config as pconfig
+
+        previo = {clave: pconfig.leer_extra(clave) for clave in
+                 ("LICENCIA_JWT", "LICENCIA_CLAIMS", "LICENCIA_VERIFICADA_EL")}
+        try:
+            c = TestClient(app)
+
+            forjado = pyjwt.encode(
+                {"sub": "nadie@nada.com", "plan": "enterprise",
+                 "features": lic.PLANES["enterprise"]["features"],
+                 "exp": int(time.time()) + 999999999},
+                "secreto-que-me-invento-yo-y-no-tiene-nada-que-ver", algorithm="HS256")
+            r_falso = licencia.activar_licencia(forjado, backend_url="", cliente_http=c)
+            if r_falso["ok"]:
+                return FALLA, "¡un token firmado con un secreto inventado se activó!"
+
+            real = lic.emitir_licencia("verificacion-activacion@plania.uy", "pro")
+            r_real = licencia.activar_licencia(real, backend_url="", cliente_http=c)
+            if not r_real["ok"] or r_real["claims"]["plan"] != "pro":
+                return FALLA, f"una licencia real emitida por el backend no activó: {r_real}"
+
+            return OK, ("un token forjado se rechazó (motivo: "
+                        f"{r_falso.get('motivo')}) y uno real emitido por el "
+                        "backend activó y quedó con sus features verificadas")
+        finally:
+            for clave, valor in previo.items():
+                pconfig.guardar_extra(clave, valor)
+
+    resultados.append(_control("Licencias", "Activación verificada contra el backend",
+                               _activacion_no_forjable))
+
+    def _plan_owner():
+        from backend_venta import licencias as lic
+        if "owner" not in lic.PLANES:
+            return FALLA, "no existe el plan 'owner'"
+        if "owner" in lic.PLANES_PUBLICOS:
+            return FALLA, "'owner' aparece en /planes: no debería listarse públicamente"
+        cfg = lic.PLANES["owner"]
+        if cfg["cupo_mensual"] is not None:
+            return FALLA, "el plan owner tiene un cupo mensual: no debería"
+        if set(cfg["features"]) != set(lic.PLANES["enterprise"]["features"]):
+            return FALLA, "el plan owner no tiene todas las features de enterprise"
+        if cfg["dias"] < 3650:
+            return FALLA, f"el plan owner vence en {cfg['dias']} días, muy poco para 'sin restricciones'"
+        return OK, (f"sin cupo, {len(cfg['features'])} features, vence en "
+                    f"{cfg['dias'] // 365} años · emitir con "
+                    "packaging/generar_licencia_owner.py")
+
+    resultados.append(_control("Licencias", "Plan owner (sin restricciones)", _plan_owner))
 
     # --- 8. Backend de venta y MercadoPago ----------------------------------
     if incluir_backend:
@@ -305,7 +377,52 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
 
     resultados.append(_control("Distribución", "Empaquetado PC y web", _empaquetado))
 
-    # --- 12. Protección del código y EULA -----------------------------------
+    # --- 12. Instalador: ícono, menú de Inicio y desinstalador --------------
+    def _instalador_windows():
+        """Este entorno es Linux: no puede correr el instalador de Windows
+        para mirarlo. Lo que sí puede hacer es leer los scripts que lo arman
+        y confirmar que declaran las tres cosas que se pidieron — accesos
+        directos con ícono, entrada en el menú de Inicio y desinstalador— en
+        las DOS vías de empaquetado (PyInstaller+Inno Setup y Electron+NSIS).
+        """
+        faltan = []
+
+        iss = os.path.join(RAIZ, "packaging", "instalador.iss")
+        texto_iss = open(iss, encoding="utf-8").read() if os.path.exists(iss) else ""
+        controles_iss = {
+            "grupo del menú de Inicio": r"{group}\Plania",
+            "acceso directo de desinstalar": "Desinstalar Plania",
+            "ícono del instalador": "SetupIconFile",
+            "ícono mostrado al desinstalar": "UninstallDisplayIcon",
+        }
+        for nombre, marca in controles_iss.items():
+            if marca not in texto_iss:
+                faltan.append(f"Inno Setup: falta {nombre}")
+
+        pkg = os.path.join(RAIZ, "desktop", "package.json")
+        import json as _json
+        cfg_nsis = {}
+        if os.path.exists(pkg):
+            cfg_nsis = _json.load(open(pkg, encoding="utf-8")).get("build", {}).get("nsis", {})
+        if not cfg_nsis.get("createStartMenuShortcut", True):  # default true en electron-builder
+            faltan.append("NSIS: createStartMenuShortcut está desactivado")
+        if not cfg_nsis.get("uninstallDisplayName"):
+            faltan.append("NSIS: falta uninstallDisplayName")
+
+        icono = os.path.join(RAIZ, "assets", "brand", "plania.ico")
+        if not os.path.exists(icono):
+            faltan.append("falta assets/brand/plania.ico")
+
+        if faltan:
+            return FALLA, "; ".join(faltan)
+        return OK, ("Inno Setup y NSIS declaran ícono, grupo del menú de "
+                    "Inicio y desinstalador; no se puede correr el instalador "
+                    "en este entorno (Windows-only) para verlo con los ojos")
+
+    resultados.append(_control("Distribución", "Instalador: ícono, menú y desinstalador",
+                               _instalador_windows))
+
+    # --- 13. Protección del código y EULA -----------------------------------
     def _proteccion():
         piezas = {
             "script de protección (Cython)": "packaging/proteger_codigo.py",
@@ -321,7 +438,7 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
 
     resultados.append(_control("Distribución", "Protección de código y EULA", _proteccion))
 
-    # --- 12. Web pública trilingüe -----------------------------------------
+    # --- 14. Web pública trilingüe -----------------------------------------
     def _web():
         """La web es la puerta de entrada de la venta: si le falta un idioma o
         una pista de subtítulos, hay visitantes que se van sin entender qué es

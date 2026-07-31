@@ -77,7 +77,7 @@ def _chequear_cupo(claims: dict) -> None:
 @app.get("/planes")
 async def planes():
     """Público: la landing y la app muestran esto (una sola fuente de verdad)."""
-    return {p: {k: v for k, v in d.items()} for p, d in licencias.PLANES.items()}
+    return {p: {k: v for k, v in d.items()} for p, d in licencias.PLANES_PUBLICOS.items()}
 
 
 @app.post("/licencias/emitir")

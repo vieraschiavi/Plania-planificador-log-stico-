@@ -95,6 +95,28 @@ PLANIA_OWNER_TOKEN=tu-token streamlit run app/owner.py --server.port 8600
 | Contenido para redes | Posts, guiones, prospección, calendario y pauta generados sobre datos reales |
 | Verificación del producto | Corre la cadena completa y da un puntaje sobre 10 |
 
+Eso es el panel de **métricas del negocio**. Aparte, y para lo que se
+pregunta seguido — "yo soy el dueño, ¿por qué me corre el reloj de la demo
+como a un cliente" — existe una **licencia `owner`** para el programa
+principal (`app/app.py`), sin cupo, con todas las features y sin vencimiento
+real (100 años):
+
+```bash
+python3 packaging/generar_licencia_owner.py vos@tu-dominio.uy
+```
+
+Pegá el token que imprime en **Planes y licencia → Ya tengo mi licencia**, y
+esa instalación deja de tener restricciones — igual que un cliente Enterprise,
+con vos como titular.
+
+Por qué esto no sale de una variable de entorno tipo `PLANIA_OWNER_MODE=1`
+que cualquiera pudiera prender: activar una licencia se valida contra el
+`backend_venta` desplegado (ver "Licencias" en la Verificación end-to-end,
+más abajo) — el cliente ya no le cree a un token porque dice "soy el dueño",
+sólo a lo que el backend confirma con el secreto de firma real, que solo
+tiene quien despliega ese backend. Es la misma licencia paga de siempre, con
+otro plan.
+
 ## Web pública (español · inglés · portugués)
 
 La web de venta vive en `web/` y se publica en Vercel apuntando la *Root

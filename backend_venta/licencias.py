@@ -39,7 +39,24 @@ PLANES = {
     "enterprise": {"cupo_mensual": None, "precio": None,  "dias": 30,
                    "features": ["copiloto", "erp", "exportes", "rutas", "excedente",
                                 "white_label", "sso", "multi_sucursal"]},
+    # Para el dueño del producto: todas las features, sin cupo, sin poder
+    # comprarse (precio=None → /checkout la rechaza igual que a enterprise) y
+    # sin poder emitirse por autoservicio: solo sale de
+    # packaging/generar_licencia_owner.py o de /licencias/emitir con el
+    # token de admin — las dos vías requieren tener el secreto de firma real,
+    # así que no es un bypass público, es la misma licencia paga de siempre
+    # con otro titular. 36500 días (100 años) en vez de omitir `exp`: que
+    # nunca venza en la práctica sin dejar el claim ausente, que otros
+    # lugares del código (p. ej. GET /licencias/estado) asumen presente.
+    "owner":      {"cupo_mensual": None, "precio": None,  "dias": 36500,
+                   "features": ["copiloto", "erp", "exportes", "rutas", "excedente",
+                                "white_label", "sso", "multi_sucursal"]},
 }
+
+# Planes que se listan en /planes (la landing y la pantalla "Planes y
+# licencia"). "owner" existe y es válido para emitir/validar, pero no es un
+# plan de catálogo: no tiene sentido mostrarlo en una página pública.
+PLANES_PUBLICOS = {p: d for p, d in PLANES.items() if p != "owner"}
 
 
 def secreto_firma() -> str:
