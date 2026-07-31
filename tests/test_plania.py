@@ -19,6 +19,17 @@ for _f in ("/tmp/plania_test_uso.db",):
 
 from data import generate_dataset  # noqa: E402
 from plania import analitica, conectores, copiloto, exportes, rutas, sugerencias  # noqa: E402
+from plania import config as pconfig  # noqa: E402
+
+# Los tests de licencia van "limpiando lo que ensucian" al final de cada uno,
+# pero eso no alcanza: si una corrida anterior se interrumpió a mitad de un
+# test (pasa con Ctrl-C, o si el proceso se corta), la limpieza final nunca
+# corre y el estado queda pisado en /tmp/plania_test_config para la PRÓXIMA
+# corrida — un test de demo puede fallar sin que nadie haya tocado su código.
+# Se arranca cada corrida desde cero en vez de confiar en que la anterior
+# haya terminado prolijo.
+for _clave in ("DEMO_INICIO", "LICENCIA_JWT", "LICENCIA_CLAIMS", "LICENCIA_VERIFICADA_EL"):
+    pconfig.guardar_extra(_clave, None)
 
 
 @pytest.fixture(scope="session")
@@ -263,25 +274,29 @@ def test_e2e_demo_a_licencia_paga():
 
     # 1) demo local vencida (instalada hace 10 días, más que los 7 de demo)
     pconfig.guardar_extra("LICENCIA_JWT", "")
+    pconfig.guardar_extra("LICENCIA_CLAIMS", None)
     inicio_viejo = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
     pconfig.guardar_extra("DEMO_INICIO", inicio_viejo)
     est = licencia.estado()
     assert est["modo"] == "vencida"
     assert est["features"] == []
 
-    # 2) el cliente pide la demo por la landing y la activa en la app
+    # 2) el cliente pide la demo por la landing y la activa en la app.
+    # `activar_licencia` consulta al backend (no le cree al token sin
+    # verificar) — acá se le inyecta el mismo TestClient así la activación
+    # golpea al backend de este mismo test en vez de a una URL real.
     c = TestClient(app)
     r = c.post("/licencias/trial", json={"email": "e2e@plania.uy"})
     assert r.status_code == 200
-    act = licencia.activar_licencia(r.json()["licencia"])
-    assert act["ok"]
+    act = licencia.activar_licencia(r.json()["licencia"], backend_url="", cliente_http=c)
+    assert act["ok"], act
     est = licencia.estado()
     assert est["modo"] == "licencia" and est["plan"] == "trial"
     assert "rutas" in est["features"]
 
     # 3) paga → webhook emite plan pro → activa y desbloquea todo
     lic_pro = licencias.emitir_licencia("e2e@plania.uy", "pro")
-    assert licencia.activar_licencia(lic_pro)["ok"]
+    assert licencia.activar_licencia(lic_pro, backend_url="", cliente_http=c)["ok"]
     est = licencia.estado()
     assert est["plan"] == "pro" and licencia.tiene("rutas") and licencia.tiene("copiloto")
 
@@ -291,6 +306,8 @@ def test_e2e_demo_a_licencia_paga():
 
     # limpiar para no afectar otros tests
     pconfig.guardar_extra("LICENCIA_JWT", "")
+    pconfig.guardar_extra("LICENCIA_CLAIMS", None)
+    pconfig.guardar_extra("LICENCIA_VERIFICADA_EL", None)
     pconfig.guardar_extra("DEMO_INICIO", "")
 
 
@@ -997,3 +1014,188 @@ def test_proteger_codigo_compila_y_se_comporta_igual(tmp_path):
                         capture_output=True, text=True, timeout=60)
     assert r2.returncode == 0, f"{r2.stdout}\n{r2.stderr}"
     assert "OK:" in r2.stdout
+
+
+# ---------------------------------------------------------------------------
+# Licencias: activación no forjable, plan owner
+# ---------------------------------------------------------------------------
+def _limpiar_licencia_local():
+    from plania import config as pconfig
+    for clave in ("LICENCIA_JWT", "LICENCIA_CLAIMS", "LICENCIA_VERIFICADA_EL"):
+        pconfig.guardar_extra(clave, None)
+
+
+def test_un_token_forjado_no_activa_ninguna_licencia():
+    """La regresión central: hasta esta versión, activar_licencia() decodificaba
+    el JWT con verify_signature=False y solo miraba el vencimiento — cualquiera
+    podía fabricarse un token con jwt.encode(payload, "lo que sea") y activarse
+    el plan que quisiera, gratis y para siempre. Se probó ejecutándolo contra
+    el código real antes de arreglarlo; esto lo deja como test permanente."""
+    import time
+
+    import jwt as pyjwt
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+    from backend_venta import licencias as lic
+    from plania import licencia
+
+    _limpiar_licencia_local()
+    try:
+        c = TestClient(app)
+        forjado = pyjwt.encode(
+            {"sub": "nadie@nada.com", "plan": "enterprise",
+             "features": lic.PLANES["enterprise"]["features"],
+             "exp": int(time.time()) + 999999999},
+            "un-secreto-que-me-invento-yo", algorithm="HS256")
+
+        r = licencia.activar_licencia(forjado, backend_url="", cliente_http=c)
+        assert r["ok"] is False
+        assert r["motivo"] == "rechazada"
+
+        # y no debe haber quedado activada ninguna licencia como efecto colateral
+        est = licencia.estado()
+        assert est["modo"] != "licencia"
+    finally:
+        _limpiar_licencia_local()
+
+
+def test_activar_licencia_sin_red_no_se_confunde_con_rechazada():
+    """Si el backend no se puede contactar, la activación tiene que fallar
+    igual (nunca se acepta sin verificar), pero el motivo tiene que ser
+    distinguible de un rechazo explícito — estado() usa esa diferencia para
+    decidir si sigue confiando en la última licencia verificada o la
+    descarta (ver plania/licencia.py)."""
+    from plania import licencia
+
+    class _SiempreFalla:
+        def get(self, *a, **k):
+            raise ConnectionError("simulado: no hay red")
+
+    r = licencia.activar_licencia("a.b.c", cliente_http=_SiempreFalla())
+    assert r["ok"] is False
+    assert r["motivo"] == "red"
+
+
+def test_estado_revalida_y_descarta_si_el_backend_rechaza(monkeypatch):
+    """Una licencia activada hace tiempo se revalida sola contra el backend.
+    Si el backend dice explícitamente que ya no vale (plan cancelado, etc.),
+    estado() tiene que dejar de confiar en la caché en el momento, no seguir
+    usándola hasta que expire la tolerancia de "sin red"."""
+    from datetime import datetime, timedelta, timezone
+
+    from plania import config as pconfig
+    from plania import licencia
+
+    _limpiar_licencia_local()
+    try:
+        pconfig.guardar_extra("LICENCIA_JWT", "a.b.c")
+        pconfig.guardar_extra("LICENCIA_CLAIMS", {
+            "cliente": "x@y.uy", "plan": "pro", "cupo_mensual": 2000,
+            "features": ["copiloto", "erp"],
+            "expira": (datetime.now(timezone.utc) + timedelta(days=20)).timestamp(),
+        })
+        vieja = (datetime.now(timezone.utc)
+                - timedelta(hours=licencia._REVALIDAR_CADA_HORAS + 1)).isoformat()
+        pconfig.guardar_extra("LICENCIA_VERIFICADA_EL", vieja)
+
+        monkeypatch.setattr(licencia, "activar_licencia",
+                            lambda *a, **k: {"ok": False, "motivo": "rechazada",
+                                             "error": "revocada"})
+        est = licencia.estado()
+        assert est["modo"] != "licencia"
+    finally:
+        _limpiar_licencia_local()
+
+
+def test_estado_tolera_no_tener_red_por_un_tiempo_sin_perder_la_licencia():
+    """Mismo escenario, pero el backend no se pudo contactar (no dijo que no,
+    simplemente no se sabe). Recién activada, dentro de la tolerancia, sigue
+    confiando en la última confirmación en vez de bajar a demo/vencida."""
+    from datetime import datetime, timedelta, timezone
+
+    from plania import config as pconfig
+    from plania import licencia
+
+    _limpiar_licencia_local()
+    try:
+        pconfig.guardar_extra("LICENCIA_JWT", "a.b.c")
+        pconfig.guardar_extra("LICENCIA_CLAIMS", {
+            "cliente": "x@y.uy", "plan": "pro", "cupo_mensual": 2000,
+            "features": ["copiloto", "erp"],
+            "expira": (datetime.now(timezone.utc) + timedelta(days=20)).timestamp(),
+        })
+        vieja = (datetime.now(timezone.utc)
+                - timedelta(hours=licencia._REVALIDAR_CADA_HORAS + 1)).isoformat()
+        pconfig.guardar_extra("LICENCIA_VERIFICADA_EL", vieja)
+
+        # Se reemplaza activar_licencia por una que "no puede" confirmar
+        # (motivo red), simulando que estado() la invoca internamente para
+        # revalidar y la red falla.
+        import plania.licencia as mod
+        original = mod.activar_licencia
+
+        def _falla_de_red(token, *a, **k):
+            return {"ok": False, "motivo": "red", "error": "sin internet"}
+
+        mod.activar_licencia = _falla_de_red
+        try:
+            est = licencia.estado()
+        finally:
+            mod.activar_licencia = original
+
+        assert est["modo"] == "licencia" and est["plan"] == "pro"
+    finally:
+        _limpiar_licencia_local()
+
+
+def test_plan_owner_no_tiene_restricciones_y_no_es_publico():
+    """El plan del dueño: todas las features, sin cupo, sin fecha de
+    vencimiento real (100 años), y NO listado en /planes — no es un plan de
+    catálogo, solo se emite con packaging/generar_licencia_owner.py o con el
+    token de admin."""
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+    from backend_venta import licencias as lic
+
+    assert lic.PLANES["owner"]["cupo_mensual"] is None
+    assert lic.PLANES["owner"]["precio"] is None  # no se puede comprar
+    assert set(lic.PLANES["owner"]["features"]) == set(lic.PLANES["enterprise"]["features"])
+    assert lic.PLANES["owner"]["dias"] >= 36500
+
+    assert "owner" not in lic.PLANES_PUBLICOS
+    c = TestClient(app)
+    assert "owner" not in c.get("/planes").json()
+
+    # y sí activa de punta a punta, igual que cualquier plan pago
+    from plania import licencia
+    _limpiar_licencia_local()
+    try:
+        token = lic.emitir_licencia("dueno@plania.uy", "owner")
+        r = licencia.activar_licencia(token, backend_url="", cliente_http=c)
+        assert r["ok"] and r["claims"]["plan"] == "owner"
+        assert licencia.tiene("white_label") and licencia.tiene("sso")
+    finally:
+        _limpiar_licencia_local()
+
+
+def test_generador_de_licencia_owner_produce_un_token_valido():
+    """packaging/generar_licencia_owner.py es lo que documenta y ejecuta el
+    dueño para su propia licencia sin restricciones — se corre de verdad,
+    no se lee el código y se asume."""
+    import subprocess
+    import sys
+
+    r = subprocess.run(
+        [sys.executable, os.path.join(RAIZ, "packaging", "generar_licencia_owner.py"),
+         "dueno-de-prueba@plania.uy"],
+        cwd=RAIZ, capture_output=True, text=True, timeout=30,
+        env={**os.environ, "PLANIA_CONFIG_DIR": os.environ["PLANIA_CONFIG_DIR"]})
+    assert r.returncode == 0, r.stderr
+    lineas = [l for l in r.stdout.splitlines() if l.count(".") == 2 and len(l) > 100]
+    assert lineas, f"no se encontró un token en la salida:\n{r.stdout}"
+
+    from backend_venta import licencias as lic
+    validado = lic.licencia_activa(lineas[0].strip())
+    assert validado["ok"] and validado["claims"]["plan"] == "owner"

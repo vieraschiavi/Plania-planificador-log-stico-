@@ -35,6 +35,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Plania",
+      "uninstallDisplayName": "Plania",
       "license": false,
       "installerLanguages": ["es_ES"]
     }

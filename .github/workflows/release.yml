@@ -76,9 +76,15 @@ jobs:
           node-version: "20"
 
       - name: Escritorio Electron + React (instalador NSIS y portable)
+        # npm ci en vez de npm install: instala exactamente lo que fija
+        # package-lock.json. Sin lockfile (como estaba antes) cada corrida
+        # podía traer una versión distinta de Electron o electron-builder
+        # dentro de los rangos "^" del package.json, y un build que
+        # funcionaba podía dejar de hacerlo sin que cambiara una sola línea
+        # de código del repo.
         working-directory: desktop
         run: |
-          npm install
+          npm ci
           npm run dist
 
       - name: Paquete BAT (codigo + lanzador, sin build)

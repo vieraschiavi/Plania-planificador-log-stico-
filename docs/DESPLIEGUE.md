@@ -21,7 +21,14 @@ detectan solos). Variables opcionales:
 | `PLANIA_CONFIG_DIR` | dónde persiste la config cifrada (default `~/.plania`) |
 | `ERP_DB_URL` | conexión fija al ERP del cliente (si no, se configura en la UI) |
 | `ANTHROPIC_API_KEY` | redacción del copiloto con Claude (opcional) |
-| `PLANIA_BACKEND_URL` | URL del backend de venta para la pantalla Planes |
+| `PLANIA_BACKEND_URL` | backend de venta — **obligatoria en producción**, no solo para el botón de pago |
+
+`PLANIA_BACKEND_URL` dejó de ser solo cosmética: activar cualquier licencia
+(trial, paga, o la propia del dueño) consulta `GET {backend}/licencias/estado`
+contra esa URL para confirmar la firma — es la única forma honesta de saber
+que el token lo emitió `backend_venta` y no cualquiera con una librería de
+JWT. Sin esa variable apuntando al backend real, nadie puede activar nada
+(ni siquiera una licencia genuina), así que en producción no es opcional.
 
 ## 2. Backend de venta (licencias + MercadoPago)
 
@@ -43,6 +50,21 @@ uvicorn backend_venta.app:app --host 0.0.0.0 --port $PORT
 
 Después del deploy: cargar `PLANIA_WEBHOOK_URL` en el panel de MercadoPago
 (Tus integraciones → Webhooks → evento `payment`).
+
+### Tu propia licencia, sin restricciones
+
+Con el backend ya desplegado (y `PLANIA_LICENSE_SECRET` fijado — si no, cada
+reinicio del proceso podría regenerar el secreto y las licencias emitidas
+antes dejarían de validar):
+
+```bash
+python3 packaging/generar_licencia_owner.py vos@tu-dominio.uy
+```
+
+Activala en tu instalación como cualquier licencia paga. El plan `owner` no
+figura en `/planes` (no es de catálogo) ni se puede comprar (no tiene
+precio) — solo sale de este script o de `POST /licencias/emitir` con el
+token de admin.
 
 ## 3. Web pública en Vercel (español, inglés y portugués)
 
@@ -209,3 +231,10 @@ a pedir la aceptación.
 7. [ ] Compra de prueba end-to-end: web → MP sandbox → webhook → licencia
        recibida → activada en la app → descarga del instalador.
 8. [ ] App web desplegada (para demos sin instalar nada).
+9. [ ] `PLANIA_BACKEND_URL` configurada en el build/deploy de la app cliente
+       (sin esto nadie puede activar ninguna licencia, ni siquiera una real).
+10. [ ] `PLANIA_LICENSE_SECRET` fijado en el backend (no dejado a
+        autogenerarse): si el proceso se reinicia y regenera el secreto,
+        las licencias ya emitidas dejan de validar.
+11. [ ] Tu propia licencia `owner` generada y activada
+        (`packaging/generar_licencia_owner.py`).

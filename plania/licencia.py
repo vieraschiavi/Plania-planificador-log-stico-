@@ -10,9 +10,40 @@ El estado vive en la config segura de Plania (keyring > archivo cifrado >
 texto plano; ver `plania/config.py`), así que reinstalar no reinicia la demo
 en la misma máquina de casualidad, pero tampoco hacemos DRM agresivo: esto
 es un producto B2B, el candado real es el vencimiento del JWT.
+
+## Por qué activar_licencia() llama al backend en vez de decodificar local
+
+Versión anterior de este módulo: `pyjwt.decode(token, options={"verify_signature":
+False})`, tanto acá como en `estado()`. Eso solo mira que el JWT tenga forma
+de JWT y que no esté vencido — la firma, que es lo único que demuestra que
+`backend_venta` lo emitió, nunca se comprobaba. Cualquiera podía escribir:
+
+    jwt.encode({"plan": "enterprise", "features": [...], "exp": ...},
+               "cualquier-cosa", algorithm="HS256")
+
+y activarse el plan más caro para siempre, sin pagar ni tocar el backend.
+No es hipotético: quedó probado corriendo exactamente ese código contra este
+módulo antes del arreglo.
+
+El cliente no tiene el secreto de firma (vive solo en `backend_venta`, ver
+`backend_venta/licencias.py::secreto_firma`), así que la única verificación
+honesta es preguntarle a quien firmó: `GET /licencias/estado` con el token
+como Bearer. Si el backend dice que sí, las claims que se guardan localmente
+son las que **devolvió el backend**, no las que trae el token sin verificar
+— así un token con un campo `features` inflado a mano nunca llega a
+importar: lo que cuenta es lo que el servidor calculó a partir del claim
+`plan`, que sí verificó firmado.
+
+Consecuencia práctica: activar una licencia por primera vez pide internet.
+Es razonable — se acaba de pagar, hay conexión — y así se comporta el
+checkout de MercadoPago también. Para seguir funcionando días después sin
+red, `estado()` reusa la última confirmación del backend durante
+`_TOLERANCIA_SIN_RED_DIAS`; pasado ese margen sin poder re-confirmar, deja
+de confiar en la caché en vez de creerle a un token indefinidamente.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from plania import config as pconfig
@@ -22,6 +53,16 @@ FEATURES_DEMO = ["copiloto", "erp", "exportes", "rutas"]
 
 _CLAVE_DEMO = "DEMO_INICIO"
 _CLAVE_LICENCIA = "LICENCIA_JWT"
+_CLAVE_CLAIMS = "LICENCIA_CLAIMS"
+_CLAVE_VERIFICADA_EL = "LICENCIA_VERIFICADA_EL"
+
+# Cada cuánto se vuelve a confirmar contra el backend una licencia ya
+# activada (revalidación silenciosa, no vuelve a pedir el token).
+_REVALIDAR_CADA_HORAS = 24
+# Cuánto seguir confiando en la última confirmación si no hay forma de
+# contactar al backend (viaje, oficina sin internet). Pasado esto, una
+# licencia que no se puede reconfirmar deja de darse por buena.
+_TOLERANCIA_SIN_RED_DIAS = 10
 
 # Aceptación de la EULA (LICENSE-EULA.md). Versionada: si el texto cambia de
 # forma sustancial, subir EULA_VERSION vuelve a pedir la aceptación en el
@@ -34,25 +75,78 @@ def _ahora() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _backend_url() -> str:
+    return (os.environ.get("PLANIA_BACKEND_URL")
+            or pconfig.leer_extra("BACKEND_URL") or "http://localhost:8100")
+
+
 def iniciar_demo_si_corresponde() -> None:
     """Se llama en cada arranque: si nunca corrió, deja registrado el inicio."""
     if not pconfig.leer_extra(_CLAVE_DEMO) and not pconfig.leer_extra(_CLAVE_LICENCIA):
         pconfig.guardar_extra(_CLAVE_DEMO, _ahora().isoformat())
 
 
-def activar_licencia(jwt_token: str) -> dict:
-    """Valida el formato y la vigencia del token y lo guarda. La firma la
-    valida el backend en cada consulta de estado online; localmente
-    verificamos expiración y claims para el modo offline."""
-    import jwt as pyjwt
+def _guardar_verificada(token: str, claims: dict) -> None:
+    pconfig.guardar_extra(_CLAVE_LICENCIA, token)
+    pconfig.guardar_extra(_CLAVE_CLAIMS, claims)
+    pconfig.guardar_extra(_CLAVE_VERIFICADA_EL, _ahora().isoformat())
+
+
+def _olvidar_licencia() -> None:
+    pconfig.guardar_extra(_CLAVE_LICENCIA, None)
+    pconfig.guardar_extra(_CLAVE_CLAIMS, None)
+    pconfig.guardar_extra(_CLAVE_VERIFICADA_EL, None)
+
+
+def activar_licencia(jwt_token: str, backend_url: str | None = None,
+                     cliente_http=None) -> dict:
+    """Activa un token consultando `/licencias/estado` en `backend_venta` —
+    el único que tiene el secreto para saber si la firma es genuina.
+
+    `cliente_http` es inyectable (acepta cualquier objeto con `.get(url,
+    headers=..., timeout=...)`, como `requests` o un `TestClient` de
+    Starlette) para poder probar el circuito completo sin sockets reales.
+
+    Devuelve `{"ok": bool, "claims": {...}|None, "error": str|None,
+    "motivo": "rechazada"|"red"|None}`. `motivo` distingue "el backend dijo
+    que no" de "no se pudo preguntar", porque `estado()` reacciona distinto
+    a cada caso.
+    """
+    jwt_token = (jwt_token or "").strip()
+    if jwt_token.count(".") != 2:
+        return {"ok": False, "error": "Eso no es un token de licencia válido.",
+                "motivo": "formato"}
+
+    backend = backend_url if backend_url is not None else _backend_url()
+    cliente = cliente_http
+    if cliente is None:
+        import requests
+        cliente = requests
+
     try:
-        claims = pyjwt.decode(jwt_token, options={"verify_signature": False})
-    except Exception as e:
-        return {"ok": False, "error": f"token inválido: {e}"}
-    if claims.get("exp") and claims["exp"] < _ahora().timestamp():
-        return {"ok": False, "error": "la licencia ya está vencida"}
-    pconfig.guardar_extra(_CLAVE_LICENCIA, jwt_token)
-    return {"ok": True, "claims": claims}
+        kwargs = {"headers": {"Authorization": f"Bearer {jwt_token}"}}
+        # El TestClient de Starlette (usado en los tests) desaconseja pasarle
+        # `timeout` — solo se manda cuando el cliente es `requests` de verdad.
+        if cliente_http is None:
+            kwargs["timeout"] = 15
+        r = cliente.get(f"{backend}/licencias/estado", **kwargs)
+    except Exception:
+        return {"ok": False, "motivo": "red",
+                "error": "No se pudo contactar el servidor de licencias. "
+                         "Probá de nuevo con internet."}
+
+    if r.status_code == 200:
+        claims = r.json()
+        _guardar_verificada(jwt_token, claims)
+        return {"ok": True, "claims": claims, "error": None, "motivo": None}
+
+    detalle = None
+    try:
+        detalle = r.json().get("detail")
+    except Exception:
+        pass
+    return {"ok": False, "claims": None, "motivo": "rechazada",
+            "error": detalle or f"el servidor de licencias respondió {r.status_code}"}
 
 
 def estado() -> dict:
@@ -60,20 +154,48 @@ def estado() -> dict:
     Único punto que consulta la app:
       {"modo": "licencia"|"demo"|"vencida", "features": [...],
        "dias_restantes": int, "plan": str|None, "cliente": str|None}
+
+    `licencia` sale SIEMPRE de la última confirmación del backend (`claims`
+    guardadas por `activar_licencia`), nunca de decodificar el token sin
+    verificar — ver el docstring del módulo.
     """
     token = pconfig.leer_extra(_CLAVE_LICENCIA)
-    if token:
-        import jwt as pyjwt
+    claims = pconfig.leer_extra(_CLAVE_CLAIMS)
+
+    if token and claims:
+        verificada_txt = pconfig.leer_extra(_CLAVE_VERIFICADA_EL)
         try:
-            claims = pyjwt.decode(token, options={"verify_signature": False})
-            exp = datetime.fromtimestamp(claims.get("exp", 0), tz=timezone.utc)
-            if exp > _ahora():
-                return {"modo": "licencia",
-                        "features": claims.get("features", FEATURES_DEMO),
-                        "dias_restantes": (exp - _ahora()).days,
-                        "plan": claims.get("plan"), "cliente": claims.get("sub")}
-        except Exception:
-            pass  # token roto -> cae a demo/vencida
+            verificada = (datetime.fromisoformat(verificada_txt) if verificada_txt
+                         else _ahora())
+        except ValueError:
+            verificada = _ahora()
+
+        vencida_hace = _ahora() - verificada
+        if vencida_hace > timedelta(hours=_REVALIDAR_CADA_HORAS):
+            r = activar_licencia(token)
+            if r["ok"]:
+                claims = r["claims"]
+            elif r.get("motivo") == "rechazada":
+                # El backend dijo explícitamente que ya no vale (vencida,
+                # cancelada): no tiene sentido seguir confiando en la caché.
+                _olvidar_licencia()
+                token, claims = None, None
+            elif vencida_hace > timedelta(days=_TOLERANCIA_SIN_RED_DIAS):
+                # Demasiado tiempo sin poder reconfirmar por red: se deja de
+                # dar por buena en vez de confiar en una caché indefinida.
+                _olvidar_licencia()
+                token, claims = None, None
+            # Si fue un problema de red y todavía está dentro de la
+            # tolerancia, se sigue usando la última confirmación (`claims`
+            # tal como estaba) sin tocarla.
+
+    if token and claims:
+        exp = claims.get("expira")
+        if exp and exp > _ahora().timestamp():
+            return {"modo": "licencia",
+                    "features": claims.get("features", FEATURES_DEMO),
+                    "dias_restantes": int((exp - _ahora().timestamp()) // 86400),
+                    "plan": claims.get("plan"), "cliente": claims.get("cliente")}
 
     inicio_txt = pconfig.leer_extra(_CLAVE_DEMO)
     if inicio_txt:
