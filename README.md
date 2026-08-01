@@ -56,8 +56,32 @@ pip install -r requirements.txt
 python3 data/generate_dataset.py     # base demo: 320 productos, 260 clientes, 12 meses de ventas
 streamlit run app/app.py             # la aplicación (web / la misma que empaqueta el .exe)
 uvicorn backend_venta.app:app --port 8100   # backend de venta (licencias + MercadoPago)
-python3 -m pytest tests/             # 39 tests
 python3 -m plania.verificacion       # verificación end-to-end del producto
+```
+
+## Correr los tests
+
+En una máquina limpia, sin nada instalado más que Python 3.11+ — no hace
+falta preguntarle a nadie qué más hace falta, está todo declarado:
+
+```bash
+pip install -r requirements-dev.txt   # incluye requirements.txt + pytest/coverage
+python3 -m pytest tests/              # 96 tests (101 casos: hay parametrizados)
+```
+
+Dos tests se saltean solos, con motivo explícito, si falta algo opcional que
+no hace falta para correr el producto — no rompen la corrida:
+- **Compilar el protector de código** (`packaging/proteger_codigo.py`,
+  Cython) necesita un compilador de C (`gcc`/`cc`). `Cython` ya está en
+  `requirements-dev.txt`; el compilador es del sistema operativo.
+- **La voz del video** (`imageio_ffmpeg`) es de `sitio/requirements.txt`
+  (herramientas de la web, no del producto) — instalalo aparte si además
+  querés tocar `sitio/doblar_video.py`.
+
+Para medir cobertura:
+
+```bash
+coverage run -m pytest tests/ -q && coverage report -m
 ```
 
 Al primer arranque se activa sola la **demo de 7 días con todo habilitado**.
@@ -124,6 +148,7 @@ Directory* a esa carpeta. No se edita a mano: los textos están en
 `sitio/i18n/{es,en,pt}.json` y la maqueta en `sitio/plantilla.html`.
 
 ```bash
+pip install -r sitio/requirements.txt && playwright install chromium   # una vez
 python3 sitio/build.py              # genera /es/ /en/ /pt/ + redirección por idioma
 python3 sitio/doblar_video.py       # subtítulos de las tres pistas + informe de calce
 python3 sitio/verificar_layout.py   # comprueba que nada se solapa
@@ -142,8 +167,7 @@ Tres decisiones que explican el resto:
   que el timbre es el mismo en las tres versiones.
 
   ```bash
-  pip install chatterbox-tts
-  python3 sitio/doblar_video.py --doblar
+  python3 sitio/doblar_video.py --doblar   # chatterbox-tts ya está en sitio/requirements.txt
   ```
 
   Cada segmento se sintetiza por separado y se coloca en su marca de tiempo,
@@ -201,9 +225,11 @@ sitio/                Fuentes de la web: textos por idioma, plantilla,
                       generador, grabación del video, doblaje y control de
                       maquetación
 web/                  Web pública generada (Vercel): /es/ /en/ /pt/
-tests/                39 tests (conectores, analítica, sugerencias, copiloto,
-                      exportes, rutas, licencias, backend, negocio, contenido,
-                      verificación end-to-end)
+tests/                96 tests (conectores, analítica, sugerencias, copiloto,
+                      exportes, rutas, licencias, backend de venta —
+                      incluidos webhook de pago, checkout, cupo y descarga
+                      del instalador—, negocio, contenido, seguridad web
+                      (XSS, rate limiting), verificación end-to-end)
 ```
 
 ## Construir el programa PC (Windows)

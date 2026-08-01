@@ -20,9 +20,12 @@ import os
 import secrets
 
 import requests
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from backend_venta import descargas, licencias, uso
 from plania import auditoria as pauditoria
@@ -34,6 +37,20 @@ MP_API = "https://api.mercadopago.com"
 app = FastAPI(title="Plania · Backend de venta", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])  # la landing estática llama a /checkout
+
+# ---------------------------------------------------------------------------
+# Rate limiting: TODO endpoint que acepta un pedido HTTP público lo tiene,
+# incluso los que además exigen un token — un token inválido igual gasta CPU
+# validándolo, y "/checkout" y "/gateway/copiloto" además disparan una
+# llamada de pago a una API externa (MercadoPago, Anthropic) que cuesta plata
+# real por golpe. El límite se guarda en memoria del proceso: alcanza porque
+# el Procfile levanta un único proceso uvicorn, no varias réplicas — si el
+# día de mañana se escala horizontalmente, este Limiter necesita un backend
+# compartido (Redis) o cada réplica cuenta aparte y el límite real efectivo
+# se multiplica por la cantidad de réplicas.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -75,14 +92,21 @@ def _chequear_cupo(claims: dict) -> None:
 # 1) Planes y licencias
 # ---------------------------------------------------------------------------
 @app.get("/planes")
-async def planes():
-    """Público: la landing y la app muestran esto (una sola fuente de verdad)."""
+@limiter.limit("60/minute")
+async def planes(request: Request):
+    """Público: la landing y la app muestran esto (una sola fuente de verdad).
+    Catálogo estático sin costo de cómputo real — el límite es generoso, solo
+    para frenar un scraper o un bucle roto, no tráfico normal."""
     return {p: {k: v for k, v in d.items()} for p, d in licencias.PLANES_PUBLICOS.items()}
 
 
 @app.post("/licencias/emitir")
-async def emitir(payload: dict, _admin: None = Depends(requerir_admin)):
-    """Emisión manual (venta directa, soporte, partners) — sin MercadoPago."""
+@limiter.limit("10/minute")
+async def emitir(request: Request, payload: dict, _admin: None = Depends(requerir_admin)):
+    """Emisión manual (venta directa, soporte, partners) — sin MercadoPago.
+    Exige token de admin, pero el límite va antes de esa validación: sin él,
+    alguien puede probar tokens a fuerza bruta tan rápido como su ancho de
+    banda lo permita."""
     cliente_id = str(payload.get("cliente_id") or "").strip()
     plan = str(payload.get("plan") or "starter")
     if not cliente_id:
@@ -95,8 +119,13 @@ async def emitir(payload: dict, _admin: None = Depends(requerir_admin)):
 
 
 @app.post("/licencias/trial")
-async def trial(payload: dict):
-    """Demo 7 días full self-service: solo pide un email. Una por email."""
+@limiter.limit("5/minute")
+async def trial(request: Request, payload: dict):
+    """Demo 7 días full self-service: solo pide un email. Una por email.
+    Es el endpoint más expuesto a abuso — nadie necesita credenciales para
+    llamarlo — así que el límite es el más estricto de los públicos sin
+    auth: alcanza de sobra para un humano probando el formulario y no
+    alcanza para generar licencias en cantidad."""
     email = str(payload.get("email") or "").strip().lower()
     if "@" not in email:
         raise HTTPException(400, "email inválido")
@@ -109,7 +138,8 @@ async def trial(payload: dict):
 
 
 @app.get("/licencias/estado")
-async def estado(claims: dict = Depends(requerir_licencia)):
+@limiter.limit("30/minute")
+async def estado(request: Request, claims: dict = Depends(requerir_licencia)):
     u = uso.uso_mes(claims["sub"])
     return {
         "cliente": claims["sub"], "plan": claims["plan"],
@@ -129,9 +159,12 @@ def _mp_token() -> str:
 
 
 @app.post("/checkout")
-async def checkout(payload: dict):
+@limiter.limit("10/minute")
+async def checkout(request: Request, payload: dict):
     """Crea la preferencia de pago y devuelve el link (init_point). La landing
-    y la pantalla 'Planes' de la app apuntan acá."""
+    y la pantalla 'Planes' de la app apuntan acá. Cada llamada golpea la API
+    de MercadoPago — sin límite, alguien podría hacer que el servidor le
+    generara preferencias de pago sin fin, gratis para el atacante."""
     plan = str(payload.get("plan") or "").strip()
     email = str(payload.get("email") or "").strip().lower()
     if plan not in licencias.PLANES or not licencias.PLANES[plan]["precio"]:
@@ -167,10 +200,19 @@ async def checkout(payload: dict):
 
 
 @app.post("/webhooks/mercadopago")
-async def webhook_mercadopago(payload: dict):
+@limiter.limit("30/minute")
+async def webhook_mercadopago(request: Request, payload: dict):
     """Nunca confiar en el cuerpo del webhook: se re-consulta el pago contra
     la API real de MercadoPago con el Access Token del servidor, y recién con
-    status=approved se emite la licencia."""
+    status=approved se emite la licencia.
+
+    El límite por IP acá es una defensa imperfecta a propósito generosa: el
+    llamante real es MercadoPago, no un usuario, y sus notificaciones pueden
+    salir de varias IPs y reintentar pagos legítimos. Lo que sí evita es que
+    cualquiera en internet — sin ser MercadoPago — haga que el servidor
+    dispare cientos de verificaciones contra la API real por minuto (que es
+    lo que de verdad cuesta acá: no el guardado local, sino el `requests.get`
+    contra MP_API en cada llamada)."""
     if payload.get("type") != "payment":
         return {"ok": True, "ignorado": True}
 
@@ -203,7 +245,16 @@ async def webhook_mercadopago(payload: dict):
 # 3) Gateway medido del Copiloto (los clientes no manejan API keys)
 # ---------------------------------------------------------------------------
 @app.post("/gateway/copiloto")
-async def gateway_copiloto(payload: dict, claims: dict = Depends(requerir_licencia)):
+@limiter.limit("20/minute")
+async def gateway_copiloto(request: Request, payload: dict,
+                           claims: dict = Depends(requerir_licencia)):
+    """El límite por IP es una primera barrera antes de gastar Anthropic; el
+    tope real de negocio (cupo_mensual por plan) lo aplica `_chequear_cupo`
+    más abajo — son dos cosas distintas: esto frena una ráfaga en segundos,
+    aquello frena el consumo a lo largo del mes. Ninguno reemplaza al otro:
+    sin este límite, una licencia válida usada desde un script en loop
+    quema cupo mensual entero en la primera hora, aunque después el mes
+    quede sin servicio para el cliente real."""
     if "copiloto" not in claims.get("features", []):
         raise HTTPException(403, "el plan no incluye el Copiloto IA")
     texto = str(payload.get("texto", ""))[:6000].strip()
@@ -243,7 +294,11 @@ async def gateway_copiloto(payload: dict, claims: dict = Depends(requerir_licenc
 # 4) Descarga del instalador post-pago
 # ---------------------------------------------------------------------------
 @app.get("/descargar/{token}")
-async def descargar(token: str):
+@limiter.limit("20/minute")
+async def descargar(request: Request, token: str):
+    """El token es largo y de un solo uso pensado, pero el límite es defensa
+    en profundidad contra que alguien lo intente adivinar a fuerza bruta en
+    vez de confiar solo en el espacio de valores del token."""
     r = descargas.validar_token_descarga(token)
     if not r["ok"]:
         raise HTTPException(403, r["error"])
@@ -256,5 +311,9 @@ async def descargar(token: str):
 
 
 @app.get("/salud")
-async def salud():
+@limiter.limit("120/minute")
+async def salud(request: Request):
+    """No devuelve nada sensible ni cuesta cómputo, pero se limita igual —
+    "todo endpoint público" no tiene excepción para el que parece inofensivo
+    — con un techo alto para no interferir con un uptime monitor real."""
     return {"ok": True, "servicio": "backend_venta"}

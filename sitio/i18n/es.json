@@ -42,7 +42,7 @@
   "plat_sub": "No es un tablero más. Cada pantalla termina en una decisión concreta, con el porqué en pesos.",
 
   "f1_t": "Se adapta a cualquier ERP",
-  "f1_d": "PostgreSQL, MySQL, SQL Server, Oracle, SQLite o CSV/Excel. Auto-detecta tus columnas aunque se llamen distinto. Sin migrar nada, sin consultores.",
+  "f1_d": "Zureo, Memory, Tango, Bejerman, Odoo, SAP Business One o el PostgreSQL/MySQL/SQL Server/Oracle/SQLite/CSV que ya tengas. Auto-detecta tus columnas aunque se llamen distinto. Sin migrar nada, sin consultores.",
   "f2_t": "Copiloto sobre datos reales",
   "f2_d": "«¿Qué ofertas armo esta semana?» «¿Qué repongo ya?» Responde calculando contra tu base y te muestra la tabla que usó. No inventa números.",
   "f3_t": "Ofertas que liberan capital",

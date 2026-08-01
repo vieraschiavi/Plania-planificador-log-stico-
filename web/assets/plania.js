@@ -18,6 +18,23 @@
   var LANG = window.PLANIA_LANG || "es";
   var BACKEND = window.PLANIA_BACKEND || "";
 
+  // ---------------------------------------------------------------------
+  // Escape explícito para lo poco que se inserta con innerHTML.
+  // ---------------------------------------------------------------------
+  // Todo dato que venga del backend, de una API externa o del usuario y
+  // termine dentro de un innerHTML pasa por acá — sin excepción, sin
+  // "total, esto no lo escribe nadie más que nosotros". La licencia que
+  // devuelve /licencias/trial es un JWT: no debería poder contener HTML,
+  // pero la función no depende de esa promesa del backend para ser segura.
+  // Cubre las cinco entidades peligrosas, no solo "<" (que es lo mínimo
+  // para no poder cerrar el <textarea> antes de tiempo, pero deja pasar
+  // "&" y las comillas, que rompen atributos si el HTML de alrededor
+  // cambia el día de mañana).
+  function escaparHtml(valor) {
+    var mapa = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    return String(valor).replace(/[&<>"']/g, function (c) { return mapa[c]; });
+  }
+
   var TXT = {
     es: {
       sinBackend: "Escribinos a ventas@plania.uy y te enviamos la licencia de prueba en el día.",
@@ -144,7 +161,7 @@
       }).then(function (res) {
         if (res.ok) {
           msg.innerHTML = t.demoOk + '<br><textarea readonly rows="3" style="width:100%;margin-top:8px">' +
-            String(res.d.licencia).replace(/</g, "&lt;") + "</textarea>";
+            escaparHtml(res.d.licencia) + "</textarea>";
         } else if (res.status === 409) {
           msg.textContent = t.demoRepetida;
         } else {

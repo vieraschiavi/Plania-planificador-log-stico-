@@ -42,7 +42,7 @@
   "plat_sub": "Não é mais um painel. Cada tela termina em uma decisão concreta, com o porquê em dinheiro.",
 
   "f1_t": "Adapta-se a qualquer ERP",
-  "f1_d": "PostgreSQL, MySQL, SQL Server, Oracle, SQLite ou CSV/Excel. Detecta suas colunas mesmo com nomes diferentes. Sem migrar nada, sem consultores.",
+  "f1_d": "Zureo, Memory, Tango, Bejerman, Odoo, SAP Business One ou o PostgreSQL/MySQL/SQL Server/Oracle/SQLite/CSV que você já usa. Detecta suas colunas mesmo com nomes diferentes. Sem migrar nada, sem consultores.",
   "f2_t": "Copiloto sobre dados reais",
   "f2_d": "«Que ofertas eu monto esta semana?» «O que reponho hoje?» Ele responde calculando na sua base e mostra a tabela que usou. Não inventa números.",
   "f3_t": "Ofertas que liberam capital",
