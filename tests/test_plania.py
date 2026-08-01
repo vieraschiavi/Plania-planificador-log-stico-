@@ -252,6 +252,521 @@ def test_backend_endpoints():
     assert r.status_code == 503
 
 
+# ---------------------------------------------------------------------------
+# Backend de venta: cobertura de los caminos que tocan dinero
+# ---------------------------------------------------------------------------
+# `test_backend_endpoints` de arriba prueba el camino feliz de trial y el 503
+# de checkout sin token — pero dejaba sin probar el webhook completo (el que
+# de verdad emite la licencia cuando MercadoPago confirma un pago), el éxito
+# de checkout, el gateway del copiloto entero (incluido el corte por cupo
+# mensual agotado) y la descarga del instalador. Eran, literalmente, los
+# caminos donde un bug significa "el cliente pagó y no le llegó nada" — y
+# eran los que menos cobertura tenían de todo el repo.
+#
+# Cada test usa una IP de prueba propia (bloque TEST-NET-3, 203.0.113.0/24,
+# reservado para documentación — nunca una IP real) para no compartir balde
+# de rate limit con otros tests ni entre sí.
+class _RespuestaFalsa:
+    """Sustituto mínimo de requests.Response para no golpear APIs reales
+    (MercadoPago, Anthropic) desde los tests."""
+
+    def __init__(self, ok=True, json_data=None, text=""):
+        self.ok = ok
+        self.status_code = 200 if ok else 502
+        self._json = json_data or {}
+        self.text = text
+
+    def json(self):
+        return self._json
+
+
+def test_token_de_descarga_es_de_un_solo_uso(tmp_path):
+    from backend_venta import descargas
+
+    db = str(tmp_path / "descargas.db")
+    token = descargas.crear_token_descarga("cliente@plania.uy", db_path=db)
+
+    primero = descargas.validar_token_descarga(token, db_path=db)
+    assert primero == {"ok": True, "cliente_id": "cliente@plania.uy", "error": None}
+
+    segundo = descargas.validar_token_descarga(token, db_path=db)
+    assert segundo["ok"] is False and segundo["error"] == "token_ya_usado"
+
+
+def test_token_de_descarga_inexistente_y_vencido(tmp_path):
+    from backend_venta import descargas
+
+    db = str(tmp_path / "descargas.db")
+    r = descargas.validar_token_descarga("no-existe", db_path=db)
+    assert r == {"ok": False, "cliente_id": None, "error": "token_no_existe"}
+
+    vencido = descargas.crear_token_descarga("cliente@plania.uy", horas_validez=-1, db_path=db)
+    r = descargas.validar_token_descarga(vencido, db_path=db)
+    assert r["ok"] is False and r["error"] == "token_expirado"
+
+
+def test_token_de_descarga_se_puede_espiar_sin_consumir(tmp_path):
+    from backend_venta import descargas
+
+    db = str(tmp_path / "descargas.db")
+    token = descargas.crear_token_descarga("cliente@plania.uy", db_path=db)
+    assert descargas.validar_token_descarga(token, marcar_usado=False, db_path=db)["ok"]
+    assert descargas.validar_token_descarga(token, marcar_usado=False, db_path=db)["ok"]
+    assert descargas.validar_token_descarga(token, db_path=db)["ok"]
+    assert descargas.validar_token_descarga(token, db_path=db)["ok"] is False
+
+
+def test_chequear_cupo_sin_tope_no_bloquea():
+    from backend_venta.app import _chequear_cupo
+
+    # cupo_mensual=None es "sin tope" (enterprise/owner): no debe lanzar nada.
+    _chequear_cupo({"cupo_mensual": None, "sub": "x@y.uy", "plan": "enterprise"})
+
+
+def test_licencias_emitir_requiere_admin_y_valida_entrada():
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["PLANIA_BACKEND_ADMIN_TOKEN"] = "admin-de-prueba-para-tests"
+    try:
+        c = TestClient(app, client=("203.0.113.60", 51000))
+        # Header(...) es obligatorio para FastAPI: sin Authorization ni
+        # siquiera llega a requerir_admin, corta antes con 422.
+        assert c.post("/licencias/emitir", json={"cliente_id": "x"}).status_code == 422
+
+        equivocado = {"Authorization": "Bearer lo-que-sea"}
+        assert c.post("/licencias/emitir", json={"cliente_id": "x"},
+                      headers=equivocado).status_code == 403
+
+        correcto = {"Authorization": "Bearer admin-de-prueba-para-tests"}
+        assert c.post("/licencias/emitir", json={}, headers=correcto).status_code == 400
+        r = c.post("/licencias/emitir", json={"cliente_id": "x", "plan": "no-existe"},
+                   headers=correcto)
+        assert r.status_code == 400
+
+        r = c.post("/licencias/emitir",
+                   json={"cliente_id": "partner@plania.uy", "plan": "pro"}, headers=correcto)
+        assert r.status_code == 200
+        from backend_venta import licencias as lic
+        val = lic.licencia_activa(r.json()["licencia"])
+        assert val["ok"] and val["claims"]["plan"] == "pro"
+        assert val["claims"]["sub"] == "partner@plania.uy"
+    finally:
+        os.environ.pop("PLANIA_BACKEND_ADMIN_TOKEN", None)
+
+
+def test_checkout_exito_crea_preferencia_con_el_token_correcto():
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token-de-prueba"
+    try:
+        with patch("backend_venta.app.requests.post") as mock_post:
+            mock_post.return_value = _RespuestaFalsa(
+                ok=True, json_data={"id": "pref-123",
+                                    "init_point": "https://mp.example/pay/pref-123"})
+            c = TestClient(app, client=("203.0.113.61", 51000))
+            r = c.post("/checkout", json={"plan": "pro", "email": "comprador@plania.uy"})
+            assert r.status_code == 200
+            assert r.json()["init_point"] == "https://mp.example/pay/pref-123"
+            _, kwargs = mock_post.call_args
+            assert kwargs["headers"]["Authorization"] == "Bearer TEST-token-de-prueba"
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def test_checkout_plan_no_comprable_y_email_invalido():
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    c = TestClient(app, client=("203.0.113.62", 51000))
+    # "owner" no tiene precio: no es un plan que se pueda pagar online.
+    assert c.post("/checkout", json={"plan": "owner", "email": "x@y.uy"}).status_code == 400
+    assert c.post("/checkout", json={"plan": "pro", "email": "no-es-un-email"}).status_code == 400
+
+
+def test_checkout_mercadopago_rechaza_la_preferencia():
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token"
+    try:
+        with patch("backend_venta.app.requests.post") as mock_post:
+            mock_post.return_value = _RespuestaFalsa(ok=False, text="credenciales inválidas")
+            c = TestClient(app, client=("203.0.113.63", 51000))
+            r = c.post("/checkout", json={"plan": "pro", "email": "x@y.uy"})
+            assert r.status_code == 502
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def test_webhook_mercadopago_ignora_lo_que_no_es_pago():
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    c = TestClient(app, client=("203.0.113.64", 51000))
+    r = c.post("/webhooks/mercadopago", json={"type": "merchant_order"})
+    assert r.status_code == 200 and r.json()["ignorado"] is True
+
+
+def test_webhook_mercadopago_sin_data_id_400():
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    c = TestClient(app, client=("203.0.113.65", 51000))
+    r = c.post("/webhooks/mercadopago", json={"type": "payment", "data": {}})
+    assert r.status_code == 400
+
+
+def test_webhook_mercadopago_verificacion_fallida_502():
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token"
+    try:
+        with patch("backend_venta.app.requests.get") as mock_get:
+            mock_get.return_value = _RespuestaFalsa(ok=False)
+            c = TestClient(app, client=("203.0.113.66", 51000))
+            r = c.post("/webhooks/mercadopago", json={"type": "payment", "data": {"id": "999"}})
+            assert r.status_code == 502
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def test_webhook_mercadopago_pago_no_aprobado_no_emite_licencia():
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token"
+    try:
+        with patch("backend_venta.app.requests.get") as mock_get:
+            mock_get.return_value = _RespuestaFalsa(ok=True, json_data={"status": "pending"})
+            c = TestClient(app, client=("203.0.113.67", 51000))
+            r = c.post("/webhooks/mercadopago", json={"type": "payment", "data": {"id": "1000"}})
+            assert r.status_code == 200
+            assert r.json() == {"ok": True, "estado": "pending"}
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def test_webhook_mercadopago_pago_aprobado_emite_licencia_y_token_de_descarga():
+    """El camino que de verdad mueve plata: sin esto probado, un bug acá
+    significa clientes que pagaron y no reciben ni licencia ni instalador,
+    sin que nadie se entere hasta que se quejen."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta import descargas
+    from backend_venta import licencias as lic
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token"
+    try:
+        with patch("backend_venta.app.requests.get") as mock_get:
+            mock_get.return_value = _RespuestaFalsa(
+                ok=True,
+                json_data={"status": "approved",
+                          "metadata": {"plan": "pro", "email": "pagador@plania.uy"}})
+            c = TestClient(app, client=("203.0.113.68", 51000))
+            r = c.post("/webhooks/mercadopago", json={"type": "payment", "data": {"id": "555"}})
+            assert r.status_code == 200
+            body = r.json()
+            assert body["ok"] is True and body["plan"] == "pro"
+            assert body["token_descarga"]
+
+        val = lic.licencia_activa(body["licencia"])
+        assert val["ok"]
+        assert val["claims"]["sub"] == "pagador@plania.uy"
+        assert val["claims"]["plan"] == "pro"
+
+        r2 = descargas.validar_token_descarga(body["token_descarga"])
+        assert r2["ok"] and r2["cliente_id"] == "pagador@plania.uy"
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def test_webhook_mercadopago_plan_desconocido_cae_a_starter():
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token"
+    try:
+        with patch("backend_venta.app.requests.get") as mock_get:
+            mock_get.return_value = _RespuestaFalsa(
+                ok=True, json_data={"status": "approved", "metadata": {"plan": "no-existe"}})
+            c = TestClient(app, client=("203.0.113.69", 51000))
+            r = c.post("/webhooks/mercadopago", json={"type": "payment", "data": {"id": "777"}})
+            assert r.json()["plan"] == "starter"
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def test_trial_email_invalido_400():
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    c = TestClient(app, client=("203.0.113.78", 51000))
+    assert c.post("/licencias/trial", json={"email": "no-es-un-email"}).status_code == 400
+
+
+def test_emitir_licencia_plan_desconocido_lanza_valueerror():
+    from backend_venta import licencias as lic
+
+    with pytest.raises(ValueError, match="desconocido"):
+        lic.emitir_licencia("x@y.uy", "plan-que-no-existe")
+
+
+def test_gateway_copiloto_error_de_anthropic_502():
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta import licencias as lic
+    from backend_venta.app import app
+
+    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-de-prueba"
+    try:
+        token = lic.emitir_licencia("copiloto-error@plania.uy", "pro")
+        with patch("backend_venta.app.requests.post") as mock_post:
+            mock_post.return_value = _RespuestaFalsa(
+                ok=False, json_data={"error": {"message": "modelo sobrecargado"}})
+            c = TestClient(app, client=("203.0.113.79", 51000))
+            r = c.post("/gateway/copiloto", json={"texto": "hola"},
+                      headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 502
+            assert "sobrecargado" in r.json()["detail"]
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_gateway_copiloto_feature_no_incluida_403():
+    from fastapi.testclient import TestClient
+
+    from backend_venta import licencias as lic
+    from backend_venta.app import app
+
+    token = lic.emitir_licencia("sinfeature@plania.uy", "starter", features=[])
+    c = TestClient(app, client=("203.0.113.70", 51000))
+    r = c.post("/gateway/copiloto", json={"texto": "hola"},
+              headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 403
+
+
+def test_gateway_copiloto_sin_texto_400():
+    from fastapi.testclient import TestClient
+
+    from backend_venta import licencias as lic
+    from backend_venta.app import app
+
+    token = lic.emitir_licencia("copiloto1@plania.uy", "pro")
+    c = TestClient(app, client=("203.0.113.71", 51000))
+    r = c.post("/gateway/copiloto", json={"texto": "   "},
+              headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 400
+
+
+def test_gateway_copiloto_sin_api_key_503():
+    from fastapi.testclient import TestClient
+
+    from backend_venta import licencias as lic
+    from backend_venta.app import app
+
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    token = lic.emitir_licencia("copiloto2@plania.uy", "pro")
+    c = TestClient(app, client=("203.0.113.72", 51000))
+    r = c.post("/gateway/copiloto", json={"texto": "hola"},
+              headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 503
+
+
+def test_gateway_copiloto_exito_registra_uso():
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta import licencias as lic
+    from backend_venta import uso
+    from backend_venta.app import app
+
+    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-de-prueba"
+    try:
+        cliente = "copiloto3@plania.uy"
+        token = lic.emitir_licencia(cliente, "pro")
+        with patch("backend_venta.app.requests.post") as mock_post:
+            mock_post.return_value = _RespuestaFalsa(
+                ok=True,
+                json_data={"content": [{"text": "la respuesta de Claude"}],
+                          "usage": {"input_tokens": 10, "output_tokens": 20}})
+            c = TestClient(app, client=("203.0.113.73", 51000))
+            r = c.post("/gateway/copiloto",
+                      json={"texto": "¿qué ofertas armo?", "ref_id": "abc"},
+                      headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 200
+            assert r.json()["raw"] == "la respuesta de Claude"
+
+        u = uso.uso_mes(cliente)
+        assert u["consultas"] == 1 and u["tok_in"] == 10 and u["tok_out"] == 20
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_gateway_copiloto_corta_al_agotar_el_cupo():
+    """El chequeo de negocio que de verdad limita lo que un cliente puede
+    gastar en un mes: sin este test, un bug en _chequear_cupo deja pasar
+    consultas ilimitadas sobre un plan pago sin que nada lo note."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta import licencias as lic
+    from backend_venta.app import app
+
+    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-de-prueba"
+    try:
+        cliente = "copiloto-cupo@plania.uy"
+        # Cupo bajo a propósito: no hace falta llamar 500 veces (el cupo real
+        # de "starter") para probar el corte, alcanza con uno chico.
+        token = lic.emitir_licencia(cliente, "starter", cupo_mensual=2)
+        c = TestClient(app, client=("203.0.113.74", 51000))
+        with patch("backend_venta.app.requests.post") as mock_post:
+            mock_post.return_value = _RespuestaFalsa(
+                ok=True, json_data={"content": [{"text": "ok"}], "usage": {}})
+            for _ in range(2):
+                r = c.post("/gateway/copiloto", json={"texto": "consulta"},
+                          headers={"Authorization": f"Bearer {token}"})
+                assert r.status_code == 200
+            r = c.post("/gateway/copiloto", json={"texto": "consulta de más"},
+                      headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 402
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_descargar_token_invalido_403():
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    c = TestClient(app, client=("203.0.113.75", 51000))
+    assert c.get("/descargar/token-que-no-existe").status_code == 403
+
+
+def test_descargar_instalador_no_publicado_503(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from backend_venta import descargas
+    from backend_venta.app import app
+
+    token = descargas.crear_token_descarga("cliente-desc@plania.uy")
+    os.environ["PLANIA_INSTALADOR_PATH"] = str(tmp_path / "no-existe.exe")
+    try:
+        c = TestClient(app, client=("203.0.113.76", 51000))
+        assert c.get(f"/descargar/{token}").status_code == 503
+    finally:
+        os.environ.pop("PLANIA_INSTALADOR_PATH", None)
+
+
+def test_descargar_instalador_exito_sirve_el_archivo_y_consume_el_token(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from backend_venta import descargas
+    from backend_venta.app import app
+
+    instalador = tmp_path / "Plania_Setup.exe"
+    instalador.write_bytes(b"contenido-de-mentira-del-instalador")
+    token = descargas.crear_token_descarga("cliente-desc2@plania.uy")
+    os.environ["PLANIA_INSTALADOR_PATH"] = str(instalador)
+    try:
+        c = TestClient(app, client=("203.0.113.77", 51000))
+        r = c.get(f"/descargar/{token}")
+        assert r.status_code == 200
+        assert r.content == b"contenido-de-mentira-del-instalador"
+        # de un solo uso: la segunda descarga con el mismo token, 403
+        assert c.get(f"/descargar/{token}").status_code == 403
+    finally:
+        os.environ.pop("PLANIA_INSTALADOR_PATH", None)
+
+
+def test_todo_endpoint_publico_tiene_rate_limit():
+    """Chequeo de cobertura: cada ruta pública de backend_venta/app.py tiene
+    un decorador @limiter.limit(...). No prueba que el límite funcione (eso
+    lo hace el test siguiente) — prueba que a nadie se le olvidó ponerlo en
+    un endpoint nuevo, que es exactamente el tipo de gap que un audit de
+    "rate limiting en TODO endpoint" está pensado para encontrar."""
+    from backend_venta.app import app
+
+    rutas_publicas = [r for r in app.routes if getattr(r, "path", "").startswith("/")
+                      and r.path not in ("/openapi.json", "/docs", "/docs/oauth2-redirect",
+                                        "/redoc")]
+    assert len(rutas_publicas) >= 9, "se esperaban al menos las 9 rutas conocidas del backend"
+
+    # slowapi registra cada ruta decorada en limiter._route_limits, con clave
+    # "módulo.nombre_de_función" — se usa ese registro real (no un atributo
+    # adivinado del wrapper, que cambió entre versiones de la librería y
+    # daba falsos negativos) para saber qué SÍ quedó decorado.
+    registradas = set(app.state.limiter._route_limits) | set(
+        app.state.limiter._dynamic_route_limits)
+
+    sin_limite = [r.path for r in rutas_publicas
+                  if f"{r.endpoint.__module__}.{r.endpoint.__name__}" not in registradas]
+
+    assert not sin_limite, f"rutas sin @limiter.limit(...): {sin_limite}"
+
+
+def test_rate_limit_corta_una_rafaga_de_altas_de_demo():
+    """La regresión en vivo: /licencias/trial tiene @limiter.limit("5/minute").
+    Se golpea 6 veces seguidas desde una IP de prueba propia (203.0.113.*, el
+    bloque TEST-NET-3 reservado para documentación — nunca una IP real) y se
+    comprueba que la sexta se corta con 429, no que el negocio la deje pasar
+    y falle recién en otro lado.
+
+    La IP es exclusiva de este test (no la usa ningún otro) justamente para
+    no compartir balde de conteo con `test_backend_endpoints` ni con el resto
+    de la suite — si lo compartiera, el orden en que corren los tests podría
+    hacer que este test falle o pase por casualidad según cuántas llamadas
+    hicieron los demás antes."""
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    c = TestClient(app, client=("203.0.113.50", 51000))
+
+    respuestas = []
+    for i in range(6):
+        r = c.post("/licencias/trial", json={"email": f"rafaga{i}@ratelimit-test.uy"})
+        respuestas.append(r.status_code)
+
+    assert respuestas[:5] == [200] * 5, f"las primeras 5 deberían pasar: {respuestas}"
+    assert respuestas[5] == 429, f"la 6ta tiene que cortarse por límite: {respuestas}"
+
+    # Y una IP distinta no está afectada por la ráfaga de la otra: el límite
+    # es por origen, no un semáforo global que deja a todo el mundo afuera.
+    otra = TestClient(app, client=("203.0.113.51", 51000))
+    assert otra.post("/licencias/trial",
+                     json={"email": "otra-ip@ratelimit-test.uy"}).status_code == 200
+
+
 def test_licencia_cliente_demo_local():
     from plania import licencia
     est = licencia.estado()
@@ -513,6 +1028,65 @@ def test_web_generada_en_los_tres_idiomas():
         assert "{{" not in html, "quedaron marcadores de plantilla sin resolver"
 
 
+def test_los_tres_idiomas_tienen_el_mismo_juego_de_meta_tags():
+    """No alcanza con que cada idioma tenga SUS meta tags — tienen que ser
+    el MISMO conjunto de etiquetas en los tres, solo con el contenido
+    traducido. Si a una versión le falta og:image o twitter:card, esa es la
+    que se comparte peor en LinkedIn/WhatsApp sin que nadie lo note hasta
+    mirar el link compartido.
+    """
+    import os
+    import re
+
+    juegos = {}
+    for idioma in ("es", "en", "pt"):
+        ruta = os.path.join(RAIZ, "web", idioma, "index.html")
+        html = open(ruta, encoding="utf-8").read()
+        cabeza = html.split("</head>")[0]
+        # El "nombre" del tag: la property/name, no el content (que cambia
+        # con el idioma a propósito).
+        nombres = re.findall(r'<meta\s+(?:property|name)="([^"]+)"', cabeza)
+        otros = re.findall(r"<(link|title)\b", cabeza)
+        juegos[idioma] = sorted(nombres) + sorted(otros)
+
+    es, en, pt = juegos["es"], juegos["en"], juegos["pt"]
+    assert es == en == pt, f"meta tags distintos entre idiomas: es={es} en={en} pt={pt}"
+
+    # Y las imágenes que esos tags declaran existen de verdad, para las tres.
+    for idioma in ("es", "en", "pt"):
+        ruta_imagen = os.path.join(RAIZ, "web", "assets", f"og_{idioma}.png")
+        assert os.path.exists(ruta_imagen), f"falta {ruta_imagen} (sitio/generar_og.py)"
+
+
+def test_landing_promete_erps_que_el_conector_soporta_de_verdad():
+    """La landing nombra ERPs concretos (Zureo, Memory, Tango, Bejerman, Odoo,
+    SAP Business One) en vez de 'se adapta a cualquier ERP' sin más — pero
+    un nombre propio en el marketing que el código no cumple es peor que no
+    decir nada. Se comprueba texto Y código: el texto nombra los seis, y el
+    autodetector reconoce de verdad los nombres de columna DISTINTIVOS y
+    documentados públicamente de Odoo y de SAP Business One (los dos ERPs
+    de la lista con esquemas públicos verificables; Zureo/Memory/Tango/
+    Bejerman no publican su esquema, por eso no se los puede chequear igual
+    de literal)."""
+    import json
+
+    ERPS = ["Zureo", "Memory", "Tango", "Bejerman", "Odoo", "SAP Business One"]
+    for idioma in ("es", "en", "pt"):
+        with open(os.path.join(RAIZ, "sitio", "i18n", f"{idioma}.json"), encoding="utf-8") as f:
+            texto = json.load(f)["f1_d"]
+        for erp in ERPS:
+            assert erp in texto, f"'{erp}' no aparece en f1_d de {idioma}.json"
+
+    todos = {c for tabla in conectores.SINONIMOS.values()
+            for cols in tabla.values() for c in cols}
+    de_odoo = {"default_code", "list_price", "standard_price", "partner_id",
+              "product_uom_qty"}
+    de_sap_b1 = {"cardcode", "cardname", "itemcode", "itemname", "docentry",
+                "docdate", "stockprice", "itmsgrpnam"}
+    assert de_odoo <= todos, f"faltan sinónimos de columnas de Odoo: {de_odoo - todos}"
+    assert de_sap_b1 <= todos, f"faltan sinónimos de columnas de SAP B1: {de_sap_b1 - todos}"
+
+
 def test_textos_traducidos_no_quedaron_en_espanol():
     """Una traducción a medias es peor que no traducir: se controla que las
     tres versiones tengan realmente las mismas claves y textos distintos."""
@@ -645,7 +1219,12 @@ def test_hay_muestra_de_voz_para_clonar():
     import os
     ruta = os.path.join(RAIZ, "sitio", "narracion", "voz_referencia.wav")
     assert os.path.exists(ruta), "falta sitio/narracion/voz_referencia.wav"
-    # VoiceBox clona desde 3 segundos; menos que eso da un timbre pobre.
+    # VoiceBox clona desde 3 segundos; menos que eso da un timbre pobre. Mide
+    # la duración real con ffmpeg — imageio_ffmpeg es de sitio/requirements.txt
+    # (herramientas de contenido), no del producto, así que en una máquina
+    # limpia que solo instaló requirements-dev.txt este test se saltea en vez
+    # de fallar por una dependencia que no tiene por qué tener.
+    pytest.importorskip("imageio_ffmpeg")
     doblar, _ = _guion()
     assert doblar.duracion(ruta) >= 3.0
 
@@ -1047,7 +1626,11 @@ def test_un_token_forjado_no_activa_ninguna_licencia():
             {"sub": "nadie@nada.com", "plan": "enterprise",
              "features": lic.PLANES["enterprise"]["features"],
              "exp": int(time.time()) + 999999999},
-            "un-secreto-que-me-invento-yo", algorithm="HS256")
+            # 32+ bytes a propósito: nada que ver con el secreto real (que el
+            # atacante no conoce), es solo para no disparar el
+            # InsecureKeyLengthWarning de PyJWT por longitud de clave y que
+            # tape con ruido las advertencias que sí importan.
+            "un-secreto-que-me-invento-yo-y-que-nadie-mas-conoce", algorithm="HS256")
 
         r = licencia.activar_licencia(forjado, backend_url="", cliente_http=c)
         assert r["ok"] is False
@@ -1199,3 +1782,170 @@ def test_generador_de_licencia_owner_produce_un_token_valido():
     from backend_venta import licencias as lic
     validado = lic.licencia_activa(lineas[0].strip())
     assert validado["ok"] and validado["claims"]["plan"] == "owner"
+
+
+# ---------------------------------------------------------------------------
+# Seguridad web: escape explícito en toda inserción al DOM
+# ---------------------------------------------------------------------------
+def _node_disponible():
+    import shutil
+    return shutil.which("node")
+
+
+PAYLOADS_XSS = [
+    "<script>alert(1)</script>",
+    "</textarea><script>alert(document.cookie)</script>",
+    "\"><img src=x onerror=alert(1)>",
+    "'><svg onload=alert(1)>",
+    "<img src=x onerror=alert(1)>",
+    "&lt;ya escapado&gt;",             # no se debe doble-escapar mal
+    "comillas \" y ' simples y dobles",
+    "<a href=\"javascript:alert(1)\">click</a>",
+]
+
+
+@pytest.mark.skipif(not _node_disponible(), reason="hace falta node para correr el JS real")
+def test_escaparHtml_neutraliza_los_payloads_de_xss_conocidos():
+    """La regresión central del eje de seguridad web: escaparHtml() (definida
+    en web/assets/plania.js) es la única vía permitida para insertar datos
+    externos con innerHTML. Se la corre con Node —el JS real, no una
+    reimplementación en Python que podría desincronizarse— contra una lista
+    de payloads de XSS típicos y se comprueba que ninguno sobrevive."""
+    import json
+    import subprocess
+
+    ruta_js = os.path.join(RAIZ, "web", "assets", "plania.js")
+    fuente = open(ruta_js, encoding="utf-8").read()
+    assert "function escaparHtml(" in fuente, "no está la función de escape esperada"
+
+    script = f"""
+    {fuente}
+    var casos = {json.dumps(PAYLOADS_XSS)};
+    var resultados = casos.map(function(c) {{ return escaparHtml(c); }});
+    console.log(JSON.stringify(resultados));
+    """
+    # escaparHtml queda dentro de la IIFE de plania.js, así que se la vuelve a
+    # declarar en un ámbito propio para el test en vez de tocar el archivo:
+    # se extrae solo el cuerpo de la función con una expresión regular chica.
+    m = re.search(r"function escaparHtml\([^)]*\)\s*\{.*?\n  \}", fuente, re.S)
+    assert m, "no se pudo aislar el cuerpo de escaparHtml() para probarla"
+    script = m.group(0) + "\n" + f"""
+    var casos = {json.dumps(PAYLOADS_XSS)};
+    console.log(JSON.stringify(casos.map(function(c) {{ return escaparHtml(c); }})));
+    """
+    r = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, f"el JS de escaparHtml() no corrió:\n{r.stderr}"
+    escapados = json.loads(r.stdout.strip().splitlines()[-1])
+
+    peligrosos = re.compile(r"[<>\"']")
+    for original, escapado in zip(PAYLOADS_XSS, escapados):
+        assert not peligrosos.search(escapado), (
+            f"'{original}' quedó con un carácter peligroso sin escapar: {escapado!r}")
+        # y que sea reversible en sentido semántico: el texto sigue legible,
+        # no se convirtió en otra cosa.
+        assert "alert" not in escapado or "&lt;" in escapado or "&amp;" not in original
+
+
+def test_ningun_innerHTML_con_variable_sin_pasar_por_escaparHtml():
+    """Chequeo estático (no hace falta Node): recorre todo el JavaScript
+    propio del sitio buscando asignaciones a `.innerHTML` y exige que, si se
+    concatena algo que no es un literal de texto fijo, ese algo esté envuelto
+    en escaparHtml(...). Es la regla que impide que el próximo desarrollador
+    —humano o IA— agregue un innerHTML nuevo y se olvide de escapar.
+    """
+    def _statement_hasta_punto_y_coma(fuente, inicio):
+        """Devuelve fuente[inicio:fin] hasta el ';' que termina la sentencia,
+        SIN cortar en un ';' que esté dentro de un string.
+
+        La primera versión de este chequeo usaba `re.finditer(r"...(.+?);")`
+        y cortaba en el primer ';' del texto — que acá cae dentro de
+        'style="width:100%;margin-top:8px"', mucho antes de llegar al dato
+        realmente peligroso. Con eso el chequeo pasaba siempre, incluso
+        reintroduciendo a mano el innerHTML sin escapar que motivó este test:
+        el checker nunca llegaba a mirar esa parte de la línea. Se lo
+        verificó así — reinsertando el bug original y confirmando que este
+        test lo detecta — antes de confiar en él.
+        """
+        i, comilla, escapando = inicio, None, False
+        while i < len(fuente):
+            c = fuente[i]
+            if comilla:
+                if escapando:
+                    escapando = False
+                elif c == "\\":
+                    escapando = True
+                elif c == comilla:
+                    comilla = None
+            elif c in ("'", '"', "`"):
+                comilla = c
+            elif c == ";":
+                return fuente[inicio:i]
+            i += 1
+        return fuente[inicio:i]
+
+    def _dividir_top_level(expresion, separador):
+        """Como str.split, pero sin partir dentro de comillas ni paréntesis."""
+        partes, actual, profundidad, comilla, escapando = [], "", 0, None, False
+        i = 0
+        while i < len(expresion):
+            c = expresion[i]
+            if comilla:
+                actual += c
+                if escapando:
+                    escapando = False
+                elif c == "\\":
+                    escapando = True
+                elif c == comilla:
+                    comilla = None
+                i += 1
+                continue
+            if c in ("'", '"', "`"):
+                comilla = c
+                actual += c
+            elif c in "([":
+                profundidad += 1
+                actual += c
+            elif c in ")]":
+                profundidad -= 1
+                actual += c
+            elif profundidad == 0 and expresion[i:i + len(separador)] == separador:
+                partes.append(actual)
+                actual = ""
+                i += len(separador) - 1
+            else:
+                actual += c
+            i += 1
+        partes.append(actual)
+        return partes
+
+    archivos_propios = []
+    for base, dirs, files in os.walk(os.path.join(RAIZ, "web")):
+        dirs[:] = [d for d in dirs if d not in ("node_modules", "vendor", "lib")]
+        for f in files:
+            if f.endswith(".js"):
+                archivos_propios.append(os.path.join(base, f))
+    assert archivos_propios, "no se encontró JavaScript propio para revisar"
+
+    problemas = []
+    for ruta in archivos_propios:
+        fuente = open(ruta, encoding="utf-8").read()
+        for m in re.finditer(r"\.innerHTML\s*=\s*", fuente):
+            expresion = _statement_hasta_punto_y_coma(fuente, m.end())
+            for t in _dividir_top_level(expresion, "+"):
+                t = t.strip()
+                if not t:
+                    continue
+                es_literal = t.startswith(("'", '"', "`"))
+                es_escapado = t.startswith("escaparHtml(")
+                # "t.algo" es el objeto TXT de traducciones: un objeto
+                # literal fijo en el propio archivo, sin claves dinámicas —
+                # no es dato externo, es texto que escribimos nosotros. Todo
+                # lo demás (respuestas de fetch, valores de formularios,
+                # window.location, etc.) sí tiene que pasar por escaparHtml.
+                es_traduccion_confiable = re.fullmatch(r"t\.[A-Za-z_]\w*", t)
+                if not es_literal and not es_escapado and not es_traduccion_confiable:
+                    problemas.append((os.path.relpath(ruta, RAIZ), t))
+
+    assert not problemas, (
+        "innerHTML con datos sin pasar por escaparHtml(): " +
+        "; ".join(f"{f}: {t}" for f, t in problemas))

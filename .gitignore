@@ -28,3 +28,4 @@ sitio/capturas/
 # Doblajes con segmentos que se pisan: se escriben aparte para poder
 # escucharlos, nunca reemplazan al video publicado.
 web/assets/video/*.REVISAR.mp4
+.coverage

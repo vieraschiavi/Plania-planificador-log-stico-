@@ -1,0 +1,10 @@
+# Herramientas para generar la web pública y su video — no son dependencias
+# del producto (Plania no las necesita para correr), por eso viven acá
+# separadas y no en el requirements.txt de la raíz.
+#
+#   pip install -r sitio/requirements.txt
+#   playwright install chromium     # deja el navegador que graban graban_demo.py y verificar_layout.py
+
+playwright>=1.40          # graba el demo real y mide que la web no se solape
+imageio-ffmpeg>=0.5       # ffmpeg embebido: recorta/muxea el video, mide duración de audio
+chatterbox-tts>=0.1.7     # clona la voz para el doblaje (sitio/doblar_video.py --motor local); pesado (PyTorch) — opcional si no vas a doblar

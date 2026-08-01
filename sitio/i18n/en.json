@@ -42,7 +42,7 @@
   "plat_sub": "This is not one more dashboard. Every screen ends in a concrete decision, with the reasoning in money.",
 
   "f1_t": "Fits any ERP you run",
-  "f1_d": "PostgreSQL, MySQL, SQL Server, Oracle, SQLite or CSV/Excel. It auto-detects your columns even when they are named differently. No migration, no consultants.",
+  "f1_d": "Zureo, Memory, Tango, Bejerman, Odoo, SAP Business One, or whatever PostgreSQL/MySQL/SQL Server/Oracle/SQLite/CSV you already run. It auto-detects your columns even when they are named differently. No migration, no consultants.",
   "f2_t": "A copilot on real data",
   "f2_d": "\"Which items should I discount this week?\" \"What do I restock today?\" It answers by computing against your database and shows the table it used. It does not invent numbers.",
   "f3_t": "Discounts that free up cash",

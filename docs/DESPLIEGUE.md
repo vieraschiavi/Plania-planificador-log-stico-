@@ -136,16 +136,17 @@ cambialo en ese archivo y volvé a generar.
 ## 3b. Video de demostración en tres idiomas
 
 ```bash
+pip install -r sitio/requirements.txt && playwright install chromium   # una vez
 streamlit run app/app.py --server.port 8710 --server.headless true &
 python3 sitio/grabar_demo.py        # graba el producto real, sin narrar
 python3 sitio/doblar_video.py       # subtítulos + informe de calce
 ```
 
 Eso ya deja el video entendible en los tres idiomas. Para el **audio
-doblado con la misma voz** en los tres, sin cuenta ni clave:
+doblado con la misma voz** en los tres, sin cuenta ni clave (`chatterbox-tts`
+ya quedó instalado en el paso de arriba):
 
 ```bash
-pip install chatterbox-tts
 python3 sitio/doblar_video.py --doblar
 ```
 

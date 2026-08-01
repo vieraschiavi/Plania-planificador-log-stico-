@@ -1,0 +1,14 @@
+-r requirements.txt
+
+# Para correr la suite de tests y medir cobertura. No van en requirements.txt
+# porque no hacen falta para correr el producto, solo para desarrollarlo.
+pytest>=8.0
+coverage>=7.4
+
+# Opcionales, cada uno con su propio salteo si falta (ningún test se rompe
+# sin esto, se saltea con motivo explícito):
+#   - Cython + un compilador de C (gcc/cc del sistema): prueba real de
+#     packaging/proteger_codigo.py.
+#   - node en el PATH: corre el JS real de escaparHtml() en vez de confiar
+#     en una reimplementación en Python.
+Cython>=3.0
