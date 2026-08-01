@@ -13,6 +13,10 @@
 #define AppPublisher "Plania"
 #define AppExe "Plania.exe"
 #define AppURL "https://plania.uy"
+; Espacio que ocupa Plania instalado. El bundle de PyInstaller lleva
+; Python, Streamlit, pandas y pyarrow adentro, así que no es una
+; aplicación chica; se pide un margen para los .pyc del primer arranque.
+#define EspacioNecesarioMB 900
 
 [Setup]
 AppId={{B7E2C1A4-6F3D-4E2A-9C21-3A8F5D2E7B10}
@@ -35,6 +39,13 @@ DefaultDirName={autopf}\Plania
 ; deja SIEMPRE visible, sin depender de esa heurística.
 DisableDirPage=no
 DisableProgramGroupPage=yes
+; Explícito y no heredado del nombre de la aplicación: de acá sale la carpeta
+; que el usuario ve en el menú Inicio, y conviene que no cambie sola si algún
+; día cambia AppName.
+DefaultGroupName={#AppName}
+; Lo que Windows muestra en Configuración → Aplicaciones. Sin esto la entrada
+; aparece sin tamaño, como si fuera un accesorio suelto.
+UninstallDisplaySize=943718400
 OutputDir=..\dist
 OutputBaseFilename=Plania_Setup_v{#AppVersion}
 Compression=lzma2
@@ -59,9 +70,16 @@ Name: "desktopicon"; Description: "Crear un acceso directo en el escritorio"; Gr
 Source: "..\dist\Plania\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Plania"; Filename: "{app}\{#AppExe}"
-Name: "{group}\Desinstalar Plania"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Plania"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+; WorkingDir explícito: el acceso directo del escritorio se puede lanzar desde
+; cualquier carpeta, y el programa busca sus recursos relativos a donde corre.
+; IconFilename también explícito para que el ícono se vea aunque Windows tenga
+; la caché de íconos sucia, que es lo que hace aparecer la hoja en blanco.
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; \
+      IconFilename: "{app}\{#AppExe}"; Comment: "Abrir {#AppName}"
+Name: "{group}\Desinstalar {#AppName}"; Filename: "{uninstallexe}"; \
+      Comment: "Quitar {#AppName} de esta computadora"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; \
+      IconFilename: "{app}\{#AppExe}"; Comment: "Abrir {#AppName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Abrir Plania ahora"; Flags: nowait postinstall skipifsilent
@@ -118,6 +136,127 @@ begin
       Exit;
     end;
   end;
+end;
+
+// --------------------------------------------------------------------------
+// Validación de la carpeta de instalación
+// --------------------------------------------------------------------------
+// El usuario puede elegir carpeta y disco, y tiene que poder — pero hay
+// elecciones que instalan bien y fallan después, cuando ya no es obvio por
+// qué. Se comprueban acá, con un mensaje que dice qué pasa, en vez de dejar
+// que Setup reviente a mitad de copia o que el programa no arranque al día
+// siguiente.
+
+// GetDriveType no viene con el lenguaje de scripting de Inno Setup: es de la
+// API de Windows y hay que declararla. Sin esta línea, `iscc` no compila.
+function GetDriveType(lpRootPathName: String): Cardinal;
+  external 'GetDriveTypeW@kernel32.dll stdcall';
+
+function LetraDeUnidad(Ruta: String): String;
+begin
+  Result := '';
+  if (Length(Ruta) >= 2) and (Ruta[2] = ':') then
+    Result := Uppercase(Copy(Ruta, 1, 1)) + ':\';
+end;
+
+function EspacioLibreMB(Ruta: String): Int64;
+var
+  Libre, Total: Int64;
+begin
+  Result := -1;
+  // División entera: con '/' el resultado es de coma flotante y no entra en
+  // un Int64 sin truncar.
+  if GetSpaceOnDisk64(LetraDeUnidad(Ruta), Libre, Total) then
+    Result := Libre div 1048576;
+end;
+
+function CarpetaEsEscribible(Ruta: String): Boolean;
+var
+  Prueba: String;
+begin
+  // Se prueba sobre el ancestro más cercano que exista: la carpeta elegida
+  // normalmente todavía no está creada.
+  while (Ruta <> '') and not DirExists(Ruta) do
+    Ruta := ExtractFileDir(Ruta);
+  if Ruta = '' then
+  begin
+    Result := False;
+    Exit;
+  end;
+  Prueba := AddBackslash(Ruta) + 'plania_prueba_escritura.tmp';
+  Result := SaveStringToFile(Prueba, 'x', False);
+  if Result then
+    DeleteFile(Prueba);
+end;
+
+function ValidarCarpeta(Ruta: String): Boolean;
+var
+  Unidad: String;
+  Tipo: Integer;
+  Libre: Int64;
+begin
+  Result := False;
+  Unidad := LetraDeUnidad(Ruta);
+
+  if Unidad = '' then
+  begin
+    // Una ruta de red (\\servidor\carpeta) instala, pero el programa deja de
+    // abrir en cuanto el usuario no tiene la red — y el error de entonces no
+    // se parece en nada a la causa.
+    MsgBox('Elegí una carpeta en un disco de esta computadora (por ejemplo ' +
+           'C:\ o D:\).' + #13#10 + #13#10 +
+           'No se puede instalar en una ruta de red: Plania dejaría de abrir ' +
+           'cada vez que la red no esté disponible.', mbError, MB_OK);
+    Exit;
+  end;
+
+  Tipo := GetDriveType(Unidad);
+  // 1 = no existe, 3 = disco fijo, 2 = extraíble, 4 = red, 5 = CD, 6 = RAM
+  if Tipo <= 1 then
+  begin
+    MsgBox('La unidad ' + Unidad + ' no existe o no está lista.' + #13#10 +
+           #13#10 + 'Elegí otro disco.', mbError, MB_OK);
+    Exit;
+  end;
+  if Tipo = 5 then
+  begin
+    MsgBox('No se puede instalar en una unidad de solo lectura (' + Unidad + ').',
+           mbError, MB_OK);
+    Exit;
+  end;
+  if (Tipo = 2) or (Tipo = 4) then
+  begin
+    if MsgBox('La unidad ' + Unidad + ' es extraíble o de red.' + #13#10 + #13#10 +
+              'Plania va a dejar de abrir cada vez que esa unidad no esté ' +
+              'conectada. ¿Instalar igual?', mbConfirmation, MB_YESNO) = IDNO then
+      Exit;
+  end;
+
+  Libre := EspacioLibreMB(Ruta);
+  if (Libre >= 0) and (Libre < {#EspacioNecesarioMB}) then
+  begin
+    MsgBox('En la unidad ' + Unidad + ' quedan ' + IntToStr(Libre) +
+           ' MB libres, y Plania necesita al menos {#EspacioNecesarioMB} MB.' +
+           #13#10 + #13#10 + 'Liberá espacio o elegí otro disco.', mbError, MB_OK);
+    Exit;
+  end;
+
+  if not CarpetaEsEscribible(Ruta) then
+  begin
+    MsgBox('No tenés permiso para escribir en:' + #13#10 + Ruta + #13#10 +
+           #13#10 + 'Elegí otra carpeta, o volvé atrás y ejecutá el instalador ' +
+           'como administrador.', mbError, MB_OK);
+    Exit;
+  end;
+
+  Result := True;
+end;
+
+function NextButtonClick(PaginaActual: Integer): Boolean;
+begin
+  Result := True;
+  if PaginaActual = wpSelectDir then
+    Result := ValidarCarpeta(WizardDirValue);
 end;
 
 function InitializeSetup(): Boolean;
