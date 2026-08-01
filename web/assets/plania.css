@@ -167,6 +167,12 @@ table.vs tbody tr:last-child td{border-bottom:0}
 .plan li{padding:7px 0 7px 24px; font-size:.92rem; color:var(--muted-d); position:relative}
 .plan li::before{content:"✓"; position:absolute; left:0; top:7px; color:var(--green); font-weight:800}
 
+/* Lista con tilde, para checklists fuera de una tarjeta de precio (p. ej. los
+   requisitos del programa de implementadores). Mismo bullet que .plan li. */
+.check-list{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px}
+.check-list li{padding:8px 0 8px 26px; font-size:.98rem; color:var(--muted-d); position:relative}
+.check-list li::before{content:"✓"; position:absolute; left:0; top:8px; color:var(--green); font-weight:800}
+
 /* ---------- formularios ---------- */
 .form-demo{display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin:0 auto; max-width:540px}
 .form-demo input{flex:1 1 240px; min-width:0; padding:13px 15px; border-radius:10px;

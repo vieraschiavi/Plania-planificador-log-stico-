@@ -88,39 +88,48 @@ def cargar(idioma: str) -> dict:
         return json.load(f)
 
 
-def hreflang(actual: str, dominio: str) -> str:
-    """Etiquetas que le dicen al buscador que las tres páginas son la misma
-    en distintos idiomas. Sin esto, Google las trata como contenido duplicado."""
-    lineas = [f'<link rel="alternate" hreflang="{l}" href="{dominio}/{l}/">'
+def hreflang(actual: str, dominio: str, ruta: str = "") -> str:
+    """Etiquetas que le dicen al buscador que las páginas son la misma en
+    distintos idiomas. Sin esto, Google las trata como contenido duplicado.
+
+    `ruta` es el segmento después del idioma (p. ej. "implementadores/"): sin
+    esto, el hreflang de /es/implementadores/ apuntaría a /en/ en vez de a
+    /en/implementadores/, y Google indexaría cruzado dos páginas distintas.
+    """
+    lineas = [f'<link rel="alternate" hreflang="{l}" href="{dominio}/{l}/{ruta}">'
               for l in IDIOMAS]
     lineas.append(f'<link rel="alternate" hreflang="x-default" '
-                  f'href="{dominio}/{IDIOMA_DEFECTO}/">')
+                  f'href="{dominio}/{IDIOMA_DEFECTO}/{ruta}">')
     return "\n".join(lineas)
 
 
-def botones_idioma(actual: str, textos: dict) -> str:
-    """Selector de idioma: son enlaces reales a /es/ /en/ /pt/, no botones de
-    JavaScript, para que se puedan abrir en otra pestaña y los indexe el
-    buscador."""
+def botones_idioma(actual: str, textos: dict, ruta: str = "") -> str:
+    """Selector de idioma: son enlaces reales a /es/<ruta> /en/<ruta> /pt/<ruta>,
+    no botones de JavaScript, para que se puedan abrir en otra pestaña y los
+    indexe el buscador.
+
+    Lleva `ruta` para que cambiar de idioma en la página de implementadores
+    quede en la página de implementadores del otro idioma, no en el inicio.
+    """
     partes = []
     for l in IDIOMAS:
         clase = ' class="on"' if l == actual else ""
         etiqueta = {"es": "ES", "en": "EN", "pt": "PT"}[l]
         nombre = cargar(l)["_meta"]["nombre"]
-        partes.append(f'<a href="/{l}/" hreflang="{l}" lang="{l}" '
+        partes.append(f'<a href="/{l}/{ruta}" hreflang="{l}" lang="{l}" '
                       f'title="{nombre}"{clase}>{etiqueta}</a>')
     return "".join(partes)
 
 
-def render(plantilla: str, textos: dict, idioma: str, cfg: dict) -> str:
+def render(plantilla: str, textos: dict, idioma: str, cfg: dict, ruta: str = "") -> str:
     valores = {k: v for k, v in textos.items() if not k.startswith("_")}
     valores["_releases"] = cfg["releases"]
     valores["_app"] = cfg["app"]
     valores["_dominio"] = cfg["dominio"]
     valores["_lang"] = idioma
     valores["_locale"] = textos["_meta"]["locale"]
-    valores["_hreflang"] = hreflang(idioma, cfg["dominio"])
-    valores["_langbtns"] = botones_idioma(idioma, textos)
+    valores["_hreflang"] = hreflang(idioma, cfg["dominio"], ruta)
+    valores["_langbtns"] = botones_idioma(idioma, textos, ruta)
     valores["_marca"] = MARCAS[idioma]
     # Sin backend no se define la variable: el JavaScript ya distingue ese
     # caso y muestra la vía de contacto en vez de un checkout que fallaría.
@@ -173,6 +182,8 @@ def main() -> None:
     cfg = config()
     with open(os.path.join(SITIO, "plantilla.html"), encoding="utf-8") as f:
         plantilla = f.read()
+    with open(os.path.join(SITIO, "plantilla_implementador.html"), encoding="utf-8") as f:
+        plantilla_impl = f.read()
 
     for idioma in IDIOMAS:
         textos = cargar(idioma)
@@ -182,6 +193,16 @@ def main() -> None:
         with open(os.path.join(destino, "index.html"), "w", encoding="utf-8") as f:
             f.write(html)
         print(f"[web] /{idioma}/index.html  ({len(html):,} bytes)")
+
+        # Página de implementadores: mismo idioma, misma marca — no traducimos
+        # la URL ("implementadores/") para que las tres versiones queden en
+        # una sola ruta estable, más fácil de compartir y de indexar.
+        destino_impl = os.path.join(destino, "implementadores")
+        os.makedirs(destino_impl, exist_ok=True)
+        html_impl = render(plantilla_impl, textos, idioma, cfg, ruta="implementadores/")
+        with open(os.path.join(destino_impl, "index.html"), "w", encoding="utf-8") as f:
+            f.write(html_impl)
+        print(f"[web] /{idioma}/implementadores/index.html  ({len(html_impl):,} bytes)")
 
     with open(os.path.join(SALIDA, "index.html"), "w", encoding="utf-8") as f:
         f.write(REDIRECCION.format(hreflang=hreflang(IDIOMA_DEFECTO, cfg["dominio"]),

@@ -1087,6 +1087,104 @@ def test_landing_promete_erps_que_el_conector_soporta_de_verdad():
     assert de_sap_b1 <= todos, f"faltan sinónimos de columnas de SAP B1: {de_sap_b1 - todos}"
 
 
+def test_cada_erp_nombrado_tiene_su_propia_seccion():
+    """No alcanza con que los cuatro nombres aparezcan en una sola frase
+    genérica (eso ya lo cubre test_landing_promete_erps...): un dueño de
+    distribuidora tiene que ver SU sistema con su propio párrafo, no una
+    enumeración de seis nombres dentro de la tarjeta de otra cosa.
+
+    Se comprueba sobre el i18n (la fuente) y sobre el HTML ya generado (lo
+    que de verdad se publica), para que un build viejo sin rehacer no
+    esconda una regresión.
+    """
+    import json
+    NOMBRES = ["Zureo", "Memory", "Tango", "Bejerman"]
+    for idioma in ("es", "en", "pt"):
+        with open(os.path.join(RAIZ, "sitio", "i18n", f"{idioma}.json"), encoding="utf-8") as f:
+            textos = json.load(f)
+        for i, nombre in enumerate(NOMBRES, start=1):
+            titulo = textos.get(f"erp{i}_t", "")
+            cuerpo = textos.get(f"erp{i}_d", "")
+            assert titulo == nombre, f"erp{i}_t de {idioma}.json es '{titulo}', esperaba '{nombre}'"
+            assert len(cuerpo) > 60, f"erp{i}_d de {idioma}.json es demasiado corto para ser propio"
+
+        ruta_html = os.path.join(RAIZ, "web", idioma, "index.html")
+        assert os.path.exists(ruta_html), f"falta {ruta_html} — correr sitio/build.py"
+        html = open(ruta_html, encoding="utf-8").read()
+        assert 'id="erps"' in html
+        for nombre in NOMBRES:
+            # Como <h3>, no como palabra suelta en un párrafo compartido.
+            assert f"<h3>{nombre}</h3>" in html, \
+                f"'{nombre}' no tiene su propio <h3> en web/{idioma}/index.html"
+
+
+def test_las_cinco_sugerencias_tienen_ejemplo_numerico_real(datos):
+    """Los cinco motores de sitio/i18n/*.json no pueden ser una promesa
+    genérica: para sobrestock, reposición, precios y recupero se vuelve a
+    correr el motor real sobre la base de demostración committeada
+    (data/erp_demo.db) y se comprueba que el número que muestra la landing
+    es el que el motor devuelve HOY — si alguien regenera la demo con otra
+    semilla y no actualiza el texto, esto lo agarra en vez de dejar un
+    número inventado publicado.
+
+    Venta cruzada no tiene ejemplo en esa base (la semilla 42 no genera una
+    brecha de zona accionable — se comprobó a mano probando semillas), así
+    que ahí solo se controla que el ejemplo tenga la forma de un hallazgo
+    real (dos porcentajes distintos y una zona), no un número recalculado.
+    """
+    import json
+    paquete = sugerencias.generar_todas(datos)
+
+    def money(n):
+        return f"{round(n):,}".replace(",", ".")
+
+    esperado = {
+        "s1_d": money(paquete["resumen"]["capital_liberable"]),
+        "s2_d": money(paquete["resumen"]["venta_en_riesgo"]),
+        "s3_d": money(paquete["resumen"]["margen_extra_mensual"]),
+        "s5_d": money(paquete["resumen"]["venta_recuperable"]),
+    }
+    for idioma in ("es", "en", "pt"):
+        with open(os.path.join(RAIZ, "sitio", "i18n", f"{idioma}.json"), encoding="utf-8") as f:
+            textos = json.load(f)
+        for clave, numero in esperado.items():
+            texto = textos[clave].replace(",", ".")  # EN usa coma de miles
+            assert numero in texto, (
+                f"{clave} de {idioma}.json no menciona el total real ${numero} "
+                f"que hoy devuelve sugerencias.generar_todas() sobre data/erp_demo.db")
+        # Venta cruzada: forma de hallazgo real, no un párrafo genérico.
+        assert re.search(r"\d+%.*\d+%", textos["s4_d"]), \
+            f"s4_d de {idioma}.json no trae dos porcentajes (el hallazgo real de zona)"
+
+
+def test_pagina_de_implementadores_existe_con_comision():
+    """Criterio de aceptación explícito: tiene que existir una página con
+    'implementador' en la URL o el título, en los tres idiomas, y tiene que
+    decir en números qué comisión se paga — no un "contactanos y vemos"."""
+    for idioma in ("es", "en", "pt"):
+        ruta = os.path.join(RAIZ, "web", idioma, "implementadores", "index.html")
+        assert os.path.exists(ruta), f"falta {ruta} — correr sitio/build.py"
+        html = open(ruta, encoding="utf-8").read()
+        assert "implementador" in html.lower() or "implementer" in html.lower()
+        assert "{{" not in html, "quedaron marcadores de plantilla sin resolver"
+        # El % de comisión recurrente tiene que estar en números, visible.
+        assert re.search(r"20\s*%", html), \
+            f"web/{idioma}/implementadores/index.html no muestra el % de comisión"
+
+
+def test_video_arranca_sin_autoplay_ni_sonido_forzado():
+    """Un video que arranca solo y con sonido es el tipo de cosa que hace
+    que alguien cierre la pestaña. El control es sobre el HTML publicado,
+    no sobre la intención: si algún día alguien agrega autoplay al <video>,
+    esto tiene que fallar."""
+    for idioma in ("es", "en", "pt"):
+        html = open(os.path.join(RAIZ, "web", idioma, "index.html"), encoding="utf-8").read()
+        etiqueta = re.search(r"<video\b[^>]*>", html)
+        assert etiqueta, f"no hay <video> en web/{idioma}/index.html"
+        assert "autoplay" not in etiqueta.group(0)
+        assert "controls" in etiqueta.group(0)
+
+
 def test_textos_traducidos_no_quedaron_en_espanol():
     """Una traducción a medias es peor que no traducir: se controla que las
     tres versiones tengan realmente las mismas claves y textos distintos."""

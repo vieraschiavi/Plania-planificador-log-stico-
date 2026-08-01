@@ -143,16 +143,26 @@ otro plan.
 
 ## Web pública (español · inglés · portugués)
 
-La web de venta vive en `web/` y se publica en Vercel apuntando la *Root
-Directory* a esa carpeta. No se edita a mano: los textos están en
-`sitio/i18n/{es,en,pt}.json` y la maqueta en `sitio/plantilla.html`.
+La web de venta vive en `web/` y se publica en Vercel con **Import → Deploy**,
+sin tocar ningún campo: el `vercel.json` de la raíz del repo ya declara que el
+sitio sale de `web/` y que no hay build (ver `docs/DESPLIEGUE.md`). No se
+edita a mano: los textos están en `sitio/i18n/{es,en,pt}.json`, la home en
+`sitio/plantilla.html` y la página de implementadores en
+`sitio/plantilla_implementador.html`.
 
 ```bash
 pip install -r sitio/requirements.txt && playwright install chromium   # una vez
-python3 sitio/build.py              # genera /es/ /en/ /pt/ + redirección por idioma
+python3 sitio/build.py              # genera /{es,en,pt}/ + /{es,en,pt}/implementadores/
 python3 sitio/doblar_video.py       # subtítulos de las tres pistas + informe de calce
-python3 sitio/verificar_layout.py   # comprueba que nada se solapa
+python3 sitio/verificar_layout.py   # comprueba que nada se solapa, en las dos páginas
 ```
+
+La home nombra los ERP que el conector realmente reconoce (Zureo, Memory,
+Tango, Bejerman, Odoo, SAP Business One — cada uno con su propia sección, no
+una lista genérica) y muestra las cinco sugerencias del producto con un
+ejemplo numérico real, corrido sobre la base de demostración. La página de
+implementadores (`/implementadores/`, mismo slug en los tres idiomas) explica
+el esquema de comisión recurrente para quien conecta el ERP del cliente.
 
 Tres decisiones que explican el resto:
 

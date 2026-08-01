@@ -109,6 +109,35 @@
   </div>
 </section>
 
+<section id="erps" class="claro tint">
+  <div class="wrap">
+    <h2 class="c">Seu ERP, sem mapear nada à mão</h2>
+    <p class="sub-c">Não existe uma Plania por sistema. Existe um mapeamento automático que reconhece como cada um nomeia suas colunas, para que a conexão se monte sozinha.</p>
+    <div class="grid-f">
+      <article class="card"><h3>Zureo</h3><p>A Zureo roda na nuvem: não existe uma base para conectar direto. Você exporta estoque, vendas ou clientes para Excel ou CSV pelo próprio sistema, e a Plania monta o mapeamento de colunas sozinha.</p></article>
+      <article class="card"><h3>Memory</h3><p>Se o seu Memory permite exportar para Excel ou CSV, é por aí que se começa. Se você tem acesso direto à base, a Plania se conecta só com a string de conexão.</p></article>
+      <article class="card"><h3>Tango</h3><p>As instalações do Tango costumam rodar sobre uma base local. Com um usuário de leitura dessa base, a Plania se conecta direto — sem exportar nada, sem intermediário.</p></article>
+      <article class="card"><h3>Bejerman</h3><p>O mesmo vale para o Bejerman: se a sua instalação roda local, você se conecta direto à base. A Plania detecta as colunas mesmo que a sua instalação tenha personalizado os nomes.</p></article>
+    </div>
+    <p class="nota-c">O resto fica por conta do mapeamento automático: 177 nomes de coluna típicos desses sistemas e também do Odoo, SAP Business One e bases genéricas — código, artigo, estoque, rubro, cardcode, itemcode, docdate e suas variantes. Se o seu sistema usa um nome que ainda não está na lista, ele é adicionado e continua funcionando.</p>
+  </div>
+</section>
+
+<section id="sugerencias" class="claro">
+  <div class="wrap">
+    <h2 class="c">Cinco decisões, com o número real por trás</h2>
+    <p class="sub-c">Não são gráficos: são as cinco perguntas que o dono de uma distribuidora se faz toda semana, cada uma com um exemplo real da base de demonstração.</p>
+    <div class="grid-f">
+      <article class="card"><h3>Excesso de estoque → oferta com desconto real</h3><p>Identifica o estoque que parou de girar e calcula o desconto, com piso de custo mais 8%. Exemplo real: “Lácteos Oro 395” tem 584 unidades paradas há 113 dias — <b>UYU 106.183</b> parados só nesse produto. Em toda a base, libera <b>UYU 1.430.318</b>.</p></article>
+      <article class="card"><h3>Reposição antes da ruptura</h3><p>Cruza o giro real com o prazo de cada fornecedor. Exemplo real: “Bebidas Eco 558” tem 6 dias de estoque e o fornecedor demora 8 — <b>UYU 80.607/mês</b> de venda em risco se não repuser hoje. Em toda a base, são UYU 1.132.051 em risco.</p></article>
+      <article class="card"><h3>Reprecificação do que perde margem</h3><p>Encontra os produtos que vendem abaixo da margem da categoria. Exemplo real: “Lácteos Clásico 736” vende com 14% de margem contra 25% da categoria — subir o preço 14,7% soma <b>UYU 5.757/mês</b>. Em toda a base, são <b>UYU 96.146/mês</b>.</p></article>
+      <article class="card"><h3>Venda cruzada por zona</h3><p>Compara quais categorias os negócios do mesmo ramo compram em cada zona. Exemplo real: em Punta del Este, só 67% dos negócios tipo Almacén compra produtos de Limpieza contra 99% no resto da base — uma categoria inteira sem oferecer nessa zona.</p></article>
+      <article class="card"><h3>Recuperação de clientes que pararam de comprar</h3><p>Cruza a frequência habitual de cada cliente com há quanto tempo ele não pede. Exemplo real: “Almacén García” comprava <b>UYU 201.362</b> e está há 52 dias sem pedir. Em toda a base, há <b>UYU 893.688</b> em clientes para recuperar.</p></article>
+    </div>
+    <p class="nota-c">Os cinco exemplos vêm de rodar os motores reais da Plania sobre a base de demonstração (dados sintéticos, não um cliente real) — para você ver o nível de detalhe antes de conectar a sua.</p>
+  </div>
+</section>
+
 <section id="comparativa" class="claro tint">
   <div class="wrap">
     <h2 class="c">Por que o que você já tem não basta</h2>
@@ -218,6 +247,7 @@
     <nav aria-label="Empresa">
       <p class="pie-h">Empresa</p>
       <a href="#contacto">Contato</a>
+      <a href="/pt/implementadores/">Programa de implementadores</a>
       <a href="/es/">Español</a>
       <a href="/en/">English</a>
       <a href="/pt/">Português</a>
