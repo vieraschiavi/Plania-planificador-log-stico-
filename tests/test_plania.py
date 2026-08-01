@@ -2047,3 +2047,83 @@ def test_ningun_innerHTML_con_variable_sin_pasar_por_escaparHtml():
     assert not problemas, (
         "innerHTML con datos sin pasar por escaparHtml(): " +
         "; ".join(f"{f}: {t}" for f, t in problemas))
+
+
+def test_el_lanzador_avisa_en_que_puerto_quedo():
+    """El bug que dejaba la ventana de Electron en el splash para siempre.
+
+    Electron elegía el puerto, el lanzador comprobaba y —si justo se había
+    ocupado— se mudaba a otro sin avisar. Electron seguía esperando en el
+    viejo: splash eterno y 'el servidor no levantó' al minuto.
+
+    Ahora el lanzador escribe el puerto real donde le indiquen.
+    """
+    import os, tempfile
+    L = _lanzador()
+    with tempfile.TemporaryDirectory() as d:
+        archivo = os.path.join(d, "sub", "puerto.txt")   # subcarpeta inexistente
+        os.environ["PLANIA_PUERTO_ARCHIVO"] = archivo
+        try:
+            L._publicar_puerto("8531")
+            assert open(archivo, encoding="utf-8").read() == "8531"
+            # y no queda el archivo parcial de la escritura atómica
+            assert not os.path.exists(archivo + ".parcial")
+        finally:
+            os.environ.pop("PLANIA_PUERTO_ARCHIVO", None)
+
+
+def test_el_puerto_publicado_es_el_que_se_usa_cuando_el_pedido_esta_ocupado():
+    """La situación exacta que rompía: alguien pide un puerto que ya está
+    ocupado. El lanzador tiene que mudarse Y avisar del nuevo."""
+    import os, socketserver, tempfile, threading, http.server
+
+    L = _lanzador()
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+    srv = socketserver.TCPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    ocupado = srv.server_address[1]
+    try:
+        assert L._ocupado(ocupado) is True
+        with tempfile.TemporaryDirectory() as d:
+            archivo = os.path.join(d, "puerto.txt")
+            # Se reproduce la decisión de main() sin levantar Streamlit.
+            pedido = str(ocupado)
+            if L._ocupado(int(pedido)):
+                pedido = str(L._puerto_libre())
+            os.environ["PLANIA_PUERTO_ARCHIVO"] = archivo
+            try:
+                L._publicar_puerto(pedido)
+            finally:
+                os.environ.pop("PLANIA_PUERTO_ARCHIVO", None)
+
+            publicado = int(open(archivo, encoding="utf-8").read())
+            assert publicado != ocupado, "publicó el puerto ocupado"
+            assert L._ocupado(publicado) is False
+    finally:
+        srv.shutdown()
+
+
+def test_electron_no_impone_el_puerto_en_produccion():
+    """Si Electron vuelve a fijar el puerto en producción, vuelve el bug: el
+    lanzador podría mudarse y la ventana quedaría esperando en el viejo."""
+    import os
+    main = open(os.path.join(RAIZ, "desktop", "main.js"), encoding="utf-8").read()
+    assert "app.isPackaged ? null :" in main, \
+        "en producción el puerto lo tiene que elegir el lanzador, no Electron"
+    assert "esperarPuerto" in main, "Electron tiene que leer el puerto publicado"
+    assert "unlinkSync" in main, \
+        "hay que borrar el puerto de la corrida anterior: si no, se espera al " \
+        "servidor equivocado"
+
+
+def test_el_instalador_esta_coherente():
+    """Corre el control completo del instalador (packaging/verificar_instalador.py)."""
+    import subprocess, sys, os
+    r = subprocess.run([sys.executable,
+                        os.path.join(RAIZ, "packaging", "verificar_instalador.py")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr

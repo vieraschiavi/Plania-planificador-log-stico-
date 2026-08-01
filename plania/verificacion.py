@@ -389,9 +389,14 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
 
         iss = os.path.join(RAIZ, "packaging", "instalador.iss")
         texto_iss = open(iss, encoding="utf-8").read() if os.path.exists(iss) else ""
+        # Se busca la estructura, no el nombre escrito: el script usa la
+        # constante {#AppName} en vez de repetir "Plania" en cada línea, y un
+        # control que busque el literal se rompe con ese cambio aunque el
+        # instalador siga estando bien.
         controles_iss = {
-            "grupo del menú de Inicio": r"{group}\Plania",
-            "acceso directo de desinstalar": "Desinstalar Plania",
+            "grupo del menú de Inicio": "{group}\\",
+            "acceso directo de desinstalar": "{uninstallexe}",
+            "ícono del escritorio": "{autodesktop}",
             "ícono del instalador": "SetupIconFile",
             "ícono mostrado al desinstalar": "UninstallDisplayIcon",
         }

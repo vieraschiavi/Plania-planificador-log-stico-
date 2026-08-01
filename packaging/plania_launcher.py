@@ -140,6 +140,34 @@ def _puerto_libre() -> int:
         return s.getsockname()[1]
 
 
+def _publicar_puerto(puerto: str) -> None:
+    """Deja escrito en qué puerto quedó Plania, para quien lo haya lanzado.
+
+    Hace falta porque el puerto no se puede acordar de antemano: entre que
+    quien lanza comprueba que un puerto está libre y que Streamlit lo toma,
+    otro programa se lo puede llevar, y entonces el lanzador se muda a otro.
+    Sin este aviso, quien lanzó se queda esperando en el puerto viejo — que es
+    exactamente lo que le pasaba a la ventana de Electron: splash para
+    siempre y un "el servidor no levantó" al minuto.
+
+    Se escribe primero en un archivo aparte y después se renombra, para que
+    quien lo lea nunca encuentre medio número escrito.
+    """
+    destino = os.environ.get("PLANIA_PUERTO_ARCHIVO")
+    if not destino:
+        return
+    try:
+        os.makedirs(os.path.dirname(destino) or ".", exist_ok=True)
+        parcial = destino + ".parcial"
+        with open(parcial, "w", encoding="utf-8") as f:
+            f.write(str(puerto))
+        os.replace(parcial, destino)
+    except Exception as e:
+        # Que no poder avisar no impida arrancar: quien lanzó tiene su propio
+        # tiempo de espera y va a mostrar un error entendible.
+        print(f"[Plania] No pude escribir {destino}: {e}")
+
+
 def _abrir_navegador(url: str):
     # Espera a que el server levante y abre el navegador una sola vez.
     for _ in range(60):
@@ -179,6 +207,7 @@ def main():
         pedido = str(libre)
     port = pedido or str(_puerto_libre())
     os.environ["STREAMLIT_SERVER_PORT"] = port
+    _publicar_puerto(port)
     # Que los import del proyecto (plania, data) resuelvan.
     if base not in sys.path:
         sys.path.insert(0, base)

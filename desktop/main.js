@@ -34,14 +34,52 @@ function puertoLibre() {
   });
 }
 
-function lanzarBackend(port) {
+/*
+ * Quién elige el puerto.
+ * ----------------------
+ * En producción NO lo elige esta ventana: lo elige el lanzador y lo avisa por
+ * archivo. Antes lo elegía acá, y había una carrera real: entre que se
+ * comprobaba que un puerto estaba libre y que Streamlit lo tomaba, otro
+ * programa se lo podía llevar; el lanzador entonces se mudaba a otro puerto
+ * —hace bien— pero esta ventana seguía esperando en el viejo. Resultado:
+ * splash para siempre y "el servidor no levantó" al minuto, sin explicación.
+ *
+ * En desarrollo se lanza `streamlit` directo, que no sabe avisar nada, así
+ * que ahí sí se fija el puerto desde acá.
+ */
+function archivoPuerto() {
+  return path.join(app.getPath("userData"), "puerto.txt");
+}
+
+function esperarPuerto(archivo, intentos = 120) {
+  return new Promise((resolve, reject) => {
+    const probar = (restantes) => {
+      let contenido = null;
+      try {
+        contenido = fs.readFileSync(archivo, "utf8").trim();
+      } catch (e) { /* todavía no existe */ }
+      const port = parseInt(contenido, 10);
+      if (port > 0 && port < 65536) return resolve(port);
+      if (restantes <= 0) {
+        return reject(new Error("El motor de Plania no informó en qué puerto quedó."));
+      }
+      setTimeout(() => probar(restantes - 1), 500);
+    };
+    probar(intentos);
+  });
+}
+
+function lanzarBackend(port, archivoPuerto) {
   const env = {
     ...process.env,
-    STREAMLIT_SERVER_PORT: String(port),
     STREAMLIT_SERVER_HEADLESS: "true",
     STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false",
     PLANIA_NO_BROWSER: "1", // que el launcher no abra otro navegador
+    PLANIA_PUERTO_ARCHIVO: archivoPuerto,
   };
+  // Solo en desarrollo se impone el puerto: en producción lo decide el
+  // lanzador, que es el único que puede comprobarlo justo antes de usarlo.
+  if (port) env.STREAMLIT_SERVER_PORT = String(port);
 
   // 1) bundle PyInstaller embebido (producción)
   const empaquetado = path.join(process.resourcesPath || "", "backend",
@@ -104,14 +142,23 @@ async function crearVentana() {
   await win.loadFile(path.join(__dirname, "renderer", "index.html")); // splash React
 
   try {
-    const port = await puertoLibre();
-    backend = lanzarBackend(port);
+    const archivo = archivoPuerto();
+    // Un puerto viejo de una corrida anterior haría que esperemos al servidor
+    // equivocado, o peor, que mostremos otra aplicación que quedó ahí.
+    try { fs.unlinkSync(archivo); } catch (e) { /* no existía */ }
+
+    // En desarrollo elegimos el puerto porque `streamlit` no sabe avisarlo;
+    // en producción lo elige el lanzador y lo escribe en `archivo`.
+    const puertoFijo = app.isPackaged ? null : await puertoLibre();
+    backend = lanzarBackend(puertoFijo, archivo);
     backend.on("error", (err) => mostrarError(err.message));
     backend.on("exit", (code) => {
       if (win && !win.isDestroyed() && code !== 0 && code !== null) {
         mostrarError(`El motor de Plania se cerró con código ${code}.`);
       }
     });
+
+    const port = puertoFijo || await esperarPuerto(archivo);
     const url = `http://127.0.0.1:${port}`;
     await esperarServidor(url);
     if (win && !win.isDestroyed()) await win.loadURL(url);

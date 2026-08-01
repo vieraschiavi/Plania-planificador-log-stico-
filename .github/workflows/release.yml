@@ -47,6 +47,13 @@ jobs:
         run: choco install innosetup --no-progress -y
         shell: pwsh
 
+      - name: Revisar el instalador antes de construirlo
+        # Barato y temprano: si al instalador le falta la opción de elegir
+        # carpeta, un acceso directo, o el script tiene un error que sólo
+        # aparece al compilar en Windows, es mejor saberlo antes de gastar
+        # veinte minutos empaquetando algo que hay que rehacer.
+        run: python packaging/verificar_instalador.py
+
       - name: Backend autocontenido (PyInstaller, código protegido con Cython)
         run: |
           pip install -r requirements.txt pyinstaller cython
