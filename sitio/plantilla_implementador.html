@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="{{_lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{impl_title}}</title>
+<meta name="description" content="{{impl_description}}">
+<link rel="icon" type="image/png" href="/assets/plania_icon.png">
+<link rel="canonical" href="{{_dominio}}/{{_lang}}/implementadores/">
+{{_hreflang}}
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{impl_title}}">
+<meta property="og:description" content="{{impl_description}}">
+<meta property="og:locale" content="{{_locale}}">
+<meta property="og:url" content="{{_dominio}}/{{_lang}}/implementadores/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{impl_title}}">
+<meta name="twitter:description" content="{{impl_description}}">
+<link rel="stylesheet" href="/assets/plania.css">
+</head>
+<body>
+
+<a class="saltar" href="#contenido">{{impl_como_h}}</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="marca" href="/{{_lang}}/">{{_marca}}</a>
+    <nav class="nav" aria-label="{{impl_como_h}}">
+      <a href="/{{_lang}}/">{{impl_back}}</a>
+      <a href="#comision">{{impl_comision_h}}</a>
+      <a href="#postularme">{{impl_form_h}}</a>
+    </nav>
+    <div class="top-acc">
+      <div class="lang" role="group" aria-label="Idioma / Language">
+        {{_langbtns}}
+      </div>
+      <a class="btn btn-amber btn-sm" href="#postularme">{{impl_cta1}}</a>
+    </div>
+  </div>
+</header>
+
+<main id="contenido">
+
+<section class="hero">
+  <div class="wrap hero-in">
+    <p class="badge">{{impl_badge}}</p>
+    <h1>{{impl_h1_a}}<br><span class="grad">{{impl_h1_b}}</span></h1>
+    <p class="sub">{{impl_sub}}</p>
+    <div class="cta-row">
+      <a class="btn btn-amber" href="#postularme">{{impl_cta1}}</a>
+      <a class="btn btn-ghost" href="#comision">{{impl_comision_h}}</a>
+    </div>
+  </div>
+</section>
+
+<section id="como" class="claro">
+  <div class="wrap">
+    <h2 class="c">{{impl_como_h}}</h2>
+    <div class="grid-f">
+      <article class="card"><h3>{{impl_paso1_t}}</h3><p>{{impl_paso1_d}}</p></article>
+      <article class="card"><h3>{{impl_paso2_t}}</h3><p>{{impl_paso2_d}}</p></article>
+      <article class="card"><h3>{{impl_paso3_t}}</h3><p>{{impl_paso3_d}}</p></article>
+    </div>
+  </div>
+</section>
+
+<section id="comision" class="claro tint">
+  <div class="wrap">
+    <h2 class="c">{{impl_comision_h}}</h2>
+    <p class="sub-c">{{impl_comision_sub}}</p>
+    <div class="grid-p">
+      <article class="plan">
+        <h3>{{impl_c1_t}}</h3>
+        <p class="precio precio-txt">{{impl_c1_p}}</p>
+        <p>{{impl_c1_d}}</p>
+      </article>
+      <article class="plan destacado">
+        <span class="tag">{{impl_comision_h}}</span>
+        <h3>{{impl_c2_t}}</h3>
+        <p class="precio precio-txt">{{impl_c2_p}}</p>
+        <p>{{impl_c2_d}}</p>
+      </article>
+      <article class="plan">
+        <h3>{{impl_c3_t}}</h3>
+        <p class="precio precio-txt">{{impl_c3_p}}</p>
+        <p>{{impl_c3_d}}</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="ejemplo" class="cta-panel">
+  <div class="wrap estrecho">
+    <h2>{{impl_ejemplo_h}}</h2>
+    <p class="sub-c">{{impl_ejemplo_d}}</p>
+  </div>
+</section>
+
+<section id="quien" class="claro">
+  <div class="wrap estrecho">
+    <h2 class="c">{{impl_quien_h}}</h2>
+    <ul class="check-list">
+      <li>{{impl_r1}}</li>
+      <li>{{impl_r2}}</li>
+      <li>{{impl_r3}}</li>
+      <li>{{impl_r4}}</li>
+    </ul>
+  </div>
+</section>
+
+<section id="postularme" class="claro tint">
+  <div class="wrap estrecho">
+    <h2 class="c">{{impl_form_h}}</h2>
+    <p class="sub-c">{{impl_form_sub}}</p>
+    <form class="form-cont" id="form-cont" novalidate>
+      <div class="f2">
+        <div><label for="c-nombre">{{cont_nombre}}</label><input id="c-nombre" type="text" autocomplete="name"></div>
+        <div><label for="c-email">{{cont_email}}</label><input id="c-email" type="email" autocomplete="email"></div>
+      </div>
+      <label for="c-empresa">{{cont_empresa}}</label>
+      <input id="c-empresa" type="text" autocomplete="organization">
+      <label for="c-msg">{{impl_form_msg}}</label>
+      <textarea id="c-msg" rows="4"></textarea>
+      <button type="submit" class="btn btn-amber">{{impl_form_cta}}</button>
+    </form>
+    <p class="nota-c" id="cont-msg"></p>
+  </div>
+</section>
+
+</main>
+
+<footer class="pie">
+  <div class="wrap pie-in">
+    <div>
+      <p class="marca marca-pie">{{_marca}}</p>
+      <p class="pie-tag">{{foot_tag}}</p>
+    </div>
+    <nav aria-label="{{foot_prod}}">
+      <p class="pie-h">{{foot_prod}}</p>
+      <a href="/{{_lang}}/#plataforma">{{nav_producto}}</a>
+      <a href="/{{_lang}}/#precios">{{nav_precios}}</a>
+      <a href="/{{_lang}}/#descargas">{{nav_descargas}}</a>
+    </nav>
+    <nav aria-label="{{foot_emp}}">
+      <p class="pie-h">{{foot_emp}}</p>
+      <a href="/{{_lang}}/#contacto">{{nav_contacto}}</a>
+      <a href="/es/implementadores/">Español</a>
+      <a href="/en/implementadores/">English</a>
+      <a href="/pt/implementadores/">Português</a>
+    </nav>
+  </div>
+  <div class="wrap"><p class="pie-legal">{{impl_legal}}</p></div>
+</footer>
+
+<script>window.PLANIA_LANG="{{_lang}}";</script>{{_backend}}
+<script src="/assets/plania.js" defer></script>
+</body>
+</html>

@@ -129,8 +129,14 @@ def oportunidades_zona(v: pd.DataFrame) -> pd.DataFrame:
                         "penetracion_general_pct": round(pg * 100, 1),
                         "clientes_zona": cz,
                         "venta_potencial": round(float(venta_prom) * cz * (pg - pz), 2),
-                        "motivo": (f"En {zona}, solo {pz:.0%} de los {tipo.lower()}s "
-                                   f"compra {cat} vs {pg:.0%} general"),
+                        # Sin pluralizar "tipo": tipo_negocio viene del ERP del
+                        # cliente y puede traer cualquier texto ("Almacén",
+                        # "Bar/Restaurante"...) — un "+s" naive rompe la
+                        # gramática ("almacéns") o directamente el string
+                        # ("bar/restaurantes"). "negocios tipo X" es correcto
+                        # para cualquier valor.
+                        "motivo": (f"En {zona}, solo {pz:.0%} de los negocios tipo "
+                                   f"{tipo} compra {cat} vs {pg:.0%} en general"),
                     })
     if not filas:
         return pd.DataFrame()

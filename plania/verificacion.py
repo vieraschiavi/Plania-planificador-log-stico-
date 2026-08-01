@@ -440,13 +440,25 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
 
     # --- 14. Web pública trilingüe -----------------------------------------
     def _web():
-        """La web es la puerta de entrada de la venta: si le falta un idioma o
-        una pista de subtítulos, hay visitantes que se van sin entender qué es
-        Plania. Se controla que estén las tres versiones y las tres pistas."""
+        """La web es la puerta de entrada de la venta: si le falta un idioma,
+        una pista de subtítulos, el nombre de un ERP soportado o la página de
+        implementadores, hay visitantes que se van sin la prueba concreta de
+        que Plania conoce su caso. Se controla que esté todo eso, no solo que
+        la página exista."""
         faltan = []
+        erps_esperados = ("Zureo", "Memory", "Tango", "Bejerman")
         for idioma in ("es", "en", "pt"):
-            if not os.path.exists(os.path.join(RAIZ, "web", idioma, "index.html")):
+            ruta_index = os.path.join(RAIZ, "web", idioma, "index.html")
+            if not os.path.exists(ruta_index):
                 faltan.append(f"web/{idioma}/index.html")
+            else:
+                html = open(ruta_index, encoding="utf-8").read()
+                for erp in erps_esperados:
+                    if erp not in html:
+                        faltan.append(f"{erp} no aparece en web/{idioma}/index.html")
+            if not os.path.exists(os.path.join(RAIZ, "web", idioma, "implementadores",
+                                               "index.html")):
+                faltan.append(f"web/{idioma}/implementadores/index.html")
             if not os.path.exists(os.path.join(RAIZ, "web", "assets", "video",
                                                f"plania_demo_{idioma}.vtt")):
                 faltan.append(f"subtítulos {idioma}")

@@ -109,6 +109,35 @@
   </div>
 </section>
 
+<section id="erps" class="claro tint">
+  <div class="wrap">
+    <h2 class="c">Tu ERP, sin mapear nada a mano</h2>
+    <p class="sub-c">No hay un Plania por sistema. Hay un mapeo automático que reconoce cómo cada uno nombra sus columnas, para que la conexión salga sola.</p>
+    <div class="grid-f">
+      <article class="card"><h3>Zureo</h3><p>Zureo corre en la nube: no hay una base a la que conectarse directo. Exportás stock, ventas o clientes a Excel o CSV desde el propio sistema, y Plania arma el mapeo de columnas solo.</p></article>
+      <article class="card"><h3>Memory</h3><p>Si tu Memory te deja exportar a Excel o CSV, arrancás por ahí. Si tenés acceso directo a la base, Plania se conecta sin pedir nada más que la cadena de conexión.</p></article>
+      <article class="card"><h3>Tango</h3><p>Las instalaciones de Tango suelen correr sobre una base local. Con un usuario de lectura de esa base, Plania se conecta directo — sin exportar nada ni pasar por un intermediario.</p></article>
+      <article class="card"><h3>Bejerman</h3><p>Igual con Bejerman: si tu instalación corre local, te conectás directo a la base. Plania detecta las columnas aunque tu instalación las haya personalizado.</p></article>
+    </div>
+    <p class="nota-c">El resto lo hace el auto-mapeo: 177 nombres de columna típicos de estos sistemas y de Odoo, SAP Business One y bases genéricas — código, artículo, existencia, rubro, cardcode, itemcode, docdate y sus variantes. Si tu sistema usa un nombre que no está en la lista, se agrega y sigue funcionando.</p>
+  </div>
+</section>
+
+<section id="sugerencias" class="claro">
+  <div class="wrap">
+    <h2 class="c">Cinco decisiones, con el número real detrás</h2>
+    <p class="sub-c">No son gráficos: son las cinco preguntas que un dueño de distribuidora se hace todas las semanas, cada una con un ejemplo real de la base de demostración.</p>
+    <div class="grid-f">
+      <article class="card"><h3>Sobrestock → oferta con el descuento justo</h3><p>Detecta el stock que dejó de rotar y calcula el descuento, con piso de costo más 8%. Ejemplo real: “Lácteos Oro 395” lleva 584 unidades y 113 días sin moverse — <b>$106.183 UYU</b> inmovilizados en ese producto. En toda la base, libera <b>$1.430.318 UYU</b>.</p></article>
+      <article class="card"><h3>Reposición antes del quiebre</h3><p>Cruza la rotación real con el plazo de cada proveedor. Ejemplo real: a “Bebidas Eco 558” le quedan 6 días de stock y el proveedor demora 8 — <b>$80.607 UYU/mes</b> de venta en riesgo si no se repone hoy. En toda la base, hay <b>$1.132.051 UYU</b> en riesgo.</p></article>
+      <article class="card"><h3>Re-precio de lo que pierde margen</h3><p>Encuentra los productos que venden por debajo del margen de su categoría. Ejemplo real: “Lácteos Clásico 736” vende con 14% de margen contra 25% de su categoría — subir el precio 14,7% suma <b>$5.757 UYU/mes</b>. En toda la base, son <b>$96.146 UYU/mes</b>.</p></article>
+      <article class="card"><h3>Venta cruzada por zona</h3><p>Compara qué categorías compran los negocios del mismo rubro en cada zona. Ejemplo real: en Punta del Este, solo el 67% de los negocios tipo Almacén compra artículos de Limpieza contra el 99% en el resto de la base — una categoría entera sin ofrecer ahí.</p></article>
+      <article class="card"><h3>Recupero de clientes que dejaron de comprar</h3><p>Cruza la frecuencia habitual de cada cliente contra cuánto hace que no pide. Ejemplo real: “Almacén García” compraba <b>$201.362 UYU</b> y lleva 52 días sin pedir. En toda la base, hay <b>$893.688 UYU</b> en clientes para recuperar.</p></article>
+    </div>
+    <p class="nota-c">Los cinco ejemplos salen de correr los motores reales de Plania sobre la base de demostración (datos sintéticos, no un cliente real) — así se ve el nivel de detalle antes de conectar la tuya.</p>
+  </div>
+</section>
+
 <section id="comparativa" class="claro tint">
   <div class="wrap">
     <h2 class="c">Por qué no alcanza con lo que ya tenés</h2>
@@ -218,6 +247,7 @@
     <nav aria-label="Empresa">
       <p class="pie-h">Empresa</p>
       <a href="#contacto">Contacto</a>
+      <a href="/es/implementadores/">Programa de implementadores</a>
       <a href="/es/">Español</a>
       <a href="/en/">English</a>
       <a href="/pt/">Português</a>
