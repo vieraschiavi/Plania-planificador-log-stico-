@@ -87,9 +87,14 @@ Filename: "{app}\{#AppExe}"; Description: "Abrir Plania ahora"; Flags: nowait po
 [UninstallDelete]
 ; Los .pyc que Python compila al primer arranque no los trae el instalador,
 ; así que tampoco los borra automáticamente al desinstalar — sin esto quedan
-; sueltos en {app}. Los datos del usuario (licencia, config) viven aparte, en
-; su carpeta de perfil (ver plania/config.py), y esos si sobreviven adrede:
-; que desinstalar y reinstalar no le haga perder la licencia activada.
+; sueltos en {app}.
+;
+; A propósito NO hay una entrada acá para "{app}\datos": ahí vive la
+; licencia activada y la configuración (plania/config.py), y tienen que
+; sobrevivir a un desinstalar + reinstalar en la MISMA carpeta. Inno Setup
+; sólo borra lo que él mismo instaló (sección [Files]) más las carpetas que
+; queden vacías al terminar; como "datos" la crea el programa en su primer
+; arranque —no el instalador— y no queda vacía, Inno Setup la deja tal cual.
 Type: filesandordirs; Name: "{app}\__pycache__"
 
 [Code]

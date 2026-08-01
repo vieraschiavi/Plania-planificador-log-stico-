@@ -16,15 +16,95 @@ usuario tenga que elegir nada):
   3. **Texto plano** (`config.json`, permisos 600) solo si ninguna librería
      de cifrado está instalada — último recurso, nunca el default.
 
-Todo vive fuera del repo, en `$PLANIA_CONFIG_DIR` (por defecto ~/.plania).
+Todo vive fuera del repo, en `$PLANIA_CONFIG_DIR`. Sin esa variable, el
+default depende de cómo se está corriendo (ver `_resolver_config_dir()`):
+en el ejecutable de Windows empaquetado, una carpeta al lado del .exe; si no,
+`~/.plania`, como siempre.
+
 Precedencia: una variable de entorno real (inyectada en producción) tiene
 prioridad sobre lo guardado. `aplicar()` carga las keys guardadas al entorno
 para que el Copiloto (Claude/Anthropic) y las integraciones funcionen automáticamente.
 """
 import json
 import os
+import shutil
+import sys
 
-CONFIG_DIR = os.environ.get("PLANIA_CONFIG_DIR", os.path.expanduser("~/.plania"))
+
+def _es_escribible(carpeta: str) -> bool:
+    """Si se puede crear y escribir en `carpeta` (creándola si hace falta)."""
+    try:
+        os.makedirs(carpeta, exist_ok=True)
+        prueba = os.path.join(carpeta, ".prueba_escritura")
+        with open(prueba, "w") as f:
+            f.write("x")
+        os.remove(prueba)
+        return True
+    except Exception:
+        return False
+
+
+def _carpeta_junto_al_exe():
+    """`datos/` al lado del ejecutable, sólo dentro del .exe empaquetado.
+
+    Es la pieza que hace que instalar Plania en el disco que el usuario elige
+    (D:, un pendrive, lo que sea) sea real: sin esto, la licencia, la
+    configuración del ERP y la caché de archivos subidos quedaban siempre en
+    `~/.plania` — el perfil de Windows, que casi siempre está en C: — sin
+    importar en qué disco se hubiera instalado el programa.
+
+    Devuelve `None` (y entonces se usa `~/.plania`, como antes) en cualquier
+    caso que no sea el ejecutable de Windows: en desarrollo `sys.frozen` no
+    existe, y en un deploy web (Linux, contenedor) "al lado del intérprete de
+    Python" no es una carpeta que tenga sentido usar — sería la instalación
+    de Python del sistema, no algo propio de Plania.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    carpeta = os.path.join(os.path.dirname(sys.executable), "datos")
+    return carpeta if _es_escribible(carpeta) else None
+
+
+def _migrar_si_hace_falta(origen: str, destino: str) -> None:
+    """Copia (no mueve) `~/.plania` a la carpeta nueva, una sola vez.
+
+    Sin esto, alguien que ya tenía Plania instalado y activó su licencia
+    contra `~/.plania` la perdería al actualizar a una versión con esta
+    carpeta nueva — el programa arrancaría pidiendo activar de nuevo. Se
+    copia en vez de mover para no arriesgar el original ante un corte de luz
+    a mitad de copia; queda huérfano en `~/.plania`, pero eso no molesta a
+    nadie.
+
+    Sólo corre si el destino todavía está vacío: no se quiere pisar datos
+    nuevos que ya se hayan generado en la instalación actual con datos viejos
+    de otra.
+    """
+    if not os.path.isdir(origen) or os.listdir(destino):
+        return
+    try:
+        for nombre in os.listdir(origen):
+            src = os.path.join(origen, nombre)
+            dst = os.path.join(destino, nombre)
+            if os.path.isfile(src):
+                shutil.copy2(src, dst)
+    except Exception:
+        # Migrar es una comodidad, no un requisito para arrancar: si falla,
+        # el usuario simplemente vuelve a activar su licencia.
+        pass
+
+
+def _resolver_config_dir() -> str:
+    explicita = os.environ.get("PLANIA_CONFIG_DIR")
+    if explicita:
+        return explicita
+    portable = _carpeta_junto_al_exe()
+    if portable:
+        _migrar_si_hace_falta(os.path.expanduser("~/.plania"), portable)
+        return portable
+    return os.path.expanduser("~/.plania")
+
+
+CONFIG_DIR = _resolver_config_dir()
 CONFIG_FILE_PLANO = os.path.join(CONFIG_DIR, "config.json")
 CONFIG_FILE_CIFRADO = os.path.join(CONFIG_DIR, "config.enc")
 CLAVE_CIFRADO_FILE = os.path.join(CONFIG_DIR, ".config.key")
