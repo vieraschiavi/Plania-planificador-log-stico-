@@ -2127,3 +2127,179 @@ def test_el_instalador_esta_coherente():
                         os.path.join(RAIZ, "packaging", "verificar_instalador.py")],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+# ---------------------------------------------------------------------------
+# Todo en el disco elegido: config/licencia y logs junto al .exe, no en C:
+# ---------------------------------------------------------------------------
+def test_config_dir_usa_la_carpeta_junto_al_exe_si_esta_empaquetado(tmp_path, monkeypatch):
+    """El pedido explícito: instalar en D: tiene que dejar TODO en D:, no sólo
+    el programa. Antes, la licencia y la config de plania.config quedaban
+    siempre en ~/.plania —el perfil de Windows, típicamente C:— sin importar
+    en qué disco se hubiera instalado Plania.
+    """
+    import importlib
+    import plania.config as pconfig
+
+    falso_exe = tmp_path / "D_simulado" / "Plania.exe"
+    falso_exe.parent.mkdir(parents=True)
+    falso_exe.write_text("")
+
+    monkeypatch.delenv("PLANIA_CONFIG_DIR", raising=False)
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", str(falso_exe))
+    try:
+        importlib.reload(pconfig)
+        esperado = str(falso_exe.parent / "datos")
+        assert pconfig.CONFIG_DIR == esperado
+        assert os.path.isdir(esperado), "tiene que dejar la carpeta creada"
+    finally:
+        importlib.reload(pconfig)   # vuelve al PLANIA_CONFIG_DIR real de los tests
+
+
+def test_config_dir_no_cambia_fuera_del_exe_empaquetado(monkeypatch):
+    """En desarrollo (sys.frozen no existe) el comportamiento no cambia: nadie
+    quiere que correr `streamlit run app/app.py` desde el repo se ponga a
+    crear carpetas raras al lado del intérprete de Python."""
+    import importlib
+    import plania.config as pconfig
+
+    monkeypatch.delenv("PLANIA_CONFIG_DIR", raising=False)
+    try:
+        importlib.reload(pconfig)
+        assert pconfig.CONFIG_DIR == os.path.expanduser("~/.plania")
+    finally:
+        importlib.reload(pconfig)
+
+
+def test_variable_de_entorno_explicita_sigue_ganando(tmp_path, monkeypatch):
+    """PLANIA_CONFIG_DIR es una elección explícita (Docker, tests, soporte
+    técnico): tiene que ganarle incluso a la detección automática."""
+    import importlib
+    import plania.config as pconfig
+
+    falso_exe = tmp_path / "app" / "Plania.exe"
+    falso_exe.parent.mkdir(parents=True)
+    falso_exe.write_text("")
+    elegida = str(tmp_path / "donde_yo_diga")
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", elegida)
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", str(falso_exe))
+    try:
+        importlib.reload(pconfig)
+        assert pconfig.CONFIG_DIR == elegida
+    finally:
+        importlib.reload(pconfig)
+
+
+def test_licencia_vieja_se_migra_a_la_carpeta_nueva(tmp_path, monkeypatch):
+    """Quien ya tenía Plania instalado (versión anterior a este cambio) con la
+    licencia activada en ~/.plania no puede perderla al actualizar: se migra
+    una sola vez a la carpeta nueva, sin pisar datos nuevos."""
+    import importlib
+    import plania.config as pconfig
+
+    home_viejo = tmp_path / "home"
+    home_viejo.mkdir()
+    (home_viejo / ".plania").mkdir()
+    (home_viejo / ".plania" / "config.enc").write_bytes(b"licencia-vieja-cifrada")
+
+    falso_exe = tmp_path / "D_simulado" / "Plania.exe"
+    falso_exe.parent.mkdir(parents=True)
+    falso_exe.write_text("")
+
+    monkeypatch.delenv("PLANIA_CONFIG_DIR", raising=False)
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", str(falso_exe))
+    monkeypatch.setattr(os.path, "expanduser",
+                        lambda p: p.replace("~", str(home_viejo)))
+    try:
+        importlib.reload(pconfig)
+        migrado = os.path.join(pconfig.CONFIG_DIR, "config.enc")
+        assert os.path.exists(migrado)
+        assert open(migrado, "rb").read() == b"licencia-vieja-cifrada"
+        # y el original sigue existiendo: se copia, no se mueve
+        assert (home_viejo / ".plania" / "config.enc").exists()
+    finally:
+        importlib.reload(pconfig)
+
+
+def test_migracion_no_pisa_datos_que_ya_existen_en_la_carpeta_nueva(tmp_path, monkeypatch):
+    """Si la carpeta nueva ya tiene algo (una activación posterior a la
+    migración, por ejemplo), no se sobreescribe con lo viejo."""
+    import importlib
+    import plania.config as pconfig
+
+    home_viejo = tmp_path / "home"
+    (home_viejo / ".plania").mkdir(parents=True)
+    (home_viejo / ".plania" / "config.enc").write_bytes(b"viejo")
+
+    falso_exe = tmp_path / "D_simulado" / "Plania.exe"
+    falso_exe.parent.mkdir(parents=True)
+    falso_exe.write_text("")
+    (falso_exe.parent / "datos").mkdir()
+    (falso_exe.parent / "datos" / "config.enc").write_bytes(b"nuevo")
+
+    monkeypatch.delenv("PLANIA_CONFIG_DIR", raising=False)
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", str(falso_exe))
+    monkeypatch.setattr(os.path, "expanduser",
+                        lambda p: p.replace("~", str(home_viejo)))
+    try:
+        importlib.reload(pconfig)
+        assert open(os.path.join(pconfig.CONFIG_DIR, "config.enc"), "rb").read() == b"nuevo"
+    finally:
+        importlib.reload(pconfig)
+
+
+def test_logs_del_lanzador_van_junto_al_exe_si_esta_empaquetado(tmp_path, monkeypatch):
+    L = _lanzador()
+    falso_exe = tmp_path / "D_simulado" / "Plania.exe"
+    falso_exe.parent.mkdir(parents=True)
+    falso_exe.write_text("")
+
+    monkeypatch.setattr(L.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(L.sys, "executable", str(falso_exe))
+    try:
+        carpeta = L._carpeta_logs()
+        assert carpeta == str(falso_exe.parent / "datos" / "logs")
+        assert os.path.isdir(carpeta)
+    finally:
+        monkeypatch.delattr(L.sys, "frozen", raising=False)
+
+
+def test_logs_caen_a_localappdata_si_la_carpeta_junto_al_exe_no_es_escribible(
+        tmp_path, monkeypatch):
+    """Instalado en Archivos de programa y corriendo sin permiso de escritura
+    ahí: no puede fallar en silencio ni perder el log, tiene que caer a
+    LOCALAPPDATA como antes."""
+    L = _lanzador()
+    falso_exe = tmp_path / "Program Files" / "Plania" / "Plania.exe"
+    falso_exe.parent.mkdir(parents=True)
+    falso_exe.write_text("")
+
+    monkeypatch.setattr(L.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(L.sys, "executable", str(falso_exe))
+    monkeypatch.setattr(L, "_escribible", lambda carpeta: False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData_simulado"))
+    try:
+        carpeta = L._carpeta_logs()
+        assert carpeta == str(tmp_path / "AppData_simulado" / "Plania" / "logs")
+    finally:
+        monkeypatch.delattr(L.sys, "frozen", raising=False)
+
+
+def test_el_instalador_no_borra_la_carpeta_de_datos_al_desinstalar():
+    """Regresión directa del pedido: la licencia tiene que sobrevivir a un
+    desinstalar + reinstalar en la misma carpeta."""
+    import os
+    iss = open(os.path.join(RAIZ, "packaging", "instalador.iss"),
+              encoding="utf-8").read()
+    seccion = iss.split("[UninstallDelete]")[1].split("[Code]")[0]
+    # Sólo las líneas de código (Type:/Name:), no los comentarios que
+    # explican por qué "datos" no está acá — esos sí la nombran a propósito.
+    codigo = "\n".join(l for l in seccion.splitlines()
+                       if l.strip() and not l.strip().startswith(";"))
+    assert r"{app}\datos" not in codigo, \
+        "[UninstallDelete] no puede borrar la carpeta donde vive la licencia"

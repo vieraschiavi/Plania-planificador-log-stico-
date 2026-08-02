@@ -246,6 +246,26 @@ def controles() -> list[tuple[bool, str, str]]:
        "No se usa el puerto por defecto de Streamlit",
        "el 8501 lo ocupa cualquier otra aplicación Streamlit del usuario")
 
+    # --- Todo en el disco que el usuario elige ------------------------------
+    config_py = _leer(os.path.join(RAIZ, "plania", "config.py"))
+    ok('"frozen"' in config_py and "_carpeta_junto_al_exe" in config_py,
+       "La licencia y la configuración quedan en el disco elegido al instalar",
+       "sin esto, plania.config vuelve a guardar siempre en ~/.plania (el "
+       "perfil de Windows, típicamente C:) sin importar dónde se instaló")
+    ok("_migrar_si_hace_falta" in config_py,
+       "Quien actualiza desde una versión anterior no pierde su licencia",
+       "falta la migración única de ~/.plania a la carpeta junto al .exe")
+    ok('"frozen"' in lanzador and "datos" in lanzador,
+       "Los logs también quedan en el disco elegido al instalar",
+       "el lanzador tiene que intentar 'datos/logs' junto al .exe antes de "
+       "caer a LOCALAPPDATA")
+    sin_comentarios = "\n".join(
+        l for l in "\n".join(_seccion(iss, "UninstallDelete")).splitlines()
+        if not l.strip().startswith(";"))
+    ok(r"{app}\datos" not in sin_comentarios,
+       "Desinstalar no borra la carpeta donde vive la licencia",
+       r"si [UninstallDelete] borra {app}\datos, reinstalar pide activar de nuevo")
+
     return r
 
 

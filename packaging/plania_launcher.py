@@ -64,9 +64,38 @@ def _ocupado(puerto: int) -> bool:
         return s.connect_ex(("127.0.0.1", puerto)) == 0
 
 
+def _escribible(carpeta: str) -> bool:
+    try:
+        os.makedirs(carpeta, exist_ok=True)
+        prueba = os.path.join(carpeta, ".prueba_escritura")
+        with open(prueba, "w") as f:
+            f.write("x")
+        os.remove(prueba)
+        return True
+    except Exception:
+        return False
+
+
 def _carpeta_logs() -> str:
-    """Carpeta de logs, en la zona de datos del usuario (no en Archivos de
-    programa, donde el programa instalado no tiene permiso de escritura)."""
+    """Carpeta de logs.
+
+    Primero se intenta `datos/logs` al lado del .exe: así, si el usuario
+    instaló Plania en D:, los logs quedan en D: también, en vez de forzarlo a
+    tener espacio en el disco del perfil de Windows (típicamente C:) sin
+    importar dónde instaló el programa. Es la misma idea y la misma lógica
+    que `plania.config._carpeta_junto_al_exe()` — se duplica acá en vez de
+    importar el paquete `plania` porque este log arranca ANTES que cualquier
+    otra cosa, justamente para poder registrar un error si algo más adelante
+    (incluida la importación de `plania`) falla.
+
+    Si esa carpeta no es escribible —instalado en Archivos de programa y
+    corriendo sin permisos de escritura ahí, por ejemplo— se cae a
+    `%LOCALAPPDATA%`, que sí lo es siempre para el usuario actual.
+    """
+    if getattr(sys, "frozen", False):
+        junto_al_exe = os.path.join(os.path.dirname(sys.executable), "datos", "logs")
+        if _escribible(junto_al_exe):
+            return junto_al_exe
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     carpeta = os.path.join(base, "Plania", "logs")
     os.makedirs(carpeta, exist_ok=True)
@@ -211,6 +240,16 @@ def main():
     # Que los import del proyecto (plania, data) resuelvan.
     if base not in sys.path:
         sys.path.insert(0, base)
+
+    try:
+        # Se informa acá, no se decide: la resolución real vive en
+        # plania.config._resolver_config_dir(). Esto es sólo para que, si
+        # alguien reporta "instalé en D: pero no sé si quedó ahí", la
+        # respuesta esté en el log en vez de tener que ir a comprobarlo.
+        from plania import config as _pconfig
+        print(f"[Plania] Datos (licencia, configuración) en: {_pconfig.CONFIG_DIR}")
+    except Exception as e:
+        print(f"[Plania] No pude determinar la carpeta de datos: {e}")
 
     _banner(port, electron)
 

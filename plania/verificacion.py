@@ -25,6 +25,7 @@ resultado.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
 import traceback
@@ -377,52 +378,33 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
 
     resultados.append(_control("Distribución", "Empaquetado PC y web", _empaquetado))
 
-    # --- 12. Instalador: ícono, menú de Inicio y desinstalador --------------
+    # --- 12. Instalador de Windows -------------------------------------------
     def _instalador_windows():
         """Este entorno es Linux: no puede correr el instalador de Windows
-        para mirarlo. Lo que sí puede hacer es leer los scripts que lo arman
-        y confirmar que declaran las tres cosas que se pidieron — accesos
-        directos con ícono, entrada en el menú de Inicio y desinstalador— en
-        las DOS vías de empaquetado (PyInstaller+Inno Setup y Electron+NSIS).
+        para mirarlo. Lo que sí puede hacer es correr
+        `packaging/verificar_instalador.py`, que lee los scripts de las DOS
+        vías de empaquetado (PyInstaller+Inno Setup y Electron+NSIS) y
+        confirma que está todo lo que se pidió: elegir carpeta y disco con
+        validación real, accesos directos con ícono, desinstalador, y que la
+        licencia y los datos queden en el disco elegido en vez de forzar
+        siempre `~/.plania`.
+
+        Se corre el script en vez de duplicar sus controles acá: ya pasó una
+        vez que un control de este archivo y el de verificar_instalador.py
+        quedaron desincronizados —uno buscaba un texto que el otro había
+        dejado de escribir— y ninguno de los dos avisó del otro.
         """
-        faltan = []
-
-        iss = os.path.join(RAIZ, "packaging", "instalador.iss")
-        texto_iss = open(iss, encoding="utf-8").read() if os.path.exists(iss) else ""
-        # Se busca la estructura, no el nombre escrito: el script usa la
-        # constante {#AppName} en vez de repetir "Plania" en cada línea, y un
-        # control que busque el literal se rompe con ese cambio aunque el
-        # instalador siga estando bien.
-        controles_iss = {
-            "grupo del menú de Inicio": "{group}\\",
-            "acceso directo de desinstalar": "{uninstallexe}",
-            "ícono del escritorio": "{autodesktop}",
-            "ícono del instalador": "SetupIconFile",
-            "ícono mostrado al desinstalar": "UninstallDisplayIcon",
-        }
-        for nombre, marca in controles_iss.items():
-            if marca not in texto_iss:
-                faltan.append(f"Inno Setup: falta {nombre}")
-
-        pkg = os.path.join(RAIZ, "desktop", "package.json")
-        import json as _json
-        cfg_nsis = {}
-        if os.path.exists(pkg):
-            cfg_nsis = _json.load(open(pkg, encoding="utf-8")).get("build", {}).get("nsis", {})
-        if not cfg_nsis.get("createStartMenuShortcut", True):  # default true en electron-builder
-            faltan.append("NSIS: createStartMenuShortcut está desactivado")
-        if not cfg_nsis.get("uninstallDisplayName"):
-            faltan.append("NSIS: falta uninstallDisplayName")
-
-        icono = os.path.join(RAIZ, "assets", "brand", "plania.ico")
-        if not os.path.exists(icono):
-            faltan.append("falta assets/brand/plania.ico")
-
-        if faltan:
-            return FALLA, "; ".join(faltan)
-        return OK, ("Inno Setup y NSIS declaran ícono, grupo del menú de "
-                    "Inicio y desinstalador; no se puede correr el instalador "
-                    "en este entorno (Windows-only) para verlo con los ojos")
+        script = os.path.join(RAIZ, "packaging", "verificar_instalador.py")
+        if not os.path.exists(script):
+            return FALLA, "falta packaging/verificar_instalador.py"
+        r = subprocess.run([sys.executable, script], capture_output=True, text=True)
+        if r.returncode != 0:
+            problemas = [l for l in r.stdout.splitlines() if l.strip().startswith("[!!]")]
+            return FALLA, "; ".join(p.strip() for p in problemas) or r.stdout[-300:]
+        resumen = [l for l in r.stdout.splitlines() if "controles en verde" in l]
+        return OK, (resumen[0].strip() if resumen else "instalador coherente") + \
+            " · no se puede correr el instalador en este entorno (Windows-only) " \
+            "para verlo con los ojos"
 
     resultados.append(_control("Distribución", "Instalador: ícono, menú y desinstalador",
                                _instalador_windows))

@@ -187,9 +187,22 @@ Deja, si Inno Setup 6 está instalado:
 Y siempre, tenga o no Inno Setup: `dist\Plania_portable.zip`.
 
 Este instalador **permite elegir dónde instalar** (`DisableDirPage=no` en
-`packaging/instalador.iss`, explícito) y no se rompe si Plania está abierto
-al instalar o desinstalar encima: detecta el proceso y pide cerrarlo antes
-de seguir, en vez de fallar a mitad de camino con archivos bloqueados.
+`packaging/instalador.iss`, explícito), valida la carpeta elegida antes de
+copiar nada (unidad lista, con espacio, escribible; avisa si es de red o
+extraíble), y no se rompe si Plania está abierto al instalar o desinstalar
+encima: detecta el proceso y pide cerrarlo antes de seguir, en vez de fallar
+a mitad de camino con archivos bloqueados.
+
+**Todo lo que Plania guarda queda en el mismo disco donde se instaló** —no
+sólo el programa. La licencia, la configuración del ERP y la caché de
+archivos subidos se guardan en una carpeta `datos\` al lado del `.exe`
+(`plania/config.py`, `_carpeta_junto_al_exe`), y los logs en `datos\logs`
+(`packaging/plania_launcher.py`). Antes quedaban siempre en `~/.plania` y
+`%LOCALAPPDATA%` —el perfil de Windows, casi siempre en C:— sin importar en
+qué disco se hubiera instalado el programa. Quien actualiza desde una
+versión anterior no pierde la licencia activada: se migra una sola vez, la
+primera vez que arranca la versión nueva. `python3 packaging/verificar_instalador.py`
+comprueba las dos cosas (elegir disco y guardar ahí) sin necesitar Windows.
 
 En el workflow de Release (`.github/workflows/release.yml`) hay que instalar
 Inno Setup a mano antes de construir: la imagen `windows-latest` actual
