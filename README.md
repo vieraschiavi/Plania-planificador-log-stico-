@@ -260,6 +260,19 @@ distribuir).
 `backend_venta/` nunca viaja al cliente: es el servidor de venta del
 Licenciante, no algo que el comprador de una licencia deba recibir.
 
+El instalador (`packaging/instalador.iss`, Inno Setup) tiene panel de
+bienvenida/cierre propio y logo en las páginas intermedias — la misma marca
+que el ícono de la app, no el asistente genérico gris. Las imágenes se
+generan, no se suben a mano:
+
+```bash
+python3 packaging/generar_imagenes_instalador.py
+```
+
+Salen de leer los colores reales de `assets/brand/plania_icon.png`, así que
+si el logo cambia algún día, correr el script de nuevo alcanza para que el
+instalador lo siga.
+
 ## Licencia de uso (EULA)
 
 El uso de Plania —demo o pago— está sujeto a
