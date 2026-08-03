@@ -1453,9 +1453,13 @@ def test_el_programa_no_se_publica_en_la_red_local():
     escuchar solo en la máquina del usuario."""
     import inspect
     L = _lanzador()
-    fuente = inspect.getsource(L.main)
-    assert '"STREAMLIT_SERVER_ADDRESS", "127.0.0.1"' in fuente
-    assert "--server.address=" in fuente
+    assert '"STREAMLIT_SERVER_ADDRESS", "127.0.0.1"' in inspect.getsource(L.main)
+    # La dirección se le pasa a Streamlit en _servir, que es quien lo arranca.
+    servir = inspect.getsource(L._servir)
+    assert 'os.environ["STREAMLIT_SERVER_ADDRESS"]' in servir, \
+        "la dirección tiene que salir del entorno, no estar fija en el arranque"
+    assert 'set_option("server.address", direccion)' in servir, \
+        "sin esto Streamlit vuelve a su default 0.0.0.0 y se expone a la red"
 
 
 def test_lanzador_elige_puerto_libre_valido():
@@ -2347,3 +2351,566 @@ def test_instalador_referencia_las_imagenes_del_asistente():
     iss = open(os.path.join(RAIZ, "packaging", "instalador.iss"), encoding="utf-8").read()
     assert "WizardImageFile=" in iss
     assert "WizardSmallImageFile=" in iss
+
+
+# ---------------------------------------------------------------------------
+# El puerto no puede hacer fallar el arranque
+# ---------------------------------------------------------------------------
+def test_reservar_devuelve_none_si_el_puerto_esta_tomado():
+    """La reserva cierra la ventana entre 'comprobé que estaba libre' y
+    'Streamlit lo tomó'. Si no distinguiera ocupado de libre, no serviría."""
+    import socket
+
+    L = _lanzador()
+    ocupado = socket.socket()
+    ocupado.bind(("127.0.0.1", 0))
+    ocupado.listen(1)
+    puerto = ocupado.getsockname()[1]
+    try:
+        assert L._reservar(puerto) is None, "dio por libre un puerto tomado"
+    finally:
+        ocupado.close()
+
+    reserva = L._reservar(puerto)
+    assert reserva is not None, "no pudo reservar un puerto que quedó libre"
+    # Mientras la tenemos, nadie más puede: eso es lo que evita la carrera.
+    assert L._reservar(puerto) is None
+    reserva.close()
+
+
+def test_si_otro_programa_gana_la_carrera_se_prueba_el_siguiente_puerto():
+    """El caso que el usuario pidió que no diera error: entre que se suelta la
+    reserva y Streamlit hace su bind, otro programa se lleva el puerto.
+    Streamlit no reintenta —muere con "Port N is not available" y código 1—,
+    así que el lanzador tiene que mudarse solo.
+
+    La carrera real dura microsegundos y no se puede provocar por tiempo, así
+    que se inyecta: el primer intento falla como falla Streamlit, y el puerto
+    queda ocupado de verdad para que el lanzador lo verifique.
+    """
+    import socket
+
+    import streamlit.web as sweb
+    from streamlit.web import bootstrap as _bs_real   # fuerza la carga del submodulo
+
+    L = _lanzador()
+    intentos = []
+
+    intruso = socket.socket()
+    intruso.bind(("127.0.0.1", 0))
+    intruso.listen(1)
+    puerto_robado = intruso.getsockname()[1]
+
+    def _run(*a, **k):
+        if intentos[-1] == puerto_robado:
+            raise SystemExit(1)          # así muere Streamlit con el puerto tomado
+        return None                      # arrancó bien
+
+    original_reservar = L._reservar
+
+    def _reservar(puerto):
+        # El intruso tiene el puerto tomado, así que hay que soltarlo un
+        # instante para que el lanzador pueda reservarlo — que es exactamente
+        # la ventana que se está simulando.
+        if puerto == puerto_robado:
+            intruso.close()
+        s = original_reservar(puerto)
+        if s is not None:
+            intentos.append(s.getsockname()[1])
+        return s
+
+    original_bootstrap = sweb.bootstrap
+    original_ocupado = L._ocupado
+    L._reservar = _reservar
+    # Tras el fallo, el puerto tiene que verse ocupado para que el lanzador
+    # sepa que fue la carrera y no otro error.
+    L._ocupado = lambda p: p == puerto_robado
+    sweb.bootstrap = type(sweb.bootstrap)("bootstrap")
+    sweb.bootstrap.run = _run
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
+    try:
+        L._servir("/tmp/no-importa.py", puerto_robado, electron=True)
+    finally:
+        L._reservar = original_reservar
+        L._ocupado = original_ocupado
+        sweb.bootstrap = original_bootstrap
+        try:
+            intruso.close()
+        except Exception:
+            pass
+
+    assert len(intentos) >= 2, f"no reintentó en otro puerto: {intentos}"
+    assert intentos[0] == puerto_robado
+    assert intentos[-1] != puerto_robado, "se quedó en el puerto que perdió"
+
+
+def test_un_error_que_no_es_de_puerto_no_se_reintenta_en_bucle():
+    """Si Streamlit falla por otra cosa, reintentar en otro puerto solo
+    esconde el error real y lo repite cinco veces. Tiene que propagarse."""
+    import streamlit.web as sweb
+    from streamlit.web import bootstrap as _bs_real   # fuerza la carga del submodulo
+
+    L = _lanzador()
+    llamadas = []
+
+    def _run(*a, **k):
+        llamadas.append(1)
+        raise SystemExit(1)
+
+    original_bootstrap = sweb.bootstrap
+    original_ocupado = L._ocupado
+    L._ocupado = lambda p: False          # el puerto quedó libre => no fue la carrera
+    sweb.bootstrap = type(sweb.bootstrap)("bootstrap")
+    sweb.bootstrap.run = _run
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
+    try:
+        with pytest.raises(SystemExit):
+            L._servir("/tmp/no-importa.py", 0, electron=True)
+    finally:
+        L._ocupado = original_ocupado
+        sweb.bootstrap = original_bootstrap
+
+    assert len(llamadas) == 1, f"reintentó un error que no era de puerto ({len(llamadas)} veces)"
+
+
+def test_el_bat_se_limpia_si_falla_la_instalacion():
+    """Lo que le pasó al usuario: pip murió sin espacio en disco DESPUÉS de
+    crear .venv. Sin borrar ese entorno a medias, el próximo doble clic ve
+    que .venv existe, se saltea la instalación y falla más adelante con un
+    error distinto y más confuso."""
+    bat = open(os.path.join(RAIZ, "INICIAR_PLANIA.bat"), encoding="utf-8",
+               errors="replace").read()
+    ejecutables = "\n".join(l for l in bat.splitlines()
+                            if not l.strip().lower().startswith("rem"))
+    assert "rd /s /q .venv" in ejecutables, \
+        "un entorno a medio instalar tiene que borrarse para que el reintento sirva"
+    assert "--no-cache-dir" in ejecutables, \
+        "sin esto pip guarda otra copia de cada paquete y necesita casi el doble de disco"
+    assert "No space left on device" in bat, \
+        "el .bat tiene que reconocer el error de disco lleno y explicarlo"
+    # La consola de Windows rompe los acentos segun la codepage.
+    assert not any(c in bat for c in "áéíóúñÁÉÍÓÚÑ"), \
+        "el .bat no puede tener acentos: se ven mal en la consola de Windows"
+
+
+# ---------------------------------------------------------------------------
+# Que el que paga reciba su licencia, y una sola
+# ---------------------------------------------------------------------------
+def test_un_pago_no_puede_emitir_dos_licencias(tmp_path, monkeypatch):
+    """MercadoPago reenvía la notificación hasta recibir 200, y además le da
+    el payment_id al comprador en la URL de retorno. Sin idempotencia,
+    repetir ese POST fabricaba licencias pro ilimitadas con un curl."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MP_ACCESS_TOKEN", "token-de-prueba")
+    from backend_venta.app import app
+
+    class _Aprobado:
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"status": "approved",
+                    "metadata": {"plan": "pro", "email": "cliente@pago.uy"}}
+
+    c = TestClient(app)
+    with patch("backend_venta.app.requests.get", return_value=_Aprobado):
+        r = [c.post("/webhooks/mercadopago",
+                    json={"type": "payment", "data": {"id": "777"}}).json()
+             for _ in range(3)]
+
+    assert len({x["licencia"] for x in r}) == 1, "un pago emitió más de una licencia"
+    assert len({x["token_descarga"] for x in r}) == 1, "emitió más de un token de descarga"
+    assert r[1].get("repetido") is True
+
+
+def test_el_comprador_puede_recuperar_la_licencia_que_pago(tmp_path, monkeypatch):
+    """El webhook le responde a MercadoPago, no al comprador: la licencia
+    viajaba en un cuerpo que MP descarta, así que el cliente pagaba y no
+    recibía nada. Tiene que poder pedirla con su payment_id."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MP_ACCESS_TOKEN", "token-de-prueba")
+    from backend_venta.app import app
+    from backend_venta import licencias
+
+    class _Aprobado:
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"status": "approved",
+                    "metadata": {"plan": "starter", "email": "compro@uy"}}
+
+    class _Pendiente:
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"status": "pending", "metadata": {}}
+
+    c = TestClient(app)
+    # Llega primero el comprador, antes que el webhook: igual la recibe.
+    with patch("backend_venta.app.requests.get", return_value=_Aprobado):
+        g = c.get("/licencias/por-pago/888").json()
+        assert licencias.validar_licencia(g["licencia"])["plan"] == "starter"
+        # Y el webhook posterior no emite otra distinta.
+        w = c.post("/webhooks/mercadopago",
+                   json={"type": "payment", "data": {"id": "888"}}).json()
+        assert w["licencia"] == g["licencia"]
+
+    # Saber un payment_id no alcanza: tiene que estar aprobado de verdad.
+    with patch("backend_venta.app.requests.get", return_value=_Pendiente):
+        assert c.get("/licencias/por-pago/000").status_code == 404
+
+
+def test_activar_una_licencia_no_rompe_el_arranque(tmp_path, monkeypatch):
+    """El bug más caro que tuvo el producto: activar una licencia paga
+    guardaba las claims (un dict) en el mismo almacén que las credenciales, y
+    al siguiente arranque `config.aplicar()` moría con TypeError. O sea: todo
+    cliente que pagaba dejaba de poder abrir la aplicación."""
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    import importlib
+
+    from plania import config as pconfig
+    importlib.reload(pconfig)
+
+    pconfig.guardar_extra("LICENCIA_CLAIMS", {"cliente": "x@y.uy", "plan": "pro"})
+    pconfig.guardar_extra("ANTHROPIC_API_KEY", "sk-ant-de-prueba")
+
+    pconfig.aplicar()          # esto es lo que corre app/app.py al arrancar
+
+    assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-de-prueba", \
+        "dejó de exportar las credenciales que sí van al entorno"
+    assert "LICENCIA_CLAIMS" not in os.environ, \
+        "las claims no son una variable de entorno"
+
+
+# ---------------------------------------------------------------------------
+# Catálogo: entender la base de CUALQUIER empresa, no solo las conocidas
+# ---------------------------------------------------------------------------
+def _base_con_nombres_inventados(tmp_path):
+    """Una base como la de una empresa real: nombres que no están en ninguna
+    lista, una tabla trampa vacía que sí tiene el nombre esperado, y ninguna
+    clave foránea declarada (lo normal en un ERP viejo)."""
+    import sqlite3
+    ruta = tmp_path / "rara.db"
+    c = sqlite3.connect(ruta)
+    c.execute("""CREATE TABLE TBL_ITEMS_01 (sku TEXT PRIMARY KEY, detalle TEXT,
+                 familia TEXT, marca TEXT, costo_neto REAL, pvp REAL,
+                 existencia INTEGER)""")
+    c.execute("""CREATE TABLE MAESTRO_CTAS (nro_cta TEXT PRIMARY KEY,
+                 nombre_fantasia TEXT, actividad TEXT, zona_reparto TEXT)""")
+    c.execute("""CREATE TABLE MOV_FACT_DET (doc TEXT, fec TEXT, nro_cta TEXT,
+                 sku TEXT, cant REAL, importe_unit REAL, costo_neto REAL)""")
+    # Trampa: se llama "articulos" pero quedó vacía de una migración vieja.
+    c.execute("""CREATE TABLE articulos (cod_articulo TEXT, descripcion TEXT,
+                 costo_unitario REAL, precio_venta REAL, stock_actual INTEGER)""")
+    for i in range(40):
+        c.execute("INSERT INTO TBL_ITEMS_01 VALUES (?,?,?,?,?,?,?)",
+                  (f"SKU{i:03d}", f"Producto {i}", "Bebidas", "M1", 10.0, 20.0, 5))
+        c.execute("INSERT INTO MAESTRO_CTAS VALUES (?,?,?,?)",
+                  (f"CTA{i:03d}", f"Comercio {i}", "Almacen", "Centro"))
+        c.execute("INSERT INTO MOV_FACT_DET VALUES (?,?,?,?,?,?,?)",
+                  (f"A{i}", "2026-03-01", f"CTA{i:03d}", f"SKU{i:03d}", 3, 20.0, 10.0))
+    c.commit()
+    c.close()
+    return ruta
+
+
+def test_encuentra_las_tablas_aunque_se_llamen_cualquier_cosa(tmp_path):
+    """El caso que antes fallaba: la empresa no llama a sus tablas como el
+    ERP del manual. Si Plania solo busca por nombre, no encuentra nada y el
+    cliente ve 'no pude mapear columnas obligatorias' sin saber qué hacer."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    ruta = _base_con_nombres_inventados(tmp_path)
+    eng = conectores.conectar_sql(f"sqlite:///{ruta}")
+    cat = cm.extraer(eng)
+    elegidas = cm.elegir_tablas(cat, conectores.SINONIMOS,
+                                conectores.TABLAS_CANDIDATAS, conectores.OBLIGATORIAS)
+    elegidas = cm.completar_por_estructura(cat, elegidas, conectores.SINONIMOS,
+                                           conectores.OBLIGATORIAS)
+
+    assert elegidas["productos"]["tabla"] == "TBL_ITEMS_01"
+    assert elegidas["ventas"]["tabla"] == "MOV_FACT_DET"
+    # A esta no se llega por ningún parecido de nombre: 'cta' no se parece a
+    # 'cuenta' ni a 'cliente'. Sale de ver que su clave está dentro de ventas.
+    assert elegidas["clientes"]["tabla"] == "MAESTRO_CTAS"
+    assert elegidas["clientes"].get("por_estructura") is True
+
+
+def test_no_elige_la_tabla_vacia_aunque_tenga_el_nombre_esperado(tmp_path):
+    """Una migración vieja deja `articulos` vacía y los datos en otro lado.
+    Elegir por nombre agarra la vacía y el cliente ve un panel en cero."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    ruta = _base_con_nombres_inventados(tmp_path)
+    eng = conectores.conectar_sql(f"sqlite:///{ruta}")
+    cat = cm.extraer(eng)
+    elegidas = cm.elegir_tablas(cat, conectores.SINONIMOS,
+                                conectores.TABLAS_CANDIDATAS, conectores.OBLIGATORIAS)
+    assert elegidas["productos"]["tabla"] != "articulos"
+    assert cat["tablas"]["articulos"]["n_filas"] == 0
+
+
+def test_mapea_las_columnas_abreviadas_y_las_de_enlace(tmp_path):
+    from plania import catalogo as cm
+    from plania import conectores
+
+    ruta = _base_con_nombres_inventados(tmp_path)
+    eng = conectores.conectar_sql(f"sqlite:///{ruta}")
+    cat = cm.extraer(eng)
+    elegidas = cm.completar_por_estructura(
+        cat, cm.elegir_tablas(cat, conectores.SINONIMOS,
+                              conectores.TABLAS_CANDIDATAS, conectores.OBLIGATORIAS),
+        conectores.SINONIMOS, conectores.OBLIGATORIAS)
+    tablas = {e: r["tabla"] for e, r in elegidas.items()}
+
+    for entidad in ("productos", "clientes", "ventas"):
+        mapeo = cm.sugerir_mapeo(cat, tablas[entidad], entidad,
+                                 conectores.SINONIMOS, tablas)
+        faltan = [o for o in conectores.OBLIGATORIAS[entidad]
+                  if o not in mapeo.values()]
+        assert not faltan, f"{entidad}: quedaron sin mapear {faltan}"
+
+    ventas = cm.sugerir_mapeo(cat, tablas["ventas"], "ventas",
+                              conectores.SINONIMOS, tablas)
+    assert ventas.get("fec") == "fecha", "no reconoció la abreviatura fec->fecha"
+    assert ventas.get("nro_cta") == "cliente_id", "no siguió el enlace a clientes"
+    # El error que tuvo la primera versión: 'nro_cta' cargado como número de
+    # comprobante porque comparte el token vacío 'nro' con 'nro_comprobante'.
+    assert ventas.get("nro_cta") != "venta_id"
+    assert ventas.get("doc") == "venta_id"
+
+
+def test_un_token_generico_no_alcanza_para_dar_dos_columnas_por_iguales():
+    """`nro_cta` y `nro_comprobante` comparten 'nro' y no son lo mismo. Un
+    mapeo equivocado en silencio es peor que uno faltante: el cliente ve
+    números que no significan nada y no tiene cómo notarlo."""
+    from plania import catalogo as cm
+
+    assert cm.parecido("nro_cta", "nro_comprobante") == 0.0
+    assert cm.parecido("cod_x", "cod_y") == 0.0
+    # Y lo que sí tiene que reconocer:
+    assert cm.parecido("fec", "fecha") > 0.6
+    assert cm.parecido("nombre_fantasia", "nombre") > 0.6
+    assert cm.parecido("costo_neto", "costo") > 0.6
+
+
+def test_las_categorias_para_filtrar_salen_de_los_datos_reales():
+    """Los filtros del panel tienen que ofrecer los rubros que el cliente
+    tiene de verdad, no una lista fija inventada."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    datos = conectores.cargar_datos()
+    cats = cm.columnas_categoricas(datos["productos"])
+    assert "categoria" in cats
+    # El código de producto es único por fila: no es una categoría.
+    assert "sku" not in cats
+    valores = cm.valores_de(datos["productos"], "categoria")
+    assert len(valores) > 1 and all(v is not None for v in valores)
+
+
+# ---------------------------------------------------------------------------
+# Archivos: que entre lo que el cliente exporta de SU sistema
+# ---------------------------------------------------------------------------
+def test_lee_el_csv_como_lo_exporta_un_erp_de_aca(tmp_path):
+    """Formato real: latin-1, separador punto y coma, decimal con coma y
+    miles con punto. Antes tiraba UnicodeDecodeError y el cliente no tenía
+    forma de saber que el problema era la codificación."""
+    from plania import archivos
+
+    ruta = tmp_path / "zureo.csv"
+    ruta.write_bytes(
+        "Código;Descripción;Rubro;Costo;Precio Venta;Stock\n"
+        "A001;Café Águila 500g;Almacén;123,45;1.234,50;12\n"
+        "A002;Té Hornimans;Almacén;98,70;150,00;5\n".encode("latin-1"))
+
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["Código", "Descripción", "Rubro", "Costo",
+                                "Precio Venta", "Stock"]
+    assert len(df) == 2
+    # Lo que de verdad importa: que los importes queden como NÚMERO. Si
+    # "1.234,50" se lee como texto, todos los cálculos de plata dan cero y el
+    # cliente ve un panel vacío sin ningún mensaje de error.
+    assert df["Precio Venta"].dtype.kind in "if"
+    assert abs(df["Precio Venta"].iloc[0] - 1234.50) < 0.01
+    assert abs(df["Costo"].iloc[0] - 123.45) < 0.01
+    assert df["Descripción"].iloc[0] == "Café Águila 500g"
+
+
+def test_lee_csv_separado_por_tabulaciones_con_bom(tmp_path):
+    from plania import archivos
+
+    ruta = tmp_path / "tango.csv"
+    ruta.write_bytes("cod_art\tdetalle\tcosto\tprecio\n"
+                     "B1\tYerba Canarias\t80.5\t120.0\n".encode("utf-8-sig"))
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["cod_art", "detalle", "costo", "precio"]
+    assert df["costo"].iloc[0] == 80.5
+
+
+def test_saltea_el_titulo_del_reporte_antes_del_encabezado(tmp_path):
+    """Los reportes traen el nombre de la empresa y la fecha arriba de todo.
+    Antes eso era un ParserError."""
+    from plania import archivos
+
+    ruta = tmp_path / "con_titulo.csv"
+    ruta.write_text("REPORTE DE ARTICULOS\nEmpresa Ejemplo SA\n"
+                    "Emitido: 03/08/2026\n\n"
+                    "codigo,descripcion,costo,precio\nC1,Fideos,20,35\n",
+                    encoding="utf-8")
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["codigo", "descripcion", "costo", "precio"]
+    assert len(df) == 1
+    assert df["codigo"].iloc[0] == "C1"
+
+
+def test_la_linea_en_blanco_no_desfasa_el_encabezado(tmp_path):
+    """`skiprows` cuenta líneas del archivo, no líneas con contenido. Contar
+    sobre la lista ya filtrada saltea de menos y el encabezado se lee como si
+    fuera un dato."""
+    from plania import archivos
+
+    ruta = tmp_path / "blancos.csv"
+    ruta.write_text("TITULO\n\n\ncodigo,precio\nX1,10\nX2,20\n", encoding="utf-8")
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["codigo", "precio"]
+    assert len(df) == 2
+
+
+def test_importa_un_archivo_grande_sin_cargarlo_entero_en_memoria(tmp_path):
+    """'Sin límite de datos' quiere decir que el pico de memoria dependa del
+    pedazo, no del archivo. Se comprueba importando de a 500 filas: si
+    cargara todo, el número de filas escritas seguiría siendo correcto pero
+    el diseño no serviría para un archivo que no entra en RAM."""
+    import sqlite3
+
+    from plania import archivos
+
+    ruta = tmp_path / "grande.csv"
+    with open(ruta, "w", encoding="utf-8") as f:
+        f.write("codigo;descripcion;costo;precio\n")
+        for i in range(5000):
+            f.write(f"SKU{i};Producto {i};{i},50;{i * 2},75\n")
+
+    db = tmp_path / "salida.db"
+    n = archivos.importar_a_sqlite(ruta, "articulos", str(db), filas_por_pedazo=500)
+    assert n == 5000
+
+    con = sqlite3.connect(db)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM articulos").fetchone()[0] == 5000
+        # El decimal con coma tiene que haber quedado numérico también acá.
+        assert con.execute("SELECT typeof(costo) FROM articulos LIMIT 1").fetchone()[0] == "real"
+        assert con.execute("SELECT costo FROM articulos WHERE codigo='SKU10'").fetchone()[0] == 10.5
+    finally:
+        con.close()
+
+
+def test_el_conector_usa_el_lector_adaptable(tmp_path):
+    """La app entra por conectores.leer_archivo: si eso no delega en el lector
+    nuevo, todo lo anterior no le sirve a nadie."""
+    from plania import conectores
+
+    ruta = tmp_path / "raro.csv"
+    ruta.write_bytes("Código;Precio\nA1;1.234,50\n".encode("latin-1"))
+    df = conectores.leer_archivo(ruta)
+    assert abs(df["Precio"].iloc[0] - 1234.50) < 0.01
+
+
+def test_filtrar_por_categoria_arrastra_las_ventas():
+    """Filtrar productos tiene que filtrar también sus ventas. Si no, los KPI
+    quedan incoherentes: la venta sigue siendo la del negocio entero mientras
+    el stock es el de una categoría, y el margen que sale de cruzarlos no
+    significa nada."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    datos = conectores.cargar_datos()
+    categoria = cm.valores_de(datos["productos"], "categoria")[0]
+
+    productos = datos["productos"][datos["productos"]["categoria"] == categoria]
+    ventas = datos["ventas"][datos["ventas"]["sku"].isin(productos["sku"])]
+
+    assert 0 < len(productos) < len(datos["productos"])
+    assert 0 < len(ventas) < len(datos["ventas"]), \
+        "el filtro de productos no redujo las ventas"
+    # Ninguna venta puede quedar apuntando a un producto que se filtró.
+    assert set(ventas["sku"]) <= set(productos["sku"])
+
+
+def test_la_app_ofrece_filtros_y_avisa_cuando_estan_puestos():
+    """Un panel filtrado que no lo dice lleva a decisiones equivocadas: el
+    encargado ve 'venta 30 días' y cree que es la del negocio entero."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert "catalogo.columnas_categoricas" in app, \
+        "las categorías tienen que salir de los datos del cliente, no de una lista fija"
+    assert "_aviso_filtros" in app
+    assert app.count("_aviso_filtros()") >= 5, \
+        "el aviso tiene que estar en todas las pantallas que filtran"
+    assert "Limpiar filtros" in app
+
+
+# ---------------------------------------------------------------------------
+# Presentación: es un producto que se vende, no un volcado de la base
+# ---------------------------------------------------------------------------
+def test_los_montos_usan_el_formato_de_aca():
+    """`$2.86 M` con punto decimal es formato de Estados Unidos; en Uruguay
+    eso se lee "dos punto ochenta y seis". Y un número cortado en la pantalla
+    principal es lo peor que puede pasar en una demo."""
+    import importlib.util
+    import sys
+
+    ruta = os.path.join(RAIZ, "app", "app.py")
+    fuente = open(ruta, encoding="utf-8").read()
+    # Se ejecutan solo las dos funciones de formato, sin levantar Streamlit.
+    ns: dict = {}
+    inicio = fuente.index("def _miles(")
+    fin = fuente.index("# Nombres de columna que ve el cliente")
+    exec(compile(fuente[inicio:fin], ruta, "exec"), ns)
+
+    assert ns["_miles"](1234567.89, 2) == "1.234.567,89"
+    assert ns["_fmt"](2856128) == "$2,86 M"
+    # El caso que se veía cortado como "$689,…" en la tarjeta:
+    assert ns["_fmt"](689234) == "$689 K"
+    assert ns["_fmt"](1500) == "$1.500"
+
+
+def test_no_se_le_muestran_al_cliente_los_nombres_internos():
+    """`cliente_id`, `ultima_compra` y `margen_pct` son nombres del modelo de
+    datos. El cliente tiene que ver el nombre de su negocio."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+
+    assert "ETIQUETAS = {" in app
+    for interno in ("cliente_id", "ultima_compra", "margen_pct", "stock_min"):
+        assert f'"{interno}"' in app.split("ETIQUETAS = {")[1].split("}")[0], \
+            f"falta la etiqueta en castellano para {interno}"
+
+    # Todas las tablas pasan por el mismo formateador: si alguna usa
+    # st.dataframe directo, queda mostrando 315742.95 al lado de otra que
+    # muestra 315.743.
+    cuerpo = app.split("def _tabla(")[1]
+    directas = [l for l in cuerpo.splitlines()
+                if "st.dataframe(" in l and "vista" not in l]
+    assert len(directas) <= 2, f"tablas sin formatear: {directas}"
+
+
+def test_el_menu_no_parece_un_formulario():
+    """El menú es un st.radio: sin ocultar el círculo de "opción marcada" se
+    ve como un formulario y no como la navegación de un producto."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert 'label[data-testid="stRadioOption"]' in app, \
+        "el selector tiene que anclarse en el data-testid, que es estable; " \
+        "las clases st-emotion-cache-… cambian entre versiones"
+    assert "display: none !important" in app

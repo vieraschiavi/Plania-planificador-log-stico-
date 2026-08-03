@@ -25,7 +25,7 @@ pd.set_option("mode.string_storage", "python")
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 
-from plania import analitica, conectores, copiloto, exportes, licencia, rutas, sugerencias  # noqa: E402
+from plania import analitica, catalogo, conectores, copiloto, exportes, licencia, rutas, sugerencias  # noqa: E402
 from plania import config as pconfig  # noqa: E402
 
 pconfig.aplicar()
@@ -63,9 +63,20 @@ st.markdown(f"""
       color: #FFFFFF; margin: 4px 0 0 0;
   }}
   .plania-logo span {{ color: {CELESTE}; }}
+  /* El menú es un st.radio, pero el círculo de "opción marcada" lo hace ver
+     como un formulario, no como la navegación de un producto. Se oculta el
+     control y se deja solo el texto con su barra de selección. */
+  section[data-testid="stSidebar"] .stRadio [data-testid="stWidgetLabel"] {{ display: none; }}
+  /* El círculo del radio. La estructura real es
+         label[data-testid=stRadioOption] > div > div > [círculo] + [texto]
+     y se apunta anclando en el data-testid, que es estable entre versiones,
+     en vez de en las clases generadas (st-emotion-cache-…) que cambian. */
+  section[data-testid="stSidebar"] label[data-testid="stRadioOption"] > div > div > div:first-child {{
+      display: none !important;
+  }}
   section[data-testid="stSidebar"] .stRadio label {{
-      padding: 7px 12px; border-radius: 8px; width: 100%;
-      font-size: .93rem; font-weight: 500;
+      padding: 8px 14px; border-radius: 8px; width: 100%;
+      font-size: .93rem; font-weight: 500; margin-bottom: 1px;
       border-left: 3px solid transparent; transition: background .15s;
   }}
   section[data-testid="stSidebar"] .stRadio label:hover {{
@@ -88,11 +99,17 @@ st.markdown(f"""
       border-radius: 8px; padding: 12px 16px; font-weight: 500;
       margin-bottom: 12px;
   }}
+  /* Altura pareja: sin esto, la tarjeta que trae variación (↑24,1%) queda
+     más alta que las otras cuatro y la fila se ve desprolija. */
   div[data-testid="stMetric"] {{
       background: #FFFFFF; border: 1px solid #E3E8F2;
-      border-radius: 10px; padding: 14px 16px;
+      border-radius: 10px; padding: 14px 16px; height: 100%;
       box-shadow: 0 1px 3px rgba(16,30,60,.06);
   }}
+  div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
+      font-size: 1.9rem; font-weight: 700; color: #142848;
+  }}
+  div[data-testid="stMetric"] > div {{ overflow-wrap: anywhere; }}
   div[data-testid="stMetric"] label {{ color: #5A6B85 !important; font-weight: 500; }}
   .stChatMessage {{ border-radius: 10px; }}
   button[kind="primary"] {{ border-radius: 8px; font-weight: 600; }}
@@ -143,11 +160,106 @@ def cargar_datos() -> dict | None:
         return None
 
 
+def _miles(n: float, decimales: int = 0) -> str:
+    """Número con separadores de acá: 1.234.567,89 — punto para miles, coma
+    para decimales. Python los escribe al revés, así que se dan vuelta."""
+    s = f"{n:,.{decimales}f}"
+    return s.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 def _fmt(n: float) -> str:
-    """Montos compactos para tarjetas: $2.86 M en vez de $2,856,128 truncado."""
+    """Montos compactos para las tarjetas del panel.
+
+    Dos cosas que estaban mal y se ven en cualquier demo:
+
+    - El separador. `$2.86 M` con punto decimal es formato de Estados Unidos;
+      acá eso se lee "dos punto ochenta y seis". Va `$2,86 M`.
+    - El ancho. Con cinco tarjetas en fila, `$689.234` no entra y Streamlit lo
+      cortaba a `$689,…`. Un número cortado en la pantalla principal de un
+      producto que se vende es lo peor que puede pasar en una demo. Por eso
+      los miles también se abrevian.
+    """
     if abs(n) >= 1_000_000:
-        return f"${n / 1_000_000:,.2f} M"
-    return f"${n:,.0f}"
+        return f"${_miles(n / 1_000_000, 2)} M"
+    if abs(n) >= 100_000:
+        return f"${_miles(n / 1_000)} K"
+    return f"${_miles(n)}"
+
+
+# Nombres de columna que ve el cliente. Las claves son los nombres canónicos
+# internos: mostrar `cliente_id` o `ultima_compra` en pantalla es enseñarle al
+# cliente el modelo de datos, no su negocio.
+ETIQUETAS = {
+    "sku": "Código", "nombre": "Producto", "categoria": "Categoría",
+    "proveedor": "Proveedor", "costo": "Costo", "precio": "Precio",
+    "stock": "Stock", "stock_min": "Stock mínimo",
+    "lead_time_dias": "Días de reposición",
+    "cliente_id": "Cliente", "tipo_negocio": "Tipo de negocio",
+    "departamento": "Departamento", "zona": "Zona",
+    "venta": "Venta", "margen": "Margen", "margen_pct": "Margen %",
+    "pedidos": "Pedidos", "ultima_compra": "Última compra",
+    "unidades": "Unidades", "cantidad": "Cantidad", "fecha": "Fecha",
+    "precio_unit": "Precio unitario", "costo_unit": "Costo unitario",
+    "rotacion": "Rotación", "dias_stock": "Días de stock",
+    "capital_inmovilizado": "Capital inmovilizado",
+    "descuento_sugerido": "Descuento sugerido", "precio_oferta": "Precio con oferta",
+    "venta_id": "Comprobante", "dias_sin_comprar": "Días sin comprar",
+}
+
+
+# Plotly rotula los ejes con el nombre de la columna: "venta", "margen_pct",
+# "categoria". Al cliente hay que mostrarle el nombre de su negocio, no el de
+# la columna — se reusan las mismas ETIQUETAS de las tablas para que un
+# concepto se llame igual en todos lados.
+ETIQUETAS_GRAFICO = dict(ETIQUETAS, mes="Mes", lat="Latitud", lon="Longitud")
+
+
+def _ejes(fig):
+    """Deja el gráfico con nombres legibles y sin ruido visual."""
+    fig.for_each_xaxis(lambda a: a.update(
+        title_text=ETIQUETAS_GRAFICO.get(a.title.text, a.title.text or "")))
+    fig.for_each_yaxis(lambda a: a.update(
+        title_text=ETIQUETAS_GRAFICO.get(a.title.text, a.title.text or "")))
+    if fig.layout.coloraxis and fig.layout.coloraxis.colorbar:
+        t = fig.layout.coloraxis.colorbar.title.text
+        if t:
+            fig.layout.coloraxis.colorbar.title.text = ETIQUETAS_GRAFICO.get(t, t)
+    fig.update_layout(
+        font=dict(family="Inter, Segoe UI, system-ui, sans-serif", size=12,
+                  color="#33415C"),
+        title_font=dict(size=15, color="#142848"),
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+        legend=dict(title_text=""),
+    )
+    fig.update_xaxes(gridcolor="#EEF2F8", zeroline=False)
+    fig.update_yaxes(gridcolor="#EEF2F8", zeroline=False)
+    return fig
+
+
+def _tabla(df: pd.DataFrame, **kw):
+    """Muestra una tabla con formato de producto, no de volcado de base.
+
+    Renombra las columnas a castellano, muestra los importes con separador de
+    miles y las fechas sin la hora. Es una sola función y no formato caso por
+    caso para que ninguna pantalla se olvide y quede mostrando `315742.95`
+    junto a otra que muestra `$315.743`.
+    """
+    if df is None or len(df) == 0:
+        st.caption("No hay datos para mostrar con los filtros actuales.")
+        return
+
+    vista = df.copy()
+    for col in vista.columns:
+        serie = vista[col]
+        if str(serie.dtype).startswith("datetime"):
+            vista[col] = serie.dt.strftime("%d/%m/%Y")
+        elif serie.dtype.kind == "f":
+            # Los porcentajes ya vienen en su escala; el resto son pesos.
+            dec = 1 if "pct" in col or "rotacion" in col or "dias" in col else 0
+            vista[col] = serie.map(lambda v, d=dec: "" if pd.isna(v) else _miles(v, d))
+    vista = vista.rename(columns={c: ETIQUETAS.get(c, c.replace("_", " ").capitalize())
+                                  for c in vista.columns})
+    st.dataframe(vista, width="stretch", hide_index=True, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +308,84 @@ if BLOQUEADA:
 datos = None
 if pagina not in ("Planes y licencia", "Configuración", "Ayuda", "Conectar ERP"):
     datos = cargar_datos()
+
+
+# ---------------------------------------------------------------------------
+# Filtros por categoría
+# ---------------------------------------------------------------------------
+# Las categorías NO están escritas acá: salen de los datos del cliente
+# (`catalogo.columnas_categoricas` las detecta por cardinalidad). Una lista
+# fija de rubros sería adivinar el negocio del cliente; así, un distribuidor
+# de bebidas filtra por sus marcas y una ferretería por sus rubros, sin que
+# nadie configure nada.
+PAGINAS_CON_FILTRO = ("Panel ejecutivo", "Stock y reposición", "Precios y márgenes",
+                      "Zonas y negocios", "Ofertas y sugerencias", "Rutas de reparto")
+
+
+def _filtrar(d: dict) -> tuple[dict, list[str]]:
+    """Aplica los filtros elegidos en la barra lateral. Devuelve (datos, activos).
+
+    Filtrar productos o clientes arrastra las ventas de esos productos o esos
+    clientes. Si no, los KPI quedarían incoherentes: la venta seguiría siendo
+    la del negocio entero mientras el stock sería el de una sola categoría, y
+    el margen resultante no significaría nada.
+    """
+    if not d:
+        return d, []
+
+    productos, clientes, ventas = d["productos"], d["clientes"], d["ventas"]
+    activos: list[str] = []
+
+    with st.sidebar:
+        st.markdown("**Filtros**")
+        for entidad, etiqueta in (("productos", "Producto"), ("clientes", "Cliente")):
+            base = d[entidad]
+            for col in catalogo.columnas_categoricas(base):
+                opciones = catalogo.valores_de(base, col)
+                if len(opciones) < 2:
+                    continue
+                sel = st.multiselect(f"{etiqueta} · {col.replace('_', ' ')}",
+                                     opciones, default=[],
+                                     key=f"filtro_{entidad}_{col}")
+                if not sel:
+                    continue
+                activos.append(f"{col}: {', '.join(str(s) for s in sel[:3])}"
+                               + ("…" if len(sel) > 3 else ""))
+                if entidad == "productos":
+                    productos = productos[productos[col].isin(sel)]
+                else:
+                    clientes = clientes[clientes[col].isin(sel)]
+
+        if activos:
+            if st.button("Limpiar filtros", width="stretch"):
+                for k in [k for k in st.session_state if k.startswith("filtro_")]:
+                    st.session_state[k] = []
+                st.rerun()
+
+    if len(productos) < len(d["productos"]):
+        ventas = ventas[ventas["sku"].isin(productos["sku"])]
+    if len(clientes) < len(d["clientes"]) and "cliente_id" in ventas.columns:
+        ventas = ventas[ventas["cliente_id"].isin(clientes["cliente_id"])]
+
+    return {"productos": productos, "clientes": clientes, "ventas": ventas}, activos
+
+
+FILTROS_ACTIVOS: list[str] = []
+if datos and pagina in PAGINAS_CON_FILTRO:
+    datos, FILTROS_ACTIVOS = _filtrar(datos)
+    if FILTROS_ACTIVOS and datos["ventas"].empty:
+        st.warning("Con esos filtros no queda ninguna venta. "
+                   "Sacá alguno para volver a ver datos.")
+
+
+def _aviso_filtros() -> None:
+    """Deja a la vista que lo de abajo es un recorte, no el negocio entero.
+
+    Un panel filtrado que no lo dice lleva a decisiones equivocadas: el
+    encargado ve 'venta 30 días' y cree que es la del negocio.
+    """
+    if FILTROS_ACTIVOS:
+        st.info("Filtrado por — " + " · ".join(FILTROS_ACTIVOS))
 
 
 def _ventas_enriquecidas(d: dict) -> pd.DataFrame:
@@ -252,6 +442,7 @@ if pagina == "Inicio":
 
 elif pagina == "Panel ejecutivo":
     st.title("Panel ejecutivo")
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         k = analitica.kpis(datos["productos"], v)
@@ -267,18 +458,19 @@ elif pagina == "Panel ejecutivo":
         fig = px.area(tm, x="mes", y="venta", title="Venta mensual",
                       color_discrete_sequence=[CELESTE])
         fig.update_layout(margin=dict(t=40, b=0), height=320)
-        col1.plotly_chart(fig, width="stretch")
+        col1.plotly_chart(_ejes(fig), width="stretch")
         g = analitica.por_dimension(v, "categoria")
         fig2 = px.bar(g, x="venta", y="categoria", orientation="h",
                       title="Venta por categoría", color="margen_pct",
                       color_continuous_scale=["#E74C3C", "#F39C12", "#20BF6B"])
         fig2.update_layout(margin=dict(t=40, b=0), height=320)
-        col2.plotly_chart(fig2, width="stretch")
+        col2.plotly_chart(_ejes(fig2), width="stretch")
         st.markdown("#### Top clientes")
-        st.dataframe(analitica.top_clientes(v), width="stretch", hide_index=True)
+        _tabla(analitica.top_clientes(v))
 
 elif pagina == "Stock y reposición":
     st.title("Stock y reposición")
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         r = analitica.rotacion(datos["productos"], v)
@@ -290,7 +482,7 @@ elif pagina == "Stock y reposición":
         with tab1:
             rep = sugerencias.reposicion(datos["productos"], v)
             if len(rep):
-                st.dataframe(rep, width="stretch", hide_index=True)
+                _tabla(rep)
                 _botones_export("reposicion", [("Reposición urgente",
                                                 exportes.TITULOS["reposicion"][1], rep)])
             else:
@@ -305,6 +497,7 @@ elif pagina == "Stock y reposición":
 
 elif pagina == "Precios y márgenes":
     st.title("Precios y márgenes")
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         mp = analitica.margen_por_producto(v)
@@ -318,10 +511,10 @@ elif pagina == "Precios y márgenes":
                          hover_name="nombre", title="Venta vs margen por producto",
                          labels={"venta": "Venta ($)", "margen_pct": "Margen %"})
         fig.update_layout(height=380, margin=dict(t=40, b=0))
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(_ejes(fig), width="stretch")
         st.markdown("#### Sugerencias de ajuste de precio")
         if len(pr):
-            st.dataframe(pr, width="stretch", hide_index=True)
+            _tabla(pr)
             _botones_export("precios", [("Ajustes de precio",
                                          exportes.TITULOS["precios"][1], pr)])
         else:
@@ -340,12 +533,12 @@ elif pagina == "Zonas y negocios":
                          color="margen_pct", title=f"Venta por {dim}",
                          color_continuous_scale=["#E74C3C", "#F39C12", "#20BF6B"])
             fig.update_layout(height=420, margin=dict(t=40, b=0))
-            col1.plotly_chart(fig, width="stretch")
+            col1.plotly_chart(_ejes(fig), width="stretch")
             col2.dataframe(g, width="stretch", hide_index=True)
         st.markdown("#### Oportunidades de venta cruzada por zona")
         op = sugerencias.oportunidades_zona(v)
         if len(op):
-            st.dataframe(op, width="stretch", hide_index=True)
+            _tabla(op)
             _botones_export("zonas", [("Oportunidades por zona",
                                        exportes.TITULOS["zonas"][1], op)])
         else:
@@ -353,6 +546,7 @@ elif pagina == "Zonas y negocios":
 
 elif pagina == "Rutas de reparto":
     st.title("Rutas de reparto")
+    _aviso_filtros()
     if not licencia.tiene("rutas"):
         st.warning("El plan actual no incluye el planificador de rutas — "
                    "disponible en **Pro** y **Enterprise**.")
@@ -381,7 +575,7 @@ elif pagina == "Rutas de reparto":
         if len(objetivo) and st.button("Planificar rutas", type="primary"):
             plan = rutas.planificar(objetivo, vehiculos=int(vehiculos),
                                     paradas_max=int(paradas))
-            st.dataframe(plan["resumen"], width="stretch", hide_index=True)
+            _tabla(plan["resumen"])
             if {"lat", "lon"}.issubset(plan["rutas"].columns):
                 figm = px.scatter_map(plan["rutas"], lat="lat", lon="lon",
                                       color=plan["rutas"]["vehiculo"].astype(str),
@@ -389,13 +583,14 @@ elif pagina == "Rutas de reparto":
                                       title="Paradas por vehículo")
                 figm.update_layout(margin=dict(t=40, b=0))
                 st.plotly_chart(figm, width="stretch")
-            st.dataframe(plan["rutas"], width="stretch", hide_index=True)
+            _tabla(plan["rutas"])
             _botones_export("rutas", [("Hoja de ruta",
                                        "Orden de visita optimizado por vehículo "
                                        "(vecino más cercano + 2-opt).", plan["rutas"])])
 
 elif pagina == "Ofertas y sugerencias":
     st.title("Ofertas y sugerencias")
+    _aviso_filtros()
     if datos:
         paq = sugerencias.generar_todas(datos)
         res = paq["resumen"]
@@ -415,7 +610,7 @@ elif pagina == "Ofertas y sugerencias":
                 df = paq[clave]
                 if df is not None and len(df):
                     st.caption(exportes.TITULOS[clave][1])
-                    st.dataframe(df, width="stretch", hide_index=True)
+                    _tabla(df)
                 else:
                     st.success("Nada para accionar acá — todo en orden.")
 
@@ -434,7 +629,7 @@ elif pagina == "Copiloto IA":
             with st.chat_message(m["rol"]):
                 st.markdown(m["texto"])
                 if m.get("tabla") is not None:
-                    st.dataframe(m["tabla"], width="stretch", hide_index=True)
+                    _tabla(m["tabla"])
         pregunta = st.chat_input("Escribí tu consulta…")
         if pregunta:
             st.session_state.chat.append({"rol": "user", "texto": pregunta})
@@ -445,7 +640,7 @@ elif pagina == "Copiloto IA":
                     r = copiloto.responder(pregunta, datos)
                 st.markdown(r["respuesta"])
                 if r["tabla"] is not None and len(r["tabla"]):
-                    st.dataframe(r["tabla"], width="stretch", hide_index=True)
+                    _tabla(r["tabla"])
                     _botones_export(f"copiloto_{len(st.session_state.chat)}",
                                     [(r["titulo"], r["respuesta"], r["tabla"])])
             st.session_state.chat.append({"rol": "assistant", "texto": r["respuesta"],

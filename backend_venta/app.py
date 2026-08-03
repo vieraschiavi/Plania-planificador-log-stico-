@@ -27,7 +27,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from backend_venta import descargas, licencias, uso
+from backend_venta import descargas, licencias, pagos, uso
 from plania import auditoria as pauditoria
 from plania import config as pconfig
 
@@ -220,6 +220,18 @@ async def webhook_mercadopago(request: Request, payload: dict):
     if not payment_id:
         raise HTTPException(400, "falta data.id en el webhook")
 
+    ya = pagos.buscar(payment_id)
+    if ya:
+        # MercadoPago reenvía la notificación hasta recibir un 200, así que
+        # ver el mismo pago dos veces es lo normal, no un ataque. Lo que no
+        # puede pasar es que emita una licencia nueva cada vez: el comprador
+        # conoce su propio payment_id —MP se lo devuelve en la URL de
+        # retorno— y podría fabricarse licencias pro ilimitadas repitiendo
+        # este POST a mano.
+        return {"ok": True, "licencia": ya["licencia"],
+                "token_descarga": ya["token_descarga"], "plan": ya["plan"],
+                "repetido": True}
+
     r = requests.get(f"{MP_API}/v1/payments/{payment_id}",
                      headers={"Authorization": f"Bearer {_mp_token()}"}, timeout=15)
     if not r.ok:
@@ -228,6 +240,19 @@ async def webhook_mercadopago(request: Request, payload: dict):
     if pago.get("status") != "approved":
         return {"ok": True, "estado": pago.get("status")}
 
+    emitido = _emitir_por_pago(payment_id, pago)
+    return {"ok": True, "licencia": emitido["licencia"],
+            "token_descarga": emitido["token_descarga"], "plan": emitido["plan"]}
+
+
+def _emitir_por_pago(payment_id: str, pago: dict) -> dict:
+    """Emite (o recupera) la licencia de un pago aprobado.
+
+    Lo usan el webhook y el rescate del comprador. Los dos pueden llegar
+    primero —MercadoPago manda al comprador a la página de gracias y notifica
+    por su lado, sin orden garantizado—, así que la operación tiene que dar el
+    mismo resultado sin importar quién llegue antes.
+    """
     md = pago.get("metadata") or {}
     plan = md.get("plan", "starter")
     cliente_id = md.get("email") or md.get("cliente_id") or str(payment_id)
@@ -236,9 +261,50 @@ async def webhook_mercadopago(request: Request, payload: dict):
 
     lic = licencias.emitir_licencia(cliente_id, plan)
     token_descarga = descargas.crear_token_descarga(cliente_id)
-    pauditoria.registrar("licencia_emitida_pago", {"cliente": cliente_id, "plan": plan,
-                                                   "payment_id": payment_id})
-    return {"ok": True, "licencia": lic, "token_descarga": token_descarga, "plan": plan}
+    guardado = pagos.registrar(payment_id, cliente_id, plan, lic, token_descarga)
+    # `registrar` devuelve lo que quedó en la base: si otra llamada ganó la
+    # carrera, se usa la suya y la nuestra se descarta.
+    if guardado["licencia"] == lic:
+        pauditoria.registrar("licencia_emitida_pago",
+                             {"cliente": cliente_id, "plan": plan,
+                              "payment_id": payment_id})
+    return guardado
+
+
+@app.get("/licencias/por-pago/{payment_id}")
+@limiter.limit("20/minute")
+async def licencia_por_pago(request: Request, payment_id: str):
+    """Le entrega al comprador la licencia de SU pago.
+
+    Existe porque el webhook le responde a MercadoPago, no al comprador: la
+    licencia viajaba en un cuerpo que MP descarta. El cliente pagaba y no
+    recibía nada.
+
+    Acá el comprador llega desde la página de gracias con el `payment_id` que
+    MercadoPago le puso en la URL de retorno. Antes de entregar nada se
+    re-consulta el pago contra la API real de MercadoPago: saber un
+    `payment_id` no alcanza, tiene que estar aprobado de verdad. Y como
+    `_emitir_por_pago` es idempotente, pedirla diez veces devuelve siempre la
+    misma licencia, no diez.
+    """
+    ya = pagos.buscar(payment_id)
+    if ya:
+        return {"ok": True, "licencia": ya["licencia"],
+                "token_descarga": ya["token_descarga"], "plan": ya["plan"]}
+
+    # Todavía no llegó el webhook: se verifica y se emite acá mismo, para que
+    # el comprador no tenga que esperar ni reintentar.
+    r = requests.get(f"{MP_API}/v1/payments/{payment_id}",
+                     headers={"Authorization": f"Bearer {_mp_token()}"}, timeout=15)
+    if not r.ok:
+        raise HTTPException(502, "no se pudo verificar el pago contra MercadoPago")
+    pago = r.json()
+    if pago.get("status") != "approved":
+        raise HTTPException(404, "ese pago todavía no está aprobado")
+
+    emitido = _emitir_por_pago(payment_id, pago)
+    return {"ok": True, "licencia": emitido["licencia"],
+            "token_descarga": emitido["token_descarga"], "plan": emitido["plan"]}
 
 
 # ---------------------------------------------------------------------------

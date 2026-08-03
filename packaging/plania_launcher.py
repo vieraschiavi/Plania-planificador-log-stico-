@@ -169,6 +169,44 @@ def _puerto_libre() -> int:
         return s.getsockname()[1]
 
 
+def _reservar(puerto: int):
+    """Toma el puerto de verdad y devuelve el socket, o None si está tomado.
+
+    Comprobar que un puerto está libre y después dejar que Streamlit lo tome
+    deja una ventana en el medio: entre las dos cosas hay que publicar el
+    puerto, importar la configuración e imprimir el encabezado, y en todo ese
+    rato otro programa se lo puede llevar. Cuando pasa, Streamlit muere con
+    "Port is not available" y el usuario ve un error por algo que no hizo.
+
+    Reservándolo primero, la ventana queda reducida al instante entre cerrar
+    este socket y el bind de Streamlit. Lo que pueda pasar igual en ese
+    instante lo cubre el reintento de `_servir()`.
+
+    A propósito SIN SO_REUSEADDR: en Windows esa opción permite hacer bind
+    aunque otro proceso esté escuchando ahí, que es justo lo que se quiere
+    detectar.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", puerto))
+        return s
+    except OSError:
+        s.close()
+        return None
+
+
+def _candidatos():
+    """Los puertos a probar, en orden, terminando en uno efímero del sistema.
+
+    El efímero es la red de seguridad: si los cinco propios están ocupados
+    —cosa rara, pero pasa con varias instancias abiertas— igual arranca en
+    vez de darle al usuario un error que no puede resolver.
+    """
+    for p in PUERTOS:
+        yield p
+    yield 0  # 0 = que lo elija el sistema operativo
+
+
 def _publicar_puerto(puerto: str) -> None:
     """Deja escrito en qué puerto quedó Plania, para quien lo haya lanzado.
 
@@ -197,17 +235,26 @@ def _publicar_puerto(puerto: str) -> None:
         print(f"[Plania] No pude escribir {destino}: {e}")
 
 
-def _abrir_navegador(url: str):
-    # Espera a que el server levante y abre el navegador una sola vez.
+def _abrir_navegador(url: str, cancelar: threading.Event):
+    """Espera a que el server levante y abre el navegador una sola vez.
+
+    `cancelar` existe por el reintento de puerto: si Streamlit no llegó a
+    tomar el puerto y hay que mudarse a otro, este hilo ya está esperando en
+    la dirección vieja. Sin la señal, abriría el navegador en el puerto que
+    se llevó OTRO programa — o sea, le mostraría al usuario esa aplicación
+    creyendo que es Plania.
+    """
     for _ in range(60):
-        time.sleep(0.5)
+        if cancelar.wait(0.5):
+            return
         try:
             import urllib.request
             urllib.request.urlopen(url, timeout=1)
             break
         except Exception:
             continue
-    webbrowser.open(url)
+    if not cancelar.is_set():
+        webbrowser.open(url)
 
 
 def main():
@@ -224,19 +271,13 @@ def main():
     # podría abrir el Plania de otro y ver sus ventas, márgenes y clientes.
     # Un programa de escritorio no tiene por qué exponer nada a la red.
     os.environ.setdefault("STREAMLIT_SERVER_ADDRESS", "127.0.0.1")
-    # Puerto: respeta el que el usuario fije en STREAMLIT_SERVER_PORT; si no,
-    # elige uno libre para no chocar con otros programas (evita el 8501 típico).
-    pedido = os.environ.get("STREAMLIT_SERVER_PORT")
-    if pedido and pedido.isdigit() and _ocupado(int(pedido)):
-        # Seguir adelante con un puerto ocupado termina en que el usuario ve
-        # el otro programa y cree que Plania está roto. Mejor avisar y mover.
-        libre = _puerto_libre()
-        print(f"[Plania] El puerto {pedido} ya está ocupado por otro programa. "
-              f"Uso el {libre}.")
-        pedido = str(libre)
-    port = pedido or str(_puerto_libre())
-    os.environ["STREAMLIT_SERVER_PORT"] = port
-    _publicar_puerto(port)
+    # Puerto: se respeta el que el usuario fije en STREAMLIT_SERVER_PORT como
+    # PREFERIDO, no como obligatorio. Si está ocupado, `_servir` se muda solo
+    # y lo avisa — seguir adelante con un puerto tomado termina en que el
+    # usuario ve el otro programa y cree que Plania está roto.
+    pedido = os.environ.get("STREAMLIT_SERVER_PORT", "")
+    preferido = int(pedido) if pedido.isdigit() else PUERTOS[0]
+
     # Que los import del proyecto (plania, data) resuelvan.
     if base not in sys.path:
         sys.path.insert(0, base)
@@ -251,22 +292,63 @@ def main():
     except Exception as e:
         print(f"[Plania] No pude determinar la carpeta de datos: {e}")
 
-    _banner(port, electron)
+    _servir(app_path, preferido, electron)
 
-    # Con PLANIA_NO_BROWSER=1 no se abre navegador: es el modo en que el
-    # escritorio Electron (desktop/) embebe este mismo server en su ventana.
-    if not electron:
-        threading.Thread(target=_abrir_navegador,
-                         args=(f"http://localhost:{port}",), daemon=True).start()
 
-    from streamlit.web import cli as stcli
-    sys.argv = ["streamlit", "run", app_path,
-                f"--server.port={port}",
-                f"--server.address={os.environ['STREAMLIT_SERVER_ADDRESS']}",
-                "--server.headless=true",
-                "--global.developmentMode=false",
-                "--browser.gatherUsageStats=false"]
-    sys.exit(stcli.main())
+def _servir(app_path: str, preferido: int, electron: bool) -> None:
+    """Levanta Streamlit, cambiando de puerto si otro programa gana la carrera.
+
+    Streamlit no reintenta solo: si el puerto está tomado imprime
+    "Port N is not available" y termina con código 1. Para el usuario eso es
+    "Plania no abre" por culpa de un programa que ni sabe que tiene abierto.
+    Acá se distingue ese caso de cualquier otro error —comprobando si el
+    puerto quedó efectivamente ocupado— y sólo en ese caso se prueba el
+    siguiente.
+    """
+    direccion = os.environ["STREAMLIT_SERVER_ADDRESS"]
+    intentos = [preferido] + [p for p in _candidatos() if p != preferido]
+
+    for puerto in intentos:
+        reserva = _reservar(puerto)
+        if reserva is None:
+            continue
+        # Con 0 el sistema operativo asignó uno real: hay que leerlo.
+        puerto = reserva.getsockname()[1]
+
+        os.environ["STREAMLIT_SERVER_PORT"] = str(puerto)
+        _publicar_puerto(str(puerto))
+        _banner(puerto, electron)
+
+        cancelar = threading.Event()
+        # Con PLANIA_NO_BROWSER=1 no se abre navegador: es el modo en que el
+        # escritorio Electron (desktop/) embebe este mismo server en su ventana.
+        if not electron:
+            threading.Thread(target=_abrir_navegador,
+                             args=(f"http://localhost:{puerto}", cancelar),
+                             daemon=True).start()
+
+        # Se suelta justo antes del bind de Streamlit, no antes.
+        reserva.close()
+        try:
+            from streamlit.web import bootstrap
+            from streamlit import config as stconfig
+            stconfig.set_option("server.port", puerto)
+            stconfig.set_option("server.address", direccion)
+            stconfig.set_option("server.headless", True)
+            stconfig.set_option("global.developmentMode", False)
+            stconfig.set_option("browser.gatherUsageStats", False)
+            bootstrap.run(app_path, False, [], {})
+            return
+        except SystemExit as e:
+            cancelar.set()
+            if e.code and _ocupado(puerto):
+                print(f"[Plania] Otro programa tomó el puerto {puerto} "
+                      f"justo al arrancar. Pruebo con otro.")
+                continue
+            raise
+
+    raise SystemExit("[Plania] No quedó ningún puerto libre para arrancar. "
+                     "Cerrá alguna aplicación y volvé a intentar.")
 
 
 if __name__ == "__main__":
