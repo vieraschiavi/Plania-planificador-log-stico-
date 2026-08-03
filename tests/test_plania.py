@@ -1453,9 +1453,13 @@ def test_el_programa_no_se_publica_en_la_red_local():
     escuchar solo en la máquina del usuario."""
     import inspect
     L = _lanzador()
-    fuente = inspect.getsource(L.main)
-    assert '"STREAMLIT_SERVER_ADDRESS", "127.0.0.1"' in fuente
-    assert "--server.address=" in fuente
+    assert '"STREAMLIT_SERVER_ADDRESS", "127.0.0.1"' in inspect.getsource(L.main)
+    # La dirección se le pasa a Streamlit en _servir, que es quien lo arranca.
+    servir = inspect.getsource(L._servir)
+    assert 'os.environ["STREAMLIT_SERVER_ADDRESS"]' in servir, \
+        "la dirección tiene que salir del entorno, no estar fija en el arranque"
+    assert 'set_option("server.address", direccion)' in servir, \
+        "sin esto Streamlit vuelve a su default 0.0.0.0 y se expone a la red"
 
 
 def test_lanzador_elige_puerto_libre_valido():
@@ -2347,3 +2351,143 @@ def test_instalador_referencia_las_imagenes_del_asistente():
     iss = open(os.path.join(RAIZ, "packaging", "instalador.iss"), encoding="utf-8").read()
     assert "WizardImageFile=" in iss
     assert "WizardSmallImageFile=" in iss
+
+
+# ---------------------------------------------------------------------------
+# El puerto no puede hacer fallar el arranque
+# ---------------------------------------------------------------------------
+def test_reservar_devuelve_none_si_el_puerto_esta_tomado():
+    """La reserva cierra la ventana entre 'comprobé que estaba libre' y
+    'Streamlit lo tomó'. Si no distinguiera ocupado de libre, no serviría."""
+    import socket
+
+    L = _lanzador()
+    ocupado = socket.socket()
+    ocupado.bind(("127.0.0.1", 0))
+    ocupado.listen(1)
+    puerto = ocupado.getsockname()[1]
+    try:
+        assert L._reservar(puerto) is None, "dio por libre un puerto tomado"
+    finally:
+        ocupado.close()
+
+    reserva = L._reservar(puerto)
+    assert reserva is not None, "no pudo reservar un puerto que quedó libre"
+    # Mientras la tenemos, nadie más puede: eso es lo que evita la carrera.
+    assert L._reservar(puerto) is None
+    reserva.close()
+
+
+def test_si_otro_programa_gana_la_carrera_se_prueba_el_siguiente_puerto():
+    """El caso que el usuario pidió que no diera error: entre que se suelta la
+    reserva y Streamlit hace su bind, otro programa se lleva el puerto.
+    Streamlit no reintenta —muere con "Port N is not available" y código 1—,
+    así que el lanzador tiene que mudarse solo.
+
+    La carrera real dura microsegundos y no se puede provocar por tiempo, así
+    que se inyecta: el primer intento falla como falla Streamlit, y el puerto
+    queda ocupado de verdad para que el lanzador lo verifique.
+    """
+    import socket
+
+    import streamlit.web as sweb
+    from streamlit.web import bootstrap as _bs_real   # fuerza la carga del submodulo
+
+    L = _lanzador()
+    intentos = []
+
+    intruso = socket.socket()
+    intruso.bind(("127.0.0.1", 0))
+    intruso.listen(1)
+    puerto_robado = intruso.getsockname()[1]
+
+    def _run(*a, **k):
+        if intentos[-1] == puerto_robado:
+            raise SystemExit(1)          # así muere Streamlit con el puerto tomado
+        return None                      # arrancó bien
+
+    original_reservar = L._reservar
+
+    def _reservar(puerto):
+        # El intruso tiene el puerto tomado, así que hay que soltarlo un
+        # instante para que el lanzador pueda reservarlo — que es exactamente
+        # la ventana que se está simulando.
+        if puerto == puerto_robado:
+            intruso.close()
+        s = original_reservar(puerto)
+        if s is not None:
+            intentos.append(s.getsockname()[1])
+        return s
+
+    original_bootstrap = sweb.bootstrap
+    original_ocupado = L._ocupado
+    L._reservar = _reservar
+    # Tras el fallo, el puerto tiene que verse ocupado para que el lanzador
+    # sepa que fue la carrera y no otro error.
+    L._ocupado = lambda p: p == puerto_robado
+    sweb.bootstrap = type(sweb.bootstrap)("bootstrap")
+    sweb.bootstrap.run = _run
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
+    try:
+        L._servir("/tmp/no-importa.py", puerto_robado, electron=True)
+    finally:
+        L._reservar = original_reservar
+        L._ocupado = original_ocupado
+        sweb.bootstrap = original_bootstrap
+        try:
+            intruso.close()
+        except Exception:
+            pass
+
+    assert len(intentos) >= 2, f"no reintentó en otro puerto: {intentos}"
+    assert intentos[0] == puerto_robado
+    assert intentos[-1] != puerto_robado, "se quedó en el puerto que perdió"
+
+
+def test_un_error_que_no_es_de_puerto_no_se_reintenta_en_bucle():
+    """Si Streamlit falla por otra cosa, reintentar en otro puerto solo
+    esconde el error real y lo repite cinco veces. Tiene que propagarse."""
+    import streamlit.web as sweb
+    from streamlit.web import bootstrap as _bs_real   # fuerza la carga del submodulo
+
+    L = _lanzador()
+    llamadas = []
+
+    def _run(*a, **k):
+        llamadas.append(1)
+        raise SystemExit(1)
+
+    original_bootstrap = sweb.bootstrap
+    original_ocupado = L._ocupado
+    L._ocupado = lambda p: False          # el puerto quedó libre => no fue la carrera
+    sweb.bootstrap = type(sweb.bootstrap)("bootstrap")
+    sweb.bootstrap.run = _run
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
+    try:
+        with pytest.raises(SystemExit):
+            L._servir("/tmp/no-importa.py", 0, electron=True)
+    finally:
+        L._ocupado = original_ocupado
+        sweb.bootstrap = original_bootstrap
+
+    assert len(llamadas) == 1, f"reintentó un error que no era de puerto ({len(llamadas)} veces)"
+
+
+def test_el_bat_se_limpia_si_falla_la_instalacion():
+    """Lo que le pasó al usuario: pip murió sin espacio en disco DESPUÉS de
+    crear .venv. Sin borrar ese entorno a medias, el próximo doble clic ve
+    que .venv existe, se saltea la instalación y falla más adelante con un
+    error distinto y más confuso."""
+    bat = open(os.path.join(RAIZ, "INICIAR_PLANIA.bat"), encoding="utf-8",
+               errors="replace").read()
+    ejecutables = "\n".join(l for l in bat.splitlines()
+                            if not l.strip().lower().startswith("rem"))
+    assert "rd /s /q .venv" in ejecutables, \
+        "un entorno a medio instalar tiene que borrarse para que el reintento sirva"
+    assert "--no-cache-dir" in ejecutables, \
+        "sin esto pip guarda otra copia de cada paquete y necesita casi el doble de disco"
+    assert "No space left on device" in bat, \
+        "el .bat tiene que reconocer el error de disco lleno y explicarlo"
+    # La consola de Windows rompe los acentos segun la codepage.
+    assert not any(c in bat for c in "áéíóúñÁÉÍÓÚÑ"), \
+        "el .bat no puede tener acentos: se ven mal en la consola de Windows"
