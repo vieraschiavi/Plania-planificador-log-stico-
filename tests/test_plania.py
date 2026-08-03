@@ -2860,3 +2860,57 @@ def test_la_app_ofrece_filtros_y_avisa_cuando_estan_puestos():
     assert app.count("_aviso_filtros()") >= 5, \
         "el aviso tiene que estar en todas las pantallas que filtran"
     assert "Limpiar filtros" in app
+
+
+# ---------------------------------------------------------------------------
+# Presentación: es un producto que se vende, no un volcado de la base
+# ---------------------------------------------------------------------------
+def test_los_montos_usan_el_formato_de_aca():
+    """`$2.86 M` con punto decimal es formato de Estados Unidos; en Uruguay
+    eso se lee "dos punto ochenta y seis". Y un número cortado en la pantalla
+    principal es lo peor que puede pasar en una demo."""
+    import importlib.util
+    import sys
+
+    ruta = os.path.join(RAIZ, "app", "app.py")
+    fuente = open(ruta, encoding="utf-8").read()
+    # Se ejecutan solo las dos funciones de formato, sin levantar Streamlit.
+    ns: dict = {}
+    inicio = fuente.index("def _miles(")
+    fin = fuente.index("# Nombres de columna que ve el cliente")
+    exec(compile(fuente[inicio:fin], ruta, "exec"), ns)
+
+    assert ns["_miles"](1234567.89, 2) == "1.234.567,89"
+    assert ns["_fmt"](2856128) == "$2,86 M"
+    # El caso que se veía cortado como "$689,…" en la tarjeta:
+    assert ns["_fmt"](689234) == "$689 K"
+    assert ns["_fmt"](1500) == "$1.500"
+
+
+def test_no_se_le_muestran_al_cliente_los_nombres_internos():
+    """`cliente_id`, `ultima_compra` y `margen_pct` son nombres del modelo de
+    datos. El cliente tiene que ver el nombre de su negocio."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+
+    assert "ETIQUETAS = {" in app
+    for interno in ("cliente_id", "ultima_compra", "margen_pct", "stock_min"):
+        assert f'"{interno}"' in app.split("ETIQUETAS = {")[1].split("}")[0], \
+            f"falta la etiqueta en castellano para {interno}"
+
+    # Todas las tablas pasan por el mismo formateador: si alguna usa
+    # st.dataframe directo, queda mostrando 315742.95 al lado de otra que
+    # muestra 315.743.
+    cuerpo = app.split("def _tabla(")[1]
+    directas = [l for l in cuerpo.splitlines()
+                if "st.dataframe(" in l and "vista" not in l]
+    assert len(directas) <= 2, f"tablas sin formatear: {directas}"
+
+
+def test_el_menu_no_parece_un_formulario():
+    """El menú es un st.radio: sin ocultar el círculo de "opción marcada" se
+    ve como un formulario y no como la navegación de un producto."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert 'label[data-testid="stRadioOption"]' in app, \
+        "el selector tiene que anclarse en el data-testid, que es estable; " \
+        "las clases st-emotion-cache-… cambian entre versiones"
+    assert "display: none !important" in app
