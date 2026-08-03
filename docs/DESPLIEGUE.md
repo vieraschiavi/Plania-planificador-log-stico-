@@ -236,6 +236,9 @@ a pedir la aceptación.
        Vercel. Probar `/es/`, `/en/` y `/pt/`, y que `/` mande al idioma del
        navegador.
 4. [ ] `python3 sitio/verificar_layout.py` en verde (nada se solapa).
+4b. [ ] `python3 packaging/verificar_pantallas.py` en verde: las 12 pantallas
+       se dibujan sin un traceback a la vista. Tarda unos minutos porque abre
+       el producto de verdad — es el control que los tests no pueden hacer.
 5. [ ] Video grabado, con las tres pistas de subtítulos, y doblado con
        VoiceBox (`--doblar` sin avisos de solapamiento).
 6. [ ] `Plania_Setup.exe` construido y subido — sin `--sin-proteger`, con

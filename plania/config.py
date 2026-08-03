@@ -301,9 +301,21 @@ def limpiar():
 
 
 def aplicar():
-    """Carga las keys guardadas al entorno (sin pisar variables ya presentes)."""
+    """Carga las keys guardadas al entorno (sin pisar variables ya presentes).
+
+    Sólo se exportan las de `CLAVES` y sólo si son texto. El mismo almacén
+    guarda además cosas que NO son variables de entorno —`LICENCIA_CLAIMS` es
+    un diccionario, lo escribe `licencia.activar_licencia()`— y `os.environ`
+    sólo acepta strings.
+
+    Sin ese filtro, todo cliente que activaba una licencia paga rompía su
+    instalación: `app/app.py` llama a `aplicar()` al arrancar, así que el
+    siguiente arranque moría con `TypeError: str expected, not dict` y la
+    aplicación no abría más. Los tests no lo veían porque guardaban claims
+    pero nunca volvían a llamar a `aplicar()` después.
+    """
     for k, v in cargar().items():
-        if v and not os.environ.get(k):
+        if k in CLAVES and isinstance(v, str) and v and not os.environ.get(k):
             os.environ[k] = v
 
 

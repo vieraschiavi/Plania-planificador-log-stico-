@@ -207,6 +207,26 @@ sugerencias, copiloto, exportes, rutas, licencias, backend, MercadoPago,
 contenido, negocio y distribución) y un puntaje. Sale con código 1 si hay
 alguna falla, así que sirve en CI o antes de una demo con un cliente.
 
+Eso comprueba las piezas. Lo que ninguna de ellas cubre —porque no levantan la
+aplicación— es que las pantallas se **dibujen**:
+
+```bash
+python3 packaging/verificar_pantallas.py    # tarda unos minutos: abre el producto de verdad
+```
+
+Levanta Plania con una configuración limpia (pasa por el gate de la EULA como
+un usuario que instala por primera vez) y recorre las 12 pantallas con un
+navegador, buscando lo único que un cliente que pagó no puede ver nunca: un
+traceback en pantalla. Un `KeyError` que solo aparece al dibujar pasa la suite
+entera de tests y explota en la demo con el cliente.
+
+Correrlo antes de cada release, junto con:
+
+```bash
+python3 packaging/verificar_instalador.py   # 34 controles del instalador Windows
+python3 sitio/verificar_layout.py           # la web no se solapa en 3 idiomas x 3 anchos
+```
+
 ## Análisis de negocio
 
 [`docs/ANALISIS_NEGOCIO.md`](docs/ANALISIS_NEGOCIO.md) — rentabilidad neta en 3

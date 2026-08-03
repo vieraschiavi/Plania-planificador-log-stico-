@@ -2491,3 +2491,102 @@ def test_el_bat_se_limpia_si_falla_la_instalacion():
     # La consola de Windows rompe los acentos segun la codepage.
     assert not any(c in bat for c in "áéíóúñÁÉÍÓÚÑ"), \
         "el .bat no puede tener acentos: se ven mal en la consola de Windows"
+
+
+# ---------------------------------------------------------------------------
+# Que el que paga reciba su licencia, y una sola
+# ---------------------------------------------------------------------------
+def test_un_pago_no_puede_emitir_dos_licencias(tmp_path, monkeypatch):
+    """MercadoPago reenvía la notificación hasta recibir 200, y además le da
+    el payment_id al comprador en la URL de retorno. Sin idempotencia,
+    repetir ese POST fabricaba licencias pro ilimitadas con un curl."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MP_ACCESS_TOKEN", "token-de-prueba")
+    from backend_venta.app import app
+
+    class _Aprobado:
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"status": "approved",
+                    "metadata": {"plan": "pro", "email": "cliente@pago.uy"}}
+
+    c = TestClient(app)
+    with patch("backend_venta.app.requests.get", return_value=_Aprobado):
+        r = [c.post("/webhooks/mercadopago",
+                    json={"type": "payment", "data": {"id": "777"}}).json()
+             for _ in range(3)]
+
+    assert len({x["licencia"] for x in r}) == 1, "un pago emitió más de una licencia"
+    assert len({x["token_descarga"] for x in r}) == 1, "emitió más de un token de descarga"
+    assert r[1].get("repetido") is True
+
+
+def test_el_comprador_puede_recuperar_la_licencia_que_pago(tmp_path, monkeypatch):
+    """El webhook le responde a MercadoPago, no al comprador: la licencia
+    viajaba en un cuerpo que MP descarta, así que el cliente pagaba y no
+    recibía nada. Tiene que poder pedirla con su payment_id."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MP_ACCESS_TOKEN", "token-de-prueba")
+    from backend_venta.app import app
+    from backend_venta import licencias
+
+    class _Aprobado:
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"status": "approved",
+                    "metadata": {"plan": "starter", "email": "compro@uy"}}
+
+    class _Pendiente:
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"status": "pending", "metadata": {}}
+
+    c = TestClient(app)
+    # Llega primero el comprador, antes que el webhook: igual la recibe.
+    with patch("backend_venta.app.requests.get", return_value=_Aprobado):
+        g = c.get("/licencias/por-pago/888").json()
+        assert licencias.validar_licencia(g["licencia"])["plan"] == "starter"
+        # Y el webhook posterior no emite otra distinta.
+        w = c.post("/webhooks/mercadopago",
+                   json={"type": "payment", "data": {"id": "888"}}).json()
+        assert w["licencia"] == g["licencia"]
+
+    # Saber un payment_id no alcanza: tiene que estar aprobado de verdad.
+    with patch("backend_venta.app.requests.get", return_value=_Pendiente):
+        assert c.get("/licencias/por-pago/000").status_code == 404
+
+
+def test_activar_una_licencia_no_rompe_el_arranque(tmp_path, monkeypatch):
+    """El bug más caro que tuvo el producto: activar una licencia paga
+    guardaba las claims (un dict) en el mismo almacén que las credenciales, y
+    al siguiente arranque `config.aplicar()` moría con TypeError. O sea: todo
+    cliente que pagaba dejaba de poder abrir la aplicación."""
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    import importlib
+
+    from plania import config as pconfig
+    importlib.reload(pconfig)
+
+    pconfig.guardar_extra("LICENCIA_CLAIMS", {"cliente": "x@y.uy", "plan": "pro"})
+    pconfig.guardar_extra("ANTHROPIC_API_KEY", "sk-ant-de-prueba")
+
+    pconfig.aplicar()          # esto es lo que corre app/app.py al arrancar
+
+    assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-de-prueba", \
+        "dejó de exportar las credenciales que sí van al entorno"
+    assert "LICENCIA_CLAIMS" not in os.environ, \
+        "las claims no son una variable de entorno"
