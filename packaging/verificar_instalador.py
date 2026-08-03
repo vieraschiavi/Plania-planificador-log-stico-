@@ -203,7 +203,9 @@ def controles() -> list[tuple[bool, str, str]]:
            f"Source apunta a {ruta}, que no viene de dist/")
 
     # --- Íconos que tienen que existir en el repo --------------------------
-    for clave, para in (("setupiconfile", "el ícono del instalador"),):
+    for clave, para in (("setupiconfile", "el ícono del instalador"),
+                        ("wizardimagefile", "el panel del asistente"),
+                        ("wizardsmallimagefile", "el logo chico del asistente")):
         valor = d.get(clave, "")
         if valor:
             ruta = os.path.normpath(os.path.join(RAIZ, "packaging",

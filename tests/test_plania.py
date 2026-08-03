@@ -2303,3 +2303,47 @@ def test_el_instalador_no_borra_la_carpeta_de_datos_al_desinstalar():
                        if l.strip() and not l.strip().startswith(";"))
     assert r"{app}\datos" not in codigo, \
         "[UninstallDelete] no puede borrar la carpeta donde vive la licencia"
+
+
+# ---------------------------------------------------------------------------
+# Imágenes del asistente de instalación
+# ---------------------------------------------------------------------------
+def test_imagenes_del_asistente_son_reproducibles_y_de_la_misma_marca():
+    """Las BMP del panel de Inno Setup salen de un script, no de un archivo
+    subido a mano: correrlo dos veces tiene que dar el mismo resultado, y el
+    color de fondo tiene que ser el navy real de assets/brand/plania_icon.png,
+    no uno inventado aparte — si no, el instalador se ve de otro producto."""
+    import importlib
+    import io
+    import os
+    import sys
+
+    from PIL import Image
+
+    sys.path.insert(0, os.path.join(RAIZ, "packaging"))
+    gen = importlib.import_module("generar_imagenes_instalador")
+
+    icono = Image.open(os.path.join(RAIZ, "assets", "brand", "plania_icon.png")).convert("RGB")
+    assert icono.getpixel((4, icono.size[1] // 2)) == gen.NAVY, \
+        "el navy del instalador tiene que ser el mismo que el del ícono de la app"
+
+    def _bytes(img):
+        buf = io.BytesIO()
+        img.save(buf, format="BMP")
+        return buf.getvalue()
+
+    assert _bytes(gen.panel_grande()) == _bytes(gen.panel_grande())
+    assert _bytes(gen.logo_chico()) == _bytes(gen.logo_chico())
+
+    for ruta, tam in ((os.path.join(RAIZ, "assets", "brand", "plania_wizard.bmp"), gen.PANEL),
+                      (os.path.join(RAIZ, "assets", "brand", "plania_wizard_small.bmp"), gen.LOGO_CHICO)):
+        assert os.path.exists(ruta), f"falta {ruta} — correr generar_imagenes_instalador.py"
+        with Image.open(ruta) as im:
+            assert im.size == tam
+            assert im.format == "BMP"
+
+
+def test_instalador_referencia_las_imagenes_del_asistente():
+    iss = open(os.path.join(RAIZ, "packaging", "instalador.iss"), encoding="utf-8").read()
+    assert "WizardImageFile=" in iss
+    assert "WizardSmallImageFile=" in iss

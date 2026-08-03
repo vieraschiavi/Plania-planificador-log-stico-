@@ -51,6 +51,12 @@ OutputBaseFilename=Plania_Setup_v{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Panel de bienvenida/cierre y logo chico de las páginas intermedias — la
+; misma marca que el ícono del .exe (assets/brand/plania_icon.png), generados
+; con packaging/generar_imagenes_instalador.py y no diseñados a mano, para
+; que no se desincronicen si el logo cambia.
+WizardImageFile=..\assets\brand\plania_wizard.bmp
+WizardSmallImageFile=..\assets\brand\plania_wizard_small.bmp
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
 SetupIconFile=..\assets\brand\plania.ico
