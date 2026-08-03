@@ -2590,3 +2590,132 @@ def test_activar_una_licencia_no_rompe_el_arranque(tmp_path, monkeypatch):
         "dejó de exportar las credenciales que sí van al entorno"
     assert "LICENCIA_CLAIMS" not in os.environ, \
         "las claims no son una variable de entorno"
+
+
+# ---------------------------------------------------------------------------
+# Catálogo: entender la base de CUALQUIER empresa, no solo las conocidas
+# ---------------------------------------------------------------------------
+def _base_con_nombres_inventados(tmp_path):
+    """Una base como la de una empresa real: nombres que no están en ninguna
+    lista, una tabla trampa vacía que sí tiene el nombre esperado, y ninguna
+    clave foránea declarada (lo normal en un ERP viejo)."""
+    import sqlite3
+    ruta = tmp_path / "rara.db"
+    c = sqlite3.connect(ruta)
+    c.execute("""CREATE TABLE TBL_ITEMS_01 (sku TEXT PRIMARY KEY, detalle TEXT,
+                 familia TEXT, marca TEXT, costo_neto REAL, pvp REAL,
+                 existencia INTEGER)""")
+    c.execute("""CREATE TABLE MAESTRO_CTAS (nro_cta TEXT PRIMARY KEY,
+                 nombre_fantasia TEXT, actividad TEXT, zona_reparto TEXT)""")
+    c.execute("""CREATE TABLE MOV_FACT_DET (doc TEXT, fec TEXT, nro_cta TEXT,
+                 sku TEXT, cant REAL, importe_unit REAL, costo_neto REAL)""")
+    # Trampa: se llama "articulos" pero quedó vacía de una migración vieja.
+    c.execute("""CREATE TABLE articulos (cod_articulo TEXT, descripcion TEXT,
+                 costo_unitario REAL, precio_venta REAL, stock_actual INTEGER)""")
+    for i in range(40):
+        c.execute("INSERT INTO TBL_ITEMS_01 VALUES (?,?,?,?,?,?,?)",
+                  (f"SKU{i:03d}", f"Producto {i}", "Bebidas", "M1", 10.0, 20.0, 5))
+        c.execute("INSERT INTO MAESTRO_CTAS VALUES (?,?,?,?)",
+                  (f"CTA{i:03d}", f"Comercio {i}", "Almacen", "Centro"))
+        c.execute("INSERT INTO MOV_FACT_DET VALUES (?,?,?,?,?,?,?)",
+                  (f"A{i}", "2026-03-01", f"CTA{i:03d}", f"SKU{i:03d}", 3, 20.0, 10.0))
+    c.commit()
+    c.close()
+    return ruta
+
+
+def test_encuentra_las_tablas_aunque_se_llamen_cualquier_cosa(tmp_path):
+    """El caso que antes fallaba: la empresa no llama a sus tablas como el
+    ERP del manual. Si Plania solo busca por nombre, no encuentra nada y el
+    cliente ve 'no pude mapear columnas obligatorias' sin saber qué hacer."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    ruta = _base_con_nombres_inventados(tmp_path)
+    eng = conectores.conectar_sql(f"sqlite:///{ruta}")
+    cat = cm.extraer(eng)
+    elegidas = cm.elegir_tablas(cat, conectores.SINONIMOS,
+                                conectores.TABLAS_CANDIDATAS, conectores.OBLIGATORIAS)
+    elegidas = cm.completar_por_estructura(cat, elegidas, conectores.SINONIMOS,
+                                           conectores.OBLIGATORIAS)
+
+    assert elegidas["productos"]["tabla"] == "TBL_ITEMS_01"
+    assert elegidas["ventas"]["tabla"] == "MOV_FACT_DET"
+    # A esta no se llega por ningún parecido de nombre: 'cta' no se parece a
+    # 'cuenta' ni a 'cliente'. Sale de ver que su clave está dentro de ventas.
+    assert elegidas["clientes"]["tabla"] == "MAESTRO_CTAS"
+    assert elegidas["clientes"].get("por_estructura") is True
+
+
+def test_no_elige_la_tabla_vacia_aunque_tenga_el_nombre_esperado(tmp_path):
+    """Una migración vieja deja `articulos` vacía y los datos en otro lado.
+    Elegir por nombre agarra la vacía y el cliente ve un panel en cero."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    ruta = _base_con_nombres_inventados(tmp_path)
+    eng = conectores.conectar_sql(f"sqlite:///{ruta}")
+    cat = cm.extraer(eng)
+    elegidas = cm.elegir_tablas(cat, conectores.SINONIMOS,
+                                conectores.TABLAS_CANDIDATAS, conectores.OBLIGATORIAS)
+    assert elegidas["productos"]["tabla"] != "articulos"
+    assert cat["tablas"]["articulos"]["n_filas"] == 0
+
+
+def test_mapea_las_columnas_abreviadas_y_las_de_enlace(tmp_path):
+    from plania import catalogo as cm
+    from plania import conectores
+
+    ruta = _base_con_nombres_inventados(tmp_path)
+    eng = conectores.conectar_sql(f"sqlite:///{ruta}")
+    cat = cm.extraer(eng)
+    elegidas = cm.completar_por_estructura(
+        cat, cm.elegir_tablas(cat, conectores.SINONIMOS,
+                              conectores.TABLAS_CANDIDATAS, conectores.OBLIGATORIAS),
+        conectores.SINONIMOS, conectores.OBLIGATORIAS)
+    tablas = {e: r["tabla"] for e, r in elegidas.items()}
+
+    for entidad in ("productos", "clientes", "ventas"):
+        mapeo = cm.sugerir_mapeo(cat, tablas[entidad], entidad,
+                                 conectores.SINONIMOS, tablas)
+        faltan = [o for o in conectores.OBLIGATORIAS[entidad]
+                  if o not in mapeo.values()]
+        assert not faltan, f"{entidad}: quedaron sin mapear {faltan}"
+
+    ventas = cm.sugerir_mapeo(cat, tablas["ventas"], "ventas",
+                              conectores.SINONIMOS, tablas)
+    assert ventas.get("fec") == "fecha", "no reconoció la abreviatura fec->fecha"
+    assert ventas.get("nro_cta") == "cliente_id", "no siguió el enlace a clientes"
+    # El error que tuvo la primera versión: 'nro_cta' cargado como número de
+    # comprobante porque comparte el token vacío 'nro' con 'nro_comprobante'.
+    assert ventas.get("nro_cta") != "venta_id"
+    assert ventas.get("doc") == "venta_id"
+
+
+def test_un_token_generico_no_alcanza_para_dar_dos_columnas_por_iguales():
+    """`nro_cta` y `nro_comprobante` comparten 'nro' y no son lo mismo. Un
+    mapeo equivocado en silencio es peor que uno faltante: el cliente ve
+    números que no significan nada y no tiene cómo notarlo."""
+    from plania import catalogo as cm
+
+    assert cm.parecido("nro_cta", "nro_comprobante") == 0.0
+    assert cm.parecido("cod_x", "cod_y") == 0.0
+    # Y lo que sí tiene que reconocer:
+    assert cm.parecido("fec", "fecha") > 0.6
+    assert cm.parecido("nombre_fantasia", "nombre") > 0.6
+    assert cm.parecido("costo_neto", "costo") > 0.6
+
+
+def test_las_categorias_para_filtrar_salen_de_los_datos_reales():
+    """Los filtros del panel tienen que ofrecer los rubros que el cliente
+    tiene de verdad, no una lista fija inventada."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    datos = conectores.cargar_datos()
+    cats = cm.columnas_categoricas(datos["productos"])
+    assert "categoria" in cats
+    # El código de producto es único por fila: no es una categoría.
+    assert "sku" not in cats
+    valores = cm.valores_de(datos["productos"], "categoria")
+    assert len(valores) > 1 and all(v is not None for v in valores)
