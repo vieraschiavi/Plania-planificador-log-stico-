@@ -2719,3 +2719,144 @@ def test_las_categorias_para_filtrar_salen_de_los_datos_reales():
     assert "sku" not in cats
     valores = cm.valores_de(datos["productos"], "categoria")
     assert len(valores) > 1 and all(v is not None for v in valores)
+
+
+# ---------------------------------------------------------------------------
+# Archivos: que entre lo que el cliente exporta de SU sistema
+# ---------------------------------------------------------------------------
+def test_lee_el_csv_como_lo_exporta_un_erp_de_aca(tmp_path):
+    """Formato real: latin-1, separador punto y coma, decimal con coma y
+    miles con punto. Antes tiraba UnicodeDecodeError y el cliente no tenía
+    forma de saber que el problema era la codificación."""
+    from plania import archivos
+
+    ruta = tmp_path / "zureo.csv"
+    ruta.write_bytes(
+        "Código;Descripción;Rubro;Costo;Precio Venta;Stock\n"
+        "A001;Café Águila 500g;Almacén;123,45;1.234,50;12\n"
+        "A002;Té Hornimans;Almacén;98,70;150,00;5\n".encode("latin-1"))
+
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["Código", "Descripción", "Rubro", "Costo",
+                                "Precio Venta", "Stock"]
+    assert len(df) == 2
+    # Lo que de verdad importa: que los importes queden como NÚMERO. Si
+    # "1.234,50" se lee como texto, todos los cálculos de plata dan cero y el
+    # cliente ve un panel vacío sin ningún mensaje de error.
+    assert df["Precio Venta"].dtype.kind in "if"
+    assert abs(df["Precio Venta"].iloc[0] - 1234.50) < 0.01
+    assert abs(df["Costo"].iloc[0] - 123.45) < 0.01
+    assert df["Descripción"].iloc[0] == "Café Águila 500g"
+
+
+def test_lee_csv_separado_por_tabulaciones_con_bom(tmp_path):
+    from plania import archivos
+
+    ruta = tmp_path / "tango.csv"
+    ruta.write_bytes("cod_art\tdetalle\tcosto\tprecio\n"
+                     "B1\tYerba Canarias\t80.5\t120.0\n".encode("utf-8-sig"))
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["cod_art", "detalle", "costo", "precio"]
+    assert df["costo"].iloc[0] == 80.5
+
+
+def test_saltea_el_titulo_del_reporte_antes_del_encabezado(tmp_path):
+    """Los reportes traen el nombre de la empresa y la fecha arriba de todo.
+    Antes eso era un ParserError."""
+    from plania import archivos
+
+    ruta = tmp_path / "con_titulo.csv"
+    ruta.write_text("REPORTE DE ARTICULOS\nEmpresa Ejemplo SA\n"
+                    "Emitido: 03/08/2026\n\n"
+                    "codigo,descripcion,costo,precio\nC1,Fideos,20,35\n",
+                    encoding="utf-8")
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["codigo", "descripcion", "costo", "precio"]
+    assert len(df) == 1
+    assert df["codigo"].iloc[0] == "C1"
+
+
+def test_la_linea_en_blanco_no_desfasa_el_encabezado(tmp_path):
+    """`skiprows` cuenta líneas del archivo, no líneas con contenido. Contar
+    sobre la lista ya filtrada saltea de menos y el encabezado se lee como si
+    fuera un dato."""
+    from plania import archivos
+
+    ruta = tmp_path / "blancos.csv"
+    ruta.write_text("TITULO\n\n\ncodigo,precio\nX1,10\nX2,20\n", encoding="utf-8")
+    df = archivos.leer(ruta)
+    assert list(df.columns) == ["codigo", "precio"]
+    assert len(df) == 2
+
+
+def test_importa_un_archivo_grande_sin_cargarlo_entero_en_memoria(tmp_path):
+    """'Sin límite de datos' quiere decir que el pico de memoria dependa del
+    pedazo, no del archivo. Se comprueba importando de a 500 filas: si
+    cargara todo, el número de filas escritas seguiría siendo correcto pero
+    el diseño no serviría para un archivo que no entra en RAM."""
+    import sqlite3
+
+    from plania import archivos
+
+    ruta = tmp_path / "grande.csv"
+    with open(ruta, "w", encoding="utf-8") as f:
+        f.write("codigo;descripcion;costo;precio\n")
+        for i in range(5000):
+            f.write(f"SKU{i};Producto {i};{i},50;{i * 2},75\n")
+
+    db = tmp_path / "salida.db"
+    n = archivos.importar_a_sqlite(ruta, "articulos", str(db), filas_por_pedazo=500)
+    assert n == 5000
+
+    con = sqlite3.connect(db)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM articulos").fetchone()[0] == 5000
+        # El decimal con coma tiene que haber quedado numérico también acá.
+        assert con.execute("SELECT typeof(costo) FROM articulos LIMIT 1").fetchone()[0] == "real"
+        assert con.execute("SELECT costo FROM articulos WHERE codigo='SKU10'").fetchone()[0] == 10.5
+    finally:
+        con.close()
+
+
+def test_el_conector_usa_el_lector_adaptable(tmp_path):
+    """La app entra por conectores.leer_archivo: si eso no delega en el lector
+    nuevo, todo lo anterior no le sirve a nadie."""
+    from plania import conectores
+
+    ruta = tmp_path / "raro.csv"
+    ruta.write_bytes("Código;Precio\nA1;1.234,50\n".encode("latin-1"))
+    df = conectores.leer_archivo(ruta)
+    assert abs(df["Precio"].iloc[0] - 1234.50) < 0.01
+
+
+def test_filtrar_por_categoria_arrastra_las_ventas():
+    """Filtrar productos tiene que filtrar también sus ventas. Si no, los KPI
+    quedan incoherentes: la venta sigue siendo la del negocio entero mientras
+    el stock es el de una categoría, y el margen que sale de cruzarlos no
+    significa nada."""
+    from plania import catalogo as cm
+    from plania import conectores
+
+    datos = conectores.cargar_datos()
+    categoria = cm.valores_de(datos["productos"], "categoria")[0]
+
+    productos = datos["productos"][datos["productos"]["categoria"] == categoria]
+    ventas = datos["ventas"][datos["ventas"]["sku"].isin(productos["sku"])]
+
+    assert 0 < len(productos) < len(datos["productos"])
+    assert 0 < len(ventas) < len(datos["ventas"]), \
+        "el filtro de productos no redujo las ventas"
+    # Ninguna venta puede quedar apuntando a un producto que se filtró.
+    assert set(ventas["sku"]) <= set(productos["sku"])
+
+
+def test_la_app_ofrece_filtros_y_avisa_cuando_estan_puestos():
+    """Un panel filtrado que no lo dice lleva a decisiones equivocadas: el
+    encargado ve 'venta 30 días' y cree que es la del negocio entero."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert "catalogo.columnas_categoricas" in app, \
+        "las categorías tienen que salir de los datos del cliente, no de una lista fija"
+    assert "_aviso_filtros" in app
+    assert app.count("_aviso_filtros()") >= 5, \
+        "el aviso tiene que estar en todas las pantallas que filtran"
+    assert "Limpiar filtros" in app

@@ -199,12 +199,17 @@ def autodescubrir_tabla(engine, entidad: str) -> str | None:
     return None
 
 
-def leer_archivo(ruta) -> pd.DataFrame:
-    """CSV o Excel exportado del ERP (acepta ruta o file-like de Streamlit)."""
-    nombre = getattr(ruta, "name", str(ruta)).lower()
-    if nombre.endswith((".xlsx", ".xls")):
-        return pd.read_excel(ruta)
-    return pd.read_csv(ruta)
+def leer_archivo(ruta, **forzado) -> pd.DataFrame:
+    """CSV o Excel exportado del ERP (acepta ruta o file-like de Streamlit).
+
+    Delega en `plania.archivos`, que detecta codificación, separador, filas de
+    título y formato de números. Antes esto era un `pd.read_csv(ruta)` pelado
+    y fallaba con los tres formatos más comunes de un ERP de acá: latin-1 con
+    punto y coma, separado por tabulaciones, y con el encabezado del reporte
+    arriba del encabezado real.
+    """
+    from plania import archivos
+    return archivos.leer(ruta, **forzado)
 
 
 def guardar_como_base(datos: dict[str, pd.DataFrame], ruta_db: str | None = None) -> str:

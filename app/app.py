@@ -25,7 +25,7 @@ pd.set_option("mode.string_storage", "python")
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 
-from plania import analitica, conectores, copiloto, exportes, licencia, rutas, sugerencias  # noqa: E402
+from plania import analitica, catalogo, conectores, copiloto, exportes, licencia, rutas, sugerencias  # noqa: E402
 from plania import config as pconfig  # noqa: E402
 
 pconfig.aplicar()
@@ -198,6 +198,84 @@ if pagina not in ("Planes y licencia", "Configuración", "Ayuda", "Conectar ERP"
     datos = cargar_datos()
 
 
+# ---------------------------------------------------------------------------
+# Filtros por categoría
+# ---------------------------------------------------------------------------
+# Las categorías NO están escritas acá: salen de los datos del cliente
+# (`catalogo.columnas_categoricas` las detecta por cardinalidad). Una lista
+# fija de rubros sería adivinar el negocio del cliente; así, un distribuidor
+# de bebidas filtra por sus marcas y una ferretería por sus rubros, sin que
+# nadie configure nada.
+PAGINAS_CON_FILTRO = ("Panel ejecutivo", "Stock y reposición", "Precios y márgenes",
+                      "Zonas y negocios", "Ofertas y sugerencias", "Rutas de reparto")
+
+
+def _filtrar(d: dict) -> tuple[dict, list[str]]:
+    """Aplica los filtros elegidos en la barra lateral. Devuelve (datos, activos).
+
+    Filtrar productos o clientes arrastra las ventas de esos productos o esos
+    clientes. Si no, los KPI quedarían incoherentes: la venta seguiría siendo
+    la del negocio entero mientras el stock sería el de una sola categoría, y
+    el margen resultante no significaría nada.
+    """
+    if not d:
+        return d, []
+
+    productos, clientes, ventas = d["productos"], d["clientes"], d["ventas"]
+    activos: list[str] = []
+
+    with st.sidebar:
+        st.markdown("**Filtros**")
+        for entidad, etiqueta in (("productos", "Producto"), ("clientes", "Cliente")):
+            base = d[entidad]
+            for col in catalogo.columnas_categoricas(base):
+                opciones = catalogo.valores_de(base, col)
+                if len(opciones) < 2:
+                    continue
+                sel = st.multiselect(f"{etiqueta} · {col.replace('_', ' ')}",
+                                     opciones, default=[],
+                                     key=f"filtro_{entidad}_{col}")
+                if not sel:
+                    continue
+                activos.append(f"{col}: {', '.join(str(s) for s in sel[:3])}"
+                               + ("…" if len(sel) > 3 else ""))
+                if entidad == "productos":
+                    productos = productos[productos[col].isin(sel)]
+                else:
+                    clientes = clientes[clientes[col].isin(sel)]
+
+        if activos:
+            if st.button("Limpiar filtros", width="stretch"):
+                for k in [k for k in st.session_state if k.startswith("filtro_")]:
+                    st.session_state[k] = []
+                st.rerun()
+
+    if len(productos) < len(d["productos"]):
+        ventas = ventas[ventas["sku"].isin(productos["sku"])]
+    if len(clientes) < len(d["clientes"]) and "cliente_id" in ventas.columns:
+        ventas = ventas[ventas["cliente_id"].isin(clientes["cliente_id"])]
+
+    return {"productos": productos, "clientes": clientes, "ventas": ventas}, activos
+
+
+FILTROS_ACTIVOS: list[str] = []
+if datos and pagina in PAGINAS_CON_FILTRO:
+    datos, FILTROS_ACTIVOS = _filtrar(datos)
+    if FILTROS_ACTIVOS and datos["ventas"].empty:
+        st.warning("Con esos filtros no queda ninguna venta. "
+                   "Sacá alguno para volver a ver datos.")
+
+
+def _aviso_filtros() -> None:
+    """Deja a la vista que lo de abajo es un recorte, no el negocio entero.
+
+    Un panel filtrado que no lo dice lleva a decisiones equivocadas: el
+    encargado ve 'venta 30 días' y cree que es la del negocio.
+    """
+    if FILTROS_ACTIVOS:
+        st.info("Filtrado por — " + " · ".join(FILTROS_ACTIVOS))
+
+
 def _ventas_enriquecidas(d: dict) -> pd.DataFrame:
     return analitica.enriquecer_ventas(d["ventas"], d["productos"], d["clientes"])
 
@@ -252,6 +330,7 @@ if pagina == "Inicio":
 
 elif pagina == "Panel ejecutivo":
     st.title("Panel ejecutivo")
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         k = analitica.kpis(datos["productos"], v)
@@ -279,6 +358,7 @@ elif pagina == "Panel ejecutivo":
 
 elif pagina == "Stock y reposición":
     st.title("Stock y reposición")
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         r = analitica.rotacion(datos["productos"], v)
@@ -305,6 +385,7 @@ elif pagina == "Stock y reposición":
 
 elif pagina == "Precios y márgenes":
     st.title("Precios y márgenes")
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         mp = analitica.margen_por_producto(v)
@@ -353,6 +434,7 @@ elif pagina == "Zonas y negocios":
 
 elif pagina == "Rutas de reparto":
     st.title("Rutas de reparto")
+    _aviso_filtros()
     if not licencia.tiene("rutas"):
         st.warning("El plan actual no incluye el planificador de rutas — "
                    "disponible en **Pro** y **Enterprise**.")
@@ -396,6 +478,7 @@ elif pagina == "Rutas de reparto":
 
 elif pagina == "Ofertas y sugerencias":
     st.title("Ofertas y sugerencias")
+    _aviso_filtros()
     if datos:
         paq = sugerencias.generar_todas(datos)
         res = paq["resumen"]
