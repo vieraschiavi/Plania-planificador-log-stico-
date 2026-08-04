@@ -1343,9 +1343,18 @@ def test_los_subtitulos_no_muestran_la_escritura_para_la_voz():
         for hablado in doblar.PARA_LEER:
             assert hablado not in texto, \
                 f"'{hablado}' es escritura para la voz y quedó en el subtítulo {idioma}"
-        # Y al revés: si el guion nombra el dominio, el subtítulo lo muestra escrito.
-        if any("uy" in s[idioma] for s in guion["segmentos"]):
-            assert "plania.uy" in texto
+
+        # La voz ya no dice el dominio —el motor no lo pronuncia bien en ningún
+        # idioma— pero el subtítulo tiene que mostrarlo igual: es el llamado a
+        # la acción del video. Se controla contra el subtítulo y no contra el
+        # texto hablado, porque justamente ya no coinciden.
+        assert "plania.uy" in texto, f"el subtítulo {idioma} perdió el dominio"
+        assert "Plania" in texto, f"el subtítulo {idioma} no nombra la marca"
+
+        # Y ninguna forma dictada de la marca puede haberse colado.
+        for dictada in ("Planía", "Plan ay eye", "Plan I A"):
+            assert dictada not in texto, \
+                f"'{dictada}' se escribe así solo para la voz, no para el subtítulo {idioma}"
 
 
 # ---------------------------------------------------------------------------
