@@ -12,3 +12,26 @@ coverage>=7.4
 #   - node en el PATH: corre el JS real de escaparHtml() en vez de confiar
 #     en una reimplementación en Python.
 Cython>=3.0
+
+# Herramientas de build y de autoría. No las corre ningún cliente —por eso no
+# van en requirements.txt— pero sí hacen falta para armar el instalador,
+# grabar el video o doblarlo, y sin declararlas esos scripts fallan con
+# ModuleNotFoundError en una máquina limpia.
+#
+#   packaging/generar_imagenes_instalador.py  ->  pillow
+#   packaging/verificar_pantallas.py          ->  playwright
+#   sitio/grabar_demo.py                      ->  playwright, imageio-ffmpeg
+#   sitio/verificar_layout.py                 ->  playwright
+#   sitio/doblar_video.py                     ->  imageio-ffmpeg (subtítulos y
+#                                                 muxeo) y, solo con
+#                                                 --motor local, chatterbox-tts
+#                                                 con torch/torchaudio
+pillow>=10.0
+playwright>=1.40
+imageio-ffmpeg>=0.4.9
+
+# El doblaje de voz pesa varios GB y solo hace falta para regenerar el audio
+# del video, así que se instala aparte a propósito:
+#   pip install chatterbox-tts
+# (trae torch y torchaudio). Los otros motores de sitio/doblar_video.py
+# —voicebox y elevenlabs— no necesitan nada de esto.
