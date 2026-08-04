@@ -159,6 +159,82 @@ def controles() -> list[tuple[bool, str, str]]:
            "elegir un disco que no existe, sin espacio, de red o sin permiso "
            "tiene que avisar en el momento, no fallar a mitad de instalación")
 
+    # --- Qué NO le llega al cliente ---------------------------------------
+    # El panel del dueño, el modelo financiero y el kit de contenido son del
+    # Licenciante. Viajaban en cada instalador y en cada demo descargada:
+    # compilarlos con Cython no evitaba que se distribuyeran. Se controla en
+    # los dos lugares que arman el paquete, porque cualquiera de los dos
+    # alcanza para que se cuelen.
+    spec = _leer(SPEC)
+    proteger = _leer(os.path.join(RAIZ, "packaging", "proteger_codigo.py"))
+    for archivo, donde in (("owner.py", "el panel del dueño"),
+                           ("negocio.py", "el modelo financiero"),
+                           ("contenido.py", "el kit de contenido")):
+        ok(archivo in proteger and archivo in spec,
+           f"El build de cliente no lleva {donde}",
+           f"{archivo} tiene que estar excluido tanto en proteger_codigo.py "
+           "como en plania.spec: el .spec también se corre solo")
+    ok("PLANIA_EDICION" in spec and "PLANIA_EDICION" in _leer(
+           os.path.join(RAIZ, "packaging", "build_release.py")),
+       "Se puede armar la edición del dueño aparte",
+       "sin una edición explícita, o se le manda todo al cliente o el dueño "
+       "se queda sin su panel")
+    ok("Sufijo" in iss,
+       "Las dos ediciones no se pisan el archivo",
+       "con el mismo OutputBaseFilename, armar la edición del dueño sobre-"
+       "escribe el instalador del cliente en dist/ sin avisar")
+
+    # --- Elegir qué se instala --------------------------------------------
+    # Se cuentan declaraciones reales, no renglones de la sección: una línea
+    # sin `Name:` no declara nada, y contar renglones daba por bueno un
+    # [Components] lleno de basura.
+    tipos = [t for t in _seccion(iss, "Types") if re.match(r'\s*Name:', t)]
+    componentes = [c for c in _seccion(iss, "Components") if re.match(r'\s*Name:', c)]
+    ok(len(tipos) >= 2,
+       "El usuario elige qué tipo de instalación quiere",
+       "sin [Types] el instalador vuelca todo sin preguntar")
+    ok(any("iscustom" in t.lower() for t in tipos),
+       "Hay una instalación personalizada",
+       "sin un tipo con el flag iscustom, elegir componentes sueltos no "
+       "habilita nada: Inno Setup vuelve al tipo anterior en cuanto se toca "
+       "una casilla")
+    ok(len(componentes) >= 2,
+       "Hay componentes que se pueden sacar",
+       "sin [Components] la instalación mínima instalaría lo mismo que la "
+       "completa")
+    ok(any("fixed" in c.lower() for c in componentes),
+       "El programa principal no se puede desmarcar",
+       "si se puede sacar el programa, existe una instalación que no instala "
+       "nada y falla al abrirse")
+    archivos_iss = _seccion(iss, "Files")
+    ok(all("Components:" in f for f in archivos_iss),
+       "Cada archivo declara a qué componente pertenece",
+       "un [Files] sin Components: se instala siempre, aunque el usuario "
+       "haya desmarcado su componente — la elección quedaría de adorno")
+    componentes_declarados = set()
+    for c in componentes:
+        m = re.search(r'Name:\s*"([^"]+)"', c)
+        if m:
+            componentes_declarados.add(m.group(1))
+    usados = set()
+    for f in archivos_iss:
+        m = re.search(r"Components:\s*([\w ]+)", f)
+        if m:
+            usados.update(m.group(1).split())
+    ok(usados <= componentes_declarados,
+       "Los archivos no apuntan a componentes que no existen",
+       f"declarados: {sorted(componentes_declarados)}; usados: {sorted(usados)} "
+       "— un componente mal escrito hace que esos archivos no se instalen nunca")
+
+    # --- Desinstalación ----------------------------------------------------
+    ok("CurUninstallStepChanged" in iss,
+       "Al desinstalar se pregunta qué hacer con los datos",
+       "quien desinstala para irse no tiene forma de pedir que se borren sus "
+       "datos, y quedan en el disco sin avisarle")
+    ok("DelTree" in iss and "IDNO" in iss,
+       "Se pueden borrar los datos si el usuario lo pide",
+       "preguntar y no actuar sobre la respuesta es peor que no preguntar")
+
     # --- Accesos directos --------------------------------------------------
     iconos = _seccion(iss, "Icons")
     ok(any("{autodesktop}" in i for i in iconos),

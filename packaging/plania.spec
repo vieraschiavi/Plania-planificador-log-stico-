@@ -57,9 +57,39 @@ def _dir(nombre):
 # necesite ni deba recibir. Antes se empaquetaba sin razón — cada instalador
 # y cada demo descargada llevaba el código fuente del backend de venta
 # adentro. Ver proteger_codigo.py para el resto de lo que esto corrige.
+# Lo que solo usa el dueño del producto no viaja en un build de cliente.
+# Normalmente esto ya lo sacó proteger_codigo.py del árbol de origen; el
+# filtro está igual acá porque el .spec también se corre solo, con
+# --sin-proteger o a mano, y en ese caso el árbol es el repo entero.
+# Tiene que estar en los dos lados o hay un camino por el que se cuela.
+_EDICION = os.environ.get("PLANIA_EDICION", "cliente")
+_SOLO_OWNER = {
+    "app": {"owner.py"},
+    "plania": {"owner.py", "negocio.py", "contenido.py", "verificacion.py"},
+}
+
+
+def _sin_lo_del_dueno(carpeta, ruta):
+    """(origen, destino) de cada archivo de la carpeta, salteando lo del dueño."""
+    prohibidos = _SOLO_OWNER.get(carpeta, set())
+    pares = []
+    for base, _dirs, archivos in os.walk(ruta):
+        rel = os.path.relpath(base, ruta)
+        for archivo in archivos:
+            if rel == "." and archivo in prohibidos:
+                continue
+            destino = carpeta if rel == "." else os.path.join(carpeta, rel)
+            pares.append((os.path.join(base, archivo), destino))
+    return pares
+
+
 for _n in ["app", "plania", "data", "assets", "docs"]:
     par = _dir(_n)
-    if par:
+    if not par:
+        continue
+    if _EDICION != "owner" and _n in _SOLO_OWNER:
+        datas += _sin_lo_del_dueno(_n, par[0])
+    else:
         datas.append(par)
 
 # README.md y la EULA sueltos: documentación embebida en la pantalla de Ayuda

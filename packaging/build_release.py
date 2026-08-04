@@ -36,6 +36,26 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "dist")
 SIN_PROTEGER = "--sin-proteger" in sys.argv
 
+# Qué edición se está armando. "cliente" es la que se vende y se descarga;
+# "owner" es la que corre el dueño del producto y es la única que lleva el
+# panel del negocio (ver packaging/proteger_codigo.py::MODULOS_SOLO_OWNER).
+# Se pasa por entorno además de por argumento porque el .spec de PyInstaller
+# corre en otro proceso y lo lee de ahí.
+def _edicion() -> str:
+    for i, a in enumerate(sys.argv):
+        if a == "--edicion" and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if a.startswith("--edicion="):
+            return a.split("=", 1)[1]
+    return os.environ.get("PLANIA_EDICION", "cliente")
+
+
+EDICION = _edicion()
+if EDICION not in ("cliente", "owner"):
+    raise SystemExit(f"[build] edición desconocida: {EDICION!r} "
+                     "(las que hay: cliente, owner)")
+os.environ["PLANIA_EDICION"] = EDICION
+
 
 def _run(cmd: list[str]) -> None:
     print(f"[build] $ {' '.join(cmd)}")
@@ -62,7 +82,7 @@ def paso_proteger_codigo() -> str | None:
               ".py legible. No usar este build para distribuir.")
         return None
     import proteger_codigo  # packaging/ ya está en sys.path por __file__
-    return proteger_codigo.main()
+    return proteger_codigo.main(EDICION)
 
 
 def paso_pyinstaller(fuente: str | None) -> str:
@@ -113,6 +133,9 @@ def paso_zip(carpeta: str) -> str:
 
 
 def main() -> None:
+    print(f"[build] edición: {EDICION}"
+          + ("" if EDICION == "owner" else
+             "  (sin el panel del dueño ni el modelo de negocio)"))
     paso_datos_demo()
     fuente_protegida = paso_proteger_codigo()
     carpeta = paso_pyinstaller(fuente_protegida)
