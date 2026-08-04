@@ -494,8 +494,19 @@ _MODELO_LOCAL = None
 def _cargar_modelo_local():
     global _MODELO_LOCAL
     if _MODELO_LOCAL is None:
-        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        import torch
+        try:
+            from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+            import torch
+            import torchaudio  # noqa: F401 — se usa al guardar; se chequea acá
+        except ImportError as e:
+            # El motor pesa varios GB y solo hace falta para regenerar el
+            # audio, así que no está en requirements: el mensaje tiene que
+            # decir cómo instalarlo, no dejar al que corre esto adivinando
+            # qué es "No module named 'torchaudio'".
+            raise SystemExit(
+                f"Falta el motor de voz local ({e}).\n"
+                "  pip install chatterbox-tts\n"
+                "O usá otro motor: --motor voicebox / --motor elevenlabs.") from e
         dispositivo = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"  cargando el modelo de voz en {dispositivo} "
               f"(la primera vez se descarga, tarda)…")
@@ -505,9 +516,14 @@ def _cargar_modelo_local():
 
 def sintetizar_local(texto: str, referencia: str, idioma: str, destino: str) -> bool:
     """Clona la voz de `referencia` y le hace decir `texto` en `idioma`."""
+    # Fuera del try: si falta el motor, el mensaje que explica cómo instalarlo
+    # tiene que llegar entero. Adentro lo tragaría el except y saldría como
+    # "error de síntesis local: No module named 'torchaudio'", que no le dice
+    # a nadie qué hacer.
+    modelo = _cargar_modelo_local()
+    import torchaudio
+
     try:
-        import torchaudio
-        modelo = _cargar_modelo_local()
         wav = modelo.generate(texto, language_id=idioma, audio_prompt_path=referencia)
         # torchaudio deduce el formato de la extensión y no acepta que se lo
         # digan por parámetro, así que se escribe como .wav y se renombra: los
@@ -718,9 +734,11 @@ def main() -> int:
 
     if not args.doblar:
         print("\nSubtítulos listos: el video ya se entiende en los tres idiomas.")
-        print("Para la voz, con VoiceBox corriendo:\n"
-              "  python3 sitio/doblar_video.py --crear-voz \"Plania\"\n"
-              "  python3 sitio/doblar_video.py --doblar --voz <id>")
+        print("Para la voz, con el motor local (no necesita cuenta ni servidor):\n"
+              "  pip install chatterbox-tts\n"
+              "  python3 sitio/doblar_video.py --doblar\n"
+              "Alternativas: --motor voicebox (la aplicación de escritorio) "
+              "o --motor elevenlabs (pago).")
         return 0
 
     api_key = ""

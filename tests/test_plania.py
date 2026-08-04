@@ -1651,8 +1651,44 @@ def test_proteger_codigo_compila_y_se_comporta_igual(tmp_path):
     for modulo in proteger_codigo.MODULOS_PROTEGIDOS:
         assert not os.path.exists(os.path.join(carpeta_plania, modulo)), \
             f"{modulo} debería haberse borrado tras compilar"
+
+    # La edición por defecto es la de CLIENTE, y a esa se le sacan los módulos
+    # que son solo del dueño (panel owner, modelo de negocio, kit de
+    # contenido, verificación). Así que lo esperado no son los 12 protegidos
+    # sino los 12 menos esos: contarlos contra los 12 daba un falso error.
+    solo_owner = proteger_codigo.MODULOS_SOLO_OWNER["plania"]
+    esperados = [m for m in proteger_codigo.MODULOS_PROTEGIDOS if m not in solo_owner]
     binarios = [f for f in os.listdir(carpeta_plania) if f.endswith((".so", ".pyd"))]
-    assert len(binarios) == len(proteger_codigo.MODULOS_PROTEGIDOS)
+    assert sorted(b.split(".")[0] for b in binarios) == sorted(m[:-3] for m in esperados)
+
+    # Lo que de verdad importa de esa cuenta: que un build de cliente no se
+    # vaya incompleto. Si un módulo declarado se perdiera en el camino —sin
+    # .so y sin .py— el producto instalado no arrancaría, y el script tiene
+    # que haber cortado antes de llegar acá.
+    import ast
+    disponibles = {f.split(".")[0] for f in os.listdir(carpeta_plania)}
+    for base, _dirs, files in os.walk(destino):
+        if "_build_c" in base or os.sep + "build" in base:
+            continue
+        for f in files:
+            if not f.endswith(".py"):
+                continue
+            try:
+                arbol = ast.parse(open(os.path.join(base, f), encoding="utf-8").read())
+            except SyntaxError:
+                continue
+            for n in ast.walk(arbol):
+                pedidos = []
+                if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("plania"):
+                    partes = (n.module or "").split(".")
+                    pedidos = [partes[1]] if len(partes) > 1 else [a.name for a in n.names]
+                elif isinstance(n, ast.Import):
+                    pedidos = [a.name.split(".")[1] for a in n.names
+                               if a.name.startswith("plania.")]
+                for p in pedidos:
+                    assert p in disponibles, \
+                        f"{os.path.relpath(os.path.join(base, f), destino)} importa " \
+                        f"plania.{p}, que no está en el build: el cliente no podría abrirlo"
 
     # __init__.py y config.py SÍ tienen que seguir siendo .py — no son el
     # diferenciador del producto (ver el porqué en proteger_codigo.py).
