@@ -2914,3 +2914,108 @@ def test_el_menu_no_parece_un_formulario():
         "el selector tiene que anclarse en el data-testid, que es estable; " \
         "las clases st-emotion-cache-… cambian entre versiones"
     assert "display: none !important" in app
+
+
+# ---------------------------------------------------------------------------
+# Ediciones del instalador: qué le llega al cliente y qué no
+# ---------------------------------------------------------------------------
+def _proteger():
+    import importlib, os, sys
+    sys.path.insert(0, os.path.join(RAIZ, "packaging"))
+    return importlib.import_module("proteger_codigo")
+
+
+def test_el_build_de_cliente_no_lleva_el_panel_del_dueno(tmp_path):
+    """El panel del dueño, el modelo financiero y el kit de contenido son del
+    Licenciante: viajaban en cada instalador y en cada demo descargada.
+
+    Compilarlos con Cython no alcanzaba — seguían distribuyéndose. Es la
+    misma razón por la que backend_venta quedó afuera.
+    """
+    import os
+    proteger = _proteger()
+    destino = str(tmp_path / "cliente")
+    proteger.preparar_arbol(destino, "cliente")
+
+    for carpeta, archivos in proteger.MODULOS_SOLO_OWNER.items():
+        for archivo in archivos:
+            assert not os.path.exists(os.path.join(destino, carpeta, archivo)), \
+                f"{carpeta}/{archivo} es del dueño y quedó en el build de cliente"
+
+    # Y lo que el cliente sí necesita tiene que seguir estando: sacar de más
+    # rompe el producto de una forma que no se ve hasta que alguien lo abre.
+    for imprescindible in ("app/app.py", "plania/analitica.py", "plania/copiloto.py",
+                           "plania/sugerencias.py", "plania/licencia.py"):
+        carpeta, archivo = imprescindible.split("/")
+        assert os.path.exists(os.path.join(destino, carpeta, archivo)), \
+            f"falta {imprescindible} en el build de cliente"
+
+
+def test_la_edicion_del_dueno_si_lo_lleva(tmp_path):
+    import os
+    proteger = _proteger()
+    destino = str(tmp_path / "owner")
+    proteger.preparar_arbol(destino, "owner")
+    for carpeta, archivos in proteger.MODULOS_SOLO_OWNER.items():
+        for archivo in archivos:
+            assert os.path.exists(os.path.join(destino, carpeta, archivo)), \
+                f"falta {carpeta}/{archivo} en la edición del dueño"
+
+
+def test_la_app_del_cliente_no_importa_nada_del_dueno():
+    """Lo que decide si se puede sacar un módulo del build es quién lo importa.
+
+    Si mañana app/app.py importara plania/negocio.py, sacarlo dejaría al
+    cliente con una app que no abre — y el test de arriba seguiría en verde.
+    """
+    import os
+    import re
+    proteger = _proteger()
+    prohibidos = {os.path.splitext(a)[0] for a in proteger.MODULOS_SOLO_OWNER["plania"]}
+
+    pendientes = ["app/app.py"]
+    vistos = set()
+    while pendientes:
+        actual = pendientes.pop()
+        if actual in vistos:
+            continue
+        vistos.add(actual)
+        ruta = os.path.join(RAIZ, actual)
+        if not os.path.exists(ruta):
+            continue
+        codigo = open(ruta, encoding="utf-8").read()
+        importados = set()
+        for m in re.finditer(r"from plania import ([^\n#]+)", codigo):
+            importados.update(x.strip() for x in m.group(1).split(","))
+        for m in re.finditer(r"import plania\.(\w+)", codigo):
+            importados.add(m.group(1))
+
+        colision = importados & prohibidos
+        assert not colision, f"{actual} importa {colision}, que no va al cliente"
+        pendientes += [f"plania/{i}.py" for i in importados if i not in vistos]
+
+
+def test_el_instalador_deja_elegir_que_instalar():
+    """El pedido explícito: instalación a elegir. Sin [Types] con un tipo
+    personalizado, marcar componentes sueltos no habilita nada."""
+    import os
+    import re
+    iss = open(os.path.join(RAIZ, "packaging", "instalador.iss"),
+               encoding="utf-8", errors="replace").read()
+    # Inno Setup parte las líneas largas con "\\": se juntan antes de buscar,
+    # o una declaración perfectamente válida no matchea por dónde se cortó.
+    iss = re.sub(r"\\\s*\n\s*", " ", iss)
+    assert "[Types]" in iss and "[Components]" in iss
+    assert "iscustom" in iss.lower()
+    assert re.search(r'Name:\s*"programa".*Flags:\s*fixed', iss), \
+        "el programa principal tiene que ser obligatorio"
+    assert "CurUninstallStepChanged" in iss and "DelTree" in iss, \
+        "al desinstalar se pregunta qué hacer con los datos"
+
+
+def test_el_control_del_instalador_pasa_entero():
+    import subprocess
+    import sys
+    r = subprocess.run([sys.executable, "packaging/verificar_instalador.py"],
+                       cwd=RAIZ, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout[-2000:]

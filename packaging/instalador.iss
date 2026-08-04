@@ -18,6 +18,22 @@
 ; aplicación chica; se pide un margen para los .pyc del primer arranque.
 #define EspacioNecesarioMB 900
 
+; Edición que se está empaquetando. La pone packaging/build_release.py en el
+; entorno antes de llamar a iscc. Importa que el nombre del archivo las
+; distinga: las dos ediciones salen a la misma carpeta dist\, y con el mismo
+; nombre la del dueño pisaría a la del cliente sin decir nada — y se
+; terminaría publicando para descarga el instalador que lleva el panel del
+; negocio adentro.
+#define Edicion GetEnv('PLANIA_EDICION')
+#if Edicion == ""
+  #define Edicion "cliente"
+#endif
+#if Edicion == "owner"
+  #define Sufijo "_Owner"
+#else
+  #define Sufijo ""
+#endif
+
 [Setup]
 AppId={{B7E2C1A4-6F3D-4E2A-9C21-3A8F5D2E7B10}
 AppName={#AppName}
@@ -47,7 +63,7 @@ DefaultGroupName={#AppName}
 ; aparece sin tamaño, como si fuera un accesorio suelto.
 UninstallDisplaySize=943718400
 OutputDir=..\dist
-OutputBaseFilename=Plania_Setup_v{#AppVersion}
+OutputBaseFilename=Plania{#Sufijo}_Setup_v{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -69,11 +85,41 @@ MinVersion=10.0
 [Languages]
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 
+; --------------------------------------------------------------------------
+; Qué se instala: el usuario elige
+; --------------------------------------------------------------------------
+; El programa es obligatorio (`fixed`); lo demás se puede sacar. La diferencia
+; no es cosmética: los datos de demostración son ~40 MB de una empresa
+; inventada, útiles para probar sin conectar nada, e inútiles —y confusos—
+; para quien ya va a conectar su propio ERP el primer día. Que el que compra
+; pueda decir "esto no lo quiero" es la diferencia entre un instalador de
+; producto y un instalador que vuelca una carpeta.
+[Types]
+Name: "completa";       Description: "Completa (recomendada)"
+Name: "minima";         Description: "Mínima: solo el programa"
+Name: "personalizada";  Description: "Personalizada"; Flags: iscustom
+
+[Components]
+Name: "programa"; Description: "Plania (programa principal)"; \
+      Types: completa minima personalizada; Flags: fixed
+Name: "demo";     Description: "Datos de demostración para probar sin conectar tu sistema"; \
+      Types: completa personalizada
+Name: "docs";     Description: "Manual y documentación"; \
+      Types: completa personalizada
+
 [Tasks]
 Name: "desktopicon"; Description: "Crear un acceso directo en el escritorio"; GroupDescription: "Accesos directos:"
 
 [Files]
-Source: "..\dist\Plania\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; El orden importa: las reglas con `excludes` van primero y las específicas
+; después, porque Inno Setup aplica la primera que matchea cada archivo.
+Source: "..\dist\Plania\*"; DestDir: "{app}"; Components: programa; \
+      Excludes: "_internal\data\*,_internal\docs\*,data\*,docs\*"; \
+      Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\Plania\_internal\data\*"; DestDir: "{app}\_internal\data"; \
+      Components: demo; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\dist\Plania\_internal\docs\*"; DestDir: "{app}\_internal\docs"; \
+      Components: docs; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 ; WorkingDir explícito: el acceso directo del escritorio se puede lanzar desde
@@ -278,4 +324,45 @@ end;
 function InitializeUninstall(): Boolean;
 begin
   Result := CerrarPlaniaSiEstaAbierto();
+end;
+
+// --------------------------------------------------------------------------
+// Desinstalación: qué pasa con los datos y la licencia
+// --------------------------------------------------------------------------
+// Por defecto se conservan (ver la nota de [UninstallDelete]): quien
+// desinstala para reinstalar en la misma carpeta no tiene que volver a
+// activar la licencia ni a reconectar su base.
+//
+// Pero quien desinstala para irse de verdad no quiere que le queden datos
+// de su empresa en el disco, y hasta ahora no tenía forma de decirlo: le
+// quedaban ahí, sin avisarle. Se pregunta, con "conservar" como respuesta
+// por defecto, y se avisa que borrarlos obliga a activar la licencia de
+// nuevo — que es la consecuencia que duele si se elige sin pensar.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Datos: String;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+
+  Datos := ExpandConstant('{app}\datos');
+  if not DirExists(Datos) then
+    Exit;
+
+  if MsgBox('¿Querés conservar tus datos y tu licencia?' + #13#10 + #13#10 +
+            'Sí: se conservan en' + #13#10 + Datos + #13#10 +
+            'y si volvés a instalar Plania en esta carpeta, todo sigue como estaba.' +
+            #13#10 + #13#10 +
+            'No: se borran. Vas a tener que activar la licencia de nuevo y volver ' +
+            'a conectar tu base.',
+            mbConfirmation, MB_YESNO) = IDNO then
+  begin
+    if DelTree(Datos, True, True, True) then
+      MsgBox('Listo, se borraron los datos de Plania de esta computadora.',
+             mbInformation, MB_OK)
+    else
+      MsgBox('No se pudieron borrar todos los archivos de:' + #13#10 + Datos +
+             #13#10 + #13#10 + 'Borrá esa carpeta a mano si querés quitarlos.',
+             mbError, MB_OK);
+  end;
 end;

@@ -222,6 +222,7 @@ PARA_LEER = {
     # matchear.
     "Planía punto uy": "plania.uy",
     "Planía ponto uy": "plania.uy",
+    "Plan ay eye dot uy": "plania.uy",
     "Plan A I dot U Y": "plania.uy",
     "Plania punto u y": "plania.uy",
     "Plania dot u y": "plania.uy",
@@ -231,6 +232,7 @@ PARA_LEER = {
     # para que la pronuncie como el juego de palabras PLAN + AI en vez de
     # leerla como una palabra inventada.
     "Planía": "Plania",
+    "Plan ay eye": "Plania",
     "Plan A I": "Plania",
 }
 
