@@ -9,7 +9,23 @@
     "",
     "Regla de duración: el texto de cada segmento tiene que entrar en su hueco.",
     "sitio/doblar_video.py mide el audio real y avisa si un segmento se pasa e",
-    "invadiría al siguiente."
+    "invadiría al siguiente.",
+    "",
+    "CÓMO SE ESCRIBE LA MARCA. Plania es PLAN + IA (inteligencia artificial) en",
+    "español y portugués, y PLAN + AI en inglés. Escrita junta, la voz la lee",
+    "como una palabra sola y el juego de palabras se pierde. Se probó cada forma",
+    "sintetizándola y transcribiéndola; quedaron las que el motor pronuncia:",
+    "  es -> 'Planía'      en -> 'Plan ay eye'      pt -> 'Plan I A'",
+    "",
+    "POR QUÉ LA VOZ NO DICE EL DOMINIO. El motor no logra pronunciar plania.uy",
+    "en ningún idioma: se probó pegado, con coma, con punto, en frase aparte y",
+    "deletreado, y sale 'www.ecitius.uy', 'Planía.ucho', 'dot you', 'ponto O'.",
+    "Así que la voz no lo dice y el subtítulo sí, con el campo sub_<idioma>.",
+    "Para una dirección web es hasta mejor: se copia mirándola, no oyéndola.",
+    "",
+    "En el cierre en portugués la marca tampoco entra: al final de frase se",
+    "degrada en todas las formas probadas ('plan A', 'plan yet', 'plana e'). Ya",
+    "se dice bien en la intro, así que el cierre va sin marca antes que mal."
   ],
   "video": "plania_demo_es.mp4",
   "duracion_seg": 86,
@@ -20,7 +36,10 @@
       "fin": 13.0,
       "es": "Esto es Planía. No reemplaza tu sistema de gestión: se conecta al que ya tenés y te dice qué hacer con esos datos el lunes a la mañana.",
       "en": "This is Plan ay eye. It does not replace your management system: it connects to the one you already run and tells you what to do with that data on Monday morning.",
-      "pt": "Isto é o Planía. Ele não substitui o seu sistema de gestão: conecta-se ao que você já usa e diz o que fazer com esses dados na segunda de manhã."
+      "pt": "Isto é o Plan I A. Ele não substitui o seu sistema de gestão: conecta-se ao que você já usa e diz o que fazer com esses dados na segunda de manhã.",
+      "sub_es": "Esto es Plania. No reemplaza tu sistema de gestión: se conecta al que ya tenés y te dice qué hacer con esos datos el lunes a la mañana.",
+      "sub_en": "This is Plania. It does not replace your management system: it connects to the one you already run and tells you what to do with that data on Monday morning.",
+      "sub_pt": "Isto é a Plania. Ela não substitui o seu sistema de gestão: conecta-se ao que você já usa e diz o que fazer com esses dados na segunda de manhã."
     },
     {
       "id": "panel",
@@ -58,9 +77,12 @@
       "id": "cierre",
       "inicio": 77.5,
       "fin": 85.5,
-      "es": "Conectás tu base en minutos. Siete días con todo habilitado, sin tarjeta. Planía punto uy.",
-      "en": "You connect your database in minutes. Seven days with everything unlocked, no card required. Go to Plan ay eye dot uy.",
-      "pt": "Você conecta a sua base em minutos. Sete dias com tudo liberado, sem cartão. Planía ponto uy."
+      "es": "Conectás tu base en minutos. Siete días con todo habilitado, sin tarjeta. Te esperamos en Planía.",
+      "en": "You connect your database in minutes. Seven days, everything unlocked, no card. Start with Plan ay eye today.",
+      "pt": "Você conecta a sua base em minutos. Sete dias com tudo liberado, sem cartão. Comece hoje, sem compromisso.",
+      "sub_es": "Conectás tu base en minutos. Siete días con todo habilitado, sin tarjeta. Te esperamos en plania.uy.",
+      "sub_en": "You connect your database in minutes. Seven days, everything unlocked, no card. Start today at plania.uy.",
+      "sub_pt": "Você conecta a sua base em minutos. Sete dias com tudo liberado, sem cartão. Comece hoje em plania.uy."
     }
   ]
 }

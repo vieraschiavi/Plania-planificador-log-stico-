@@ -104,7 +104,16 @@ hiddenimports += [
     "plania.config", "plania.copiloto", "plania.exportes", "plania.licencia",
     "plania.rutas", "plania.sugerencias",
     "data.generate_dataset",
+    # El módulo que abre la ventana propia del programa. Va declarado porque
+    # el lanzador lo importa dentro de un try/except —para poder correr tanto
+    # empaquetado como desde el repo— y ahí el análisis estático de
+    # PyInstaller no lo ve. Sin esto el .exe se abriría en el navegador.
+    "ventana",
 ]
+
+# `import ventana` tiene que resolver dentro del bundle: se agrega la carpeta
+# packaging/ al path de análisis, igual que la raíz del repo.
+_PATHEX_EXTRA = [os.path.join(REPO, "packaging")]
 
 _ICON = os.path.join(ROOT, "assets", "brand", "plania.ico")
 _icon = _ICON if os.path.exists(_ICON) else None
@@ -113,7 +122,7 @@ block_cipher = None
 
 a = Analysis(
     [os.path.join(REPO, "packaging", "plania_launcher.py")],
-    pathex=[REPO],
+    pathex=[REPO] + _PATHEX_EXTRA,
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

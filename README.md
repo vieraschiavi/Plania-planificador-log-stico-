@@ -33,11 +33,19 @@ que responde consultas sobre los datos reales y exporta todo a
 | Archivo | Es | Elegís carpeta de instalación |
 |---|---|---|
 | `Plania Setup *.exe` | Electron + React — ventana propia, todo embebido | sí |
-| `Plania_Setup_v*.exe` | Liviano (Inno Setup), se abre en el navegador — es el que se descarga después de pagar | sí |
+| `Plania_Setup_v*.exe` | Liviano (Inno Setup), ventana propia sin barra de direcciones — es el que se descarga después de pagar | sí |
 
 Los dos son instaladores completos: no hace falta tener Python ni nada
 instalado. También está `Plania_portable.zip` (el liviano, sin instalar) y
 `Plania_BAT.zip` (requiere Python).
+
+Los dos abren **una ventana de programa**: sin barra de direcciones, sin
+pestañas, con su ícono propio en la barra de tareas. El liviano lo consigue
+usando el modo aplicación de Edge (que viene en todo Windows 10 y 11) en vez
+de empaquetar un navegador entero — por eso pesa una fracción del de
+Electron. Si la máquina no tuviera ningún navegador basado en Chromium, se
+abre el navegador por defecto: peor, pero funciona. Detalle en
+`packaging/ventana.py`.
 
 *Nota: requiere GitHub Actions habilitado para el repo — ver la nota en
 `.github/workflows/ci.yml`.* También se pueden construir localmente en

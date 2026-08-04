@@ -326,12 +326,34 @@ def cues(texto: str, inicio: float, fin: float) -> list[tuple[float, float, str]
     return salida
 
 
+def texto_hablado(seg: dict, idioma: str) -> str:
+    """Lo que sintetiza la voz."""
+    return seg[idioma]
+
+
+def texto_leido(seg: dict, idioma: str) -> str:
+    """Lo que se muestra en el subtítulo.
+
+    Por defecto es lo mismo que dice la voz. Pero un segmento puede traer
+    `sub_<idioma>` y entonces gana ese texto, porque hay cosas que conviene
+    mostrar y no decir.
+
+    El caso concreto es el dominio. El motor de voz no lo pronuncia bien en
+    ningún idioma —se probó pegado, con coma, con punto, en frase aparte y
+    deletreado, y sale "www.ecitius.uy", "Planía.ucho", "dot you", "ponto O"—,
+    así que la voz no lo dice. Pero plania.uy es el llamado a la acción del
+    video y tiene que quedar: se lee en el subtítulo. Para una dirección web
+    eso es hasta mejor, porque una URL se copia mirándola, no escuchándola.
+    """
+    return seg.get(f"sub_{idioma}", seg[idioma])
+
+
 def escribir_vtt(guion: dict, idioma: str) -> str:
     destino = os.path.join(VIDEO_DIR, f"plania_demo_{idioma}.vtt")
     lineas = ["WEBVTT", "", f"NOTE Plania · {NOMBRE[idioma]}", ""]
     n = 0
     for seg in guion["segmentos"]:
-        for ini, fin, texto in cues(seg[idioma], seg["inicio"], seg["fin"]):
+        for ini, fin, texto in cues(texto_leido(seg, idioma), seg["inicio"], seg["fin"]):
             n += 1
             lineas += [str(n), f"{_mmss(ini)} --> {_mmss(fin)}", texto, ""]
     with open(destino, "w", encoding="utf-8") as f:
@@ -621,12 +643,13 @@ def doblar(guion: dict, idioma: str, voz: str, motor: str, api_key: str,
     for i, s in enumerate(segs):
         h = hueco(s, segs[i + 1] if i + 1 < len(segs) else None, fin_video)
         archivo = os.path.join(tmp, f"{i:02d}_{s['id']}.audio")
+        hablado = texto_hablado(s, idioma)
         if motor == "local":
-            ok = sintetizar_local(s[idioma], voz, idioma, archivo)
+            ok = sintetizar_local(hablado, voz, idioma, archivo)
         elif motor == "voicebox":
-            ok = sintetizar_voicebox(s[idioma], voz, idioma, archivo)
+            ok = sintetizar_voicebox(hablado, voz, idioma, archivo)
         else:
-            ok = sintetizar_elevenlabs(s[idioma], voz, api_key, archivo)
+            ok = sintetizar_elevenlabs(hablado, voz, api_key, archivo)
         if not ok:
             shutil.rmtree(tmp, ignore_errors=True)
             raise SystemExit(f"[{idioma}] no se pudo sintetizar '{s['id']}'.")
