@@ -236,13 +236,23 @@ def _publicar_puerto(puerto: str) -> None:
 
 
 def _abrir_navegador(url: str, cancelar: threading.Event):
-    """Espera a que el server levante y abre el navegador una sola vez.
+    """Espera a que el server levante y abre la ventana del programa.
 
     `cancelar` existe por el reintento de puerto: si Streamlit no llegó a
     tomar el puerto y hay que mudarse a otro, este hilo ya está esperando en
     la dirección vieja. Sin la señal, abriría el navegador en el puerto que
     se llevó OTRO programa — o sea, le mostraría al usuario esa aplicación
     creyendo que es Plania.
+
+    Se abre una **ventana de aplicación** (ver packaging/ventana.py), no una
+    pestaña del navegador: lo que el cliente compró es un programa, y "se me
+    abrió el Chrome con una barra de direcciones" se lee como una página web.
+    Si en la máquina no hay ningún navegador que soporte el modo ventana, se
+    cae al navegador por defecto — peor, pero funciona.
+
+    Cuando el usuario cierra la ventana se termina el programa. Es lo que
+    espera de una aplicación de escritorio: sin esto, el server quedaría
+    corriendo invisible y el próximo arranque se mudaría de puerto.
     """
     for _ in range(60):
         if cancelar.wait(0.5):
@@ -253,8 +263,32 @@ def _abrir_navegador(url: str, cancelar: threading.Event):
             break
         except Exception:
             continue
-    if not cancelar.is_set():
+    if cancelar.is_set():
+        return
+
+    if os.environ.get("PLANIA_NAVEGADOR"):
         webbrowser.open(url)
+        return
+
+    try:
+        import ventana
+    except ImportError:
+        from packaging import ventana   # type: ignore[no-redef]
+
+    proceso = ventana.abrir(url)
+    if proceso is None:
+        print("[Plania] Sin navegador para abrir ventana propia: "
+              "se abre el navegador por defecto.")
+        webbrowser.open(url)
+        return
+
+    ventana.ocultar_consola()
+    proceso.wait()
+    print("[Plania] Ventana cerrada. Cerrando Plania.")
+    # os._exit y no sys.exit: esto corre en un hilo secundario, y sys.exit
+    # ahí sólo termina el hilo — el server de Streamlit seguiría corriendo.
+    sys.stdout.flush()
+    os._exit(0)
 
 
 def main():

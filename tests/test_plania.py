@@ -3064,3 +3064,68 @@ def test_el_control_del_instalador_pasa_entero():
     r = subprocess.run([sys.executable, "packaging/verificar_instalador.py"],
                        cwd=RAIZ, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout[-2000:]
+
+
+# ---------------------------------------------------------------------------
+# Ventana propia del programa (que el .exe no se abra como una página web)
+# ---------------------------------------------------------------------------
+def _ventana():
+    import importlib.util
+    ruta = os.path.join(RAIZ, "packaging", "ventana.py")
+    spec = importlib.util.spec_from_file_location("ventana", ruta)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_el_programa_pide_ventana_propia_y_no_una_pestana():
+    """Lo que se vende es un programa. Si abre una pestaña con la barra de
+    direcciones a la vista, el cliente lee "esto es una página web"."""
+    v = _ventana()
+    cmd = v.comando("/ruta/al/navegador", "http://localhost:8531", "/tmp/perfil")
+
+    modo_app = [a for a in cmd if a.startswith("--app=")]
+    assert modo_app == ["--app=http://localhost:8531"], \
+        "sin --app se abre una pestaña común, con barra de direcciones y pestañas"
+
+    # Perfil propio: sin esto la ventana se cuelga de la sesión de navegación
+    # del usuario, hereda sus extensiones y cerrarla puede arrastrarle otras
+    # ventanas abiertas.
+    assert any(a.startswith("--user-data-dir=") for a in cmd)
+
+
+def test_sin_navegador_no_se_rompe_se_avisa():
+    """Sin ningún navegador con modo ventana, `abrir` devuelve None para que
+    el lanzador caiga al navegador por defecto. Nunca puede quedar peor que
+    antes de existir la ventana."""
+    v = _ventana()
+    v.buscar_navegador = lambda: None
+    assert v.abrir("http://localhost:1") is None
+
+    v.buscar_navegador = lambda: "/no/existe"
+    assert v.abrir("http://localhost:1") is None
+
+
+def test_el_lanzador_abre_ventana_antes_que_navegador():
+    """El lanzador tiene que intentar la ventana primero y dejar el navegador
+    como reserva — no al revés."""
+    fuente = open(os.path.join(RAIZ, "packaging", "plania_launcher.py"),
+                  encoding="utf-8").read()
+    assert "ventana.abrir(url)" in fuente
+    i_ventana = fuente.index("ventana.abrir(url)")
+    i_reserva = fuente.index("webbrowser.open(url)", i_ventana)
+    assert i_ventana < i_reserva, "el navegador tiene que ser la reserva, no lo primero"
+    # Y cerrar la ventana tiene que terminar el programa: si no, el server
+    # queda corriendo invisible y el próximo arranque se muda de puerto.
+    assert "proceso.wait()" in fuente and "os._exit(0)" in fuente
+
+
+def test_el_ejecutable_empaqueta_el_modulo_de_la_ventana():
+    """El lanzador importa `ventana` dentro de un try/except, así que
+    PyInstaller no lo ve solo. Si falta esta declaración el .exe compila
+    igual y se abre en el navegador — el error se descubre recién cuando un
+    cliente lo descarga."""
+    spec = open(os.path.join(RAIZ, "packaging", "plania.spec"), encoding="utf-8").read()
+    assert '"ventana"' in spec, "falta 'ventana' en hiddenimports de plania.spec"
+    assert "_PATHEX_EXTRA" in spec and "pathex=[REPO] + _PATHEX_EXTRA" in spec, \
+        "packaging/ tiene que estar en el pathex para que `import ventana` resuelva"
