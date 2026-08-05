@@ -186,6 +186,29 @@ Deja, si Inno Setup 6 está instalado:
 
 Y siempre, tenga o no Inno Setup: `dist\Plania_portable.zip`.
 
+### Un solo producto, y el panel del dueño aparte
+
+`build_release.py` arma **un** Plania, sin ediciones. Ese archivo es el que
+usa el dueño y el que descarga quien lo compra: es la única forma de que el
+dueño esté probando lo mismo que reciben sus clientes.
+
+El panel del negocio —facturación, clientes, modelo financiero, kit de
+contenido— se arma por separado y no se publica:
+
+```powershell
+python packaging\build_release.py --con-owner
+```
+
+Eso agrega `dist\Plania_Owner.zip`. Es tuyo: no va a `descargas/`, no se
+adjunta a la release y el propio workflow corta si aparece ahí.
+
+### Dónde quedan los instaladores
+
+La carpeta [`descargas/`](../descargas/) del repositorio, con sus `sha256`.
+La llena la corrida de **Actions → Release → Run workflow**, que compila en
+Windows y commitea el resultado. Los mismos archivos quedan además en la
+página de *Releases*.
+
 Este instalador **permite elegir dónde instalar** (`DisableDirPage=no` en
 `packaging/instalador.iss`, explícito), valida la carpeta elegida antes de
 copiar nada (unidad lista, con espacio, escribible; avisa si es de red o

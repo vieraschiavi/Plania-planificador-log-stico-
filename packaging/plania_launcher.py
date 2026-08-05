@@ -291,9 +291,31 @@ def _abrir_navegador(url: str, cancelar: threading.Event):
     os._exit(0)
 
 
+def _pantalla(base: str) -> str:
+    """Qué pantalla levanta este ejecutable.
+
+    Son dos programas distintos y se empaquetan por separado:
+
+      · **Plania** — el producto. Es el mismo archivo para el dueño y para
+        cualquiera que lo compre; no existe una versión "del dueño" del
+        producto. Si existiera, el dueño estaría probando algo que ningún
+        cliente tiene, y los problemas que reporte un cliente no se
+        reproducirían en su máquina.
+      · **Plania Owner** — el panel del negocio (facturación, clientes,
+        modelo financiero). Se instala solo en la máquina del dueño.
+
+    Comparten este lanzador porque el problema que resuelve —buscar un puerto
+    libre de verdad, no exponerse a la red, dejar log— es idéntico en los dos.
+    Cuál de las dos pantallas se levanta lo fija el .spec al empaquetar.
+    """
+    if os.environ.get("PLANIA_PANEL") == "owner":
+        return os.path.join(base, "app", "owner.py")
+    return os.path.join(base, "app", "app.py")
+
+
 def main():
     base = _base_dir()
-    app_path = os.path.join(base, "app", "app.py")
+    app_path = _pantalla(base)
     electron = bool(os.environ.get("PLANIA_NO_BROWSER"))
 
     # Config de Streamlit para modo "programa" (no dev, no telemetría).

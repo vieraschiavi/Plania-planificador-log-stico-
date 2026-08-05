@@ -57,12 +57,18 @@ def _dir(nombre):
 # necesite ni deba recibir. Antes se empaquetaba sin razón — cada instalador
 # y cada demo descargada llevaba el código fuente del backend de venta
 # adentro. Ver proteger_codigo.py para el resto de lo que esto corrige.
-# Lo que solo usa el dueño del producto no viaja en un build de cliente.
+# Lo que solo usa el dueño del producto NUNCA viaja en este ejecutable, sin
+# excepciones ni ediciones: el Plania que corre el dueño tiene que ser el
+# mismo archivo, byte por byte, que el que descarga un comprador — si no, el
+# dueño estaría probando un programa que nadie más tiene.
+#
+# El panel del dueño es un programa aparte (packaging/plania_owner.spec), que
+# se instala solo en su máquina.
+#
 # Normalmente esto ya lo sacó proteger_codigo.py del árbol de origen; el
 # filtro está igual acá porque el .spec también se corre solo, con
 # --sin-proteger o a mano, y en ese caso el árbol es el repo entero.
 # Tiene que estar en los dos lados o hay un camino por el que se cuela.
-_EDICION = os.environ.get("PLANIA_EDICION", "cliente")
 _SOLO_OWNER = {
     "app": {"owner.py"},
     "plania": {"owner.py", "negocio.py", "contenido.py", "verificacion.py"},
@@ -87,7 +93,7 @@ for _n in ["app", "plania", "data", "assets", "docs"]:
     par = _dir(_n)
     if not par:
         continue
-    if _EDICION != "owner" and _n in _SOLO_OWNER:
+    if _n in _SOLO_OWNER:
         datas += _sin_lo_del_dueno(_n, par[0])
     else:
         datas.append(par)

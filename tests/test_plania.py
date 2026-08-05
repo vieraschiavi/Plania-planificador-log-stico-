@@ -2980,7 +2980,7 @@ def test_el_build_de_cliente_no_lleva_el_panel_del_dueno(tmp_path):
     import os
     proteger = _proteger()
     destino = str(tmp_path / "cliente")
-    proteger.preparar_arbol(destino, "cliente")
+    proteger.preparar_arbol(destino)
 
     for carpeta, archivos in proteger.MODULOS_SOLO_OWNER.items():
         for archivo in archivos:
@@ -2996,15 +2996,61 @@ def test_el_build_de_cliente_no_lleva_el_panel_del_dueno(tmp_path):
             f"falta {imprescindible} en el build de cliente"
 
 
-def test_la_edicion_del_dueno_si_lo_lleva(tmp_path):
+def test_el_producto_es_uno_solo_para_el_dueno_y_para_quien_lo_compra(tmp_path):
+    """No hay una versión del producto para adentro y otra para vender.
+
+    Si la hubiera, el dueño estaría probando un programa que ningún cliente
+    tiene: un problema reportado por un comprador podría no reproducírsele
+    nunca, y la demo que le muestra a un prospecto no sería la que ese
+    prospecto se descarga.
+    """
+    import inspect
     import os
     proteger = _proteger()
-    destino = str(tmp_path / "owner")
-    proteger.preparar_arbol(destino, "owner")
-    for carpeta, archivos in proteger.MODULOS_SOLO_OWNER.items():
-        for archivo in archivos:
-            assert os.path.exists(os.path.join(destino, carpeta, archivo)), \
-                f"falta {carpeta}/{archivo} en la edición del dueño"
+
+    # Preparar el árbol no admite variantes: no se le puede pedir "la del dueño".
+    firma = inspect.signature(proteger.preparar_arbol)
+    assert list(firma.parameters) == ["destino"], \
+        "preparar_arbol volvió a aceptar una edición: el producto se bifurcó"
+
+    # Y lo del dueño se saca siempre, sin importar el entorno.
+    os.environ["PLANIA_EDICION"] = "owner"      # aunque alguien la reviva
+    try:
+        destino = str(tmp_path / "producto")
+        proteger.preparar_arbol(destino)
+        for carpeta, archivos in proteger.MODULOS_SOLO_OWNER.items():
+            for archivo in archivos:
+                assert not os.path.exists(os.path.join(destino, carpeta, archivo)), \
+                    f"{carpeta}/{archivo} es del dueño y quedó en el producto"
+    finally:
+        os.environ.pop("PLANIA_EDICION", None)
+
+
+def test_el_panel_del_dueno_se_arma_como_programa_aparte():
+    """El panel del dueño existe, pero como ejecutable propio.
+
+    Es la contracara del test de arriba: sacarlo del producto no puede
+    significar que el dueño se quede sin él.
+    """
+    import os
+    spec = open(os.path.join(RAIZ, "packaging", "plania_owner.spec"),
+                encoding="utf-8").read()
+    assert "entrada_owner.py" in spec
+    assert 'name="Plania Owner"' in spec
+
+    entrada = open(os.path.join(RAIZ, "packaging", "entrada_owner.py"),
+                   encoding="utf-8").read()
+    assert 'PLANIA_PANEL"] = "owner"' in entrada
+
+    lanzador = open(os.path.join(RAIZ, "packaging", "plania_launcher.py"),
+                    encoding="utf-8").read()
+    assert "owner.py" in lanzador, \
+        "el lanzador no sabe levantar el panel del dueño"
+
+    # Y el .spec del producto no puede nombrar ese entry point.
+    producto = open(os.path.join(RAIZ, "packaging", "plania.spec"),
+                    encoding="utf-8").read()
+    assert "entrada_owner" not in producto
 
 
 def test_la_app_del_cliente_no_importa_nada_del_dueno():

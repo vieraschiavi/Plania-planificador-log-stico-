@@ -171,18 +171,23 @@ def controles() -> list[tuple[bool, str, str]]:
                            ("negocio.py", "el modelo financiero"),
                            ("contenido.py", "el kit de contenido")):
         ok(archivo in proteger and archivo in spec,
-           f"El build de cliente no lleva {donde}",
+           f"El producto no lleva {donde}",
            f"{archivo} tiene que estar excluido tanto en proteger_codigo.py "
            "como en plania.spec: el .spec también se corre solo")
-    ok("PLANIA_EDICION" in spec and "PLANIA_EDICION" in _leer(
+
+    # El producto es un solo build. Si el .spec vuelve a mirar una variable de
+    # edición, vuelve a existir un Plania del dueño distinto del que se vende:
+    # el dueño dejaría de probar lo que reciben sus clientes.
+    ok("PLANIA_EDICION" not in spec and "PLANIA_EDICION" not in _leer(
            os.path.join(RAIZ, "packaging", "build_release.py")),
-       "Se puede armar la edición del dueño aparte",
-       "sin una edición explícita, o se le manda todo al cliente o el dueño "
-       "se queda sin su panel")
-    ok("Sufijo" in iss,
-       "Las dos ediciones no se pisan el archivo",
-       "con el mismo OutputBaseFilename, armar la edición del dueño sobre-"
-       "escribe el instalador del cliente en dist/ sin avisar")
+       "El producto se arma una sola vez, sin ediciones",
+       "con ediciones, el dueño corre un programa distinto del que descarga "
+       "quien le compra, y los problemas que le reportan no le pasan a él")
+    owner_spec = _leer(os.path.join(RAIZ, "packaging", "plania_owner.spec"))
+    ok("entrada_owner.py" in owner_spec and "Plania Owner" in owner_spec,
+       "El panel del dueño se arma como programa aparte",
+       "sin un .spec propio, el panel del negocio o viaja adentro del producto "
+       "o directamente no se puede armar")
 
     # --- Elegir qué se instala --------------------------------------------
     # Se cuentan declaraciones reales, no renglones de la sección: una línea
@@ -323,6 +328,42 @@ def controles() -> list[tuple[bool, str, str]]:
     ok(not any("8501" in l for l in codigo),
        "No se usa el puerto por defecto de Streamlit",
        "el 8501 lo ocupa cualquier otra aplicación Streamlit del usuario")
+    ok("_puerto_libre" in lanzador and "_reservar" in lanzador,
+       "El puerto se toma de verdad antes de anunciarlo",
+       "comprobar que un puerto está libre y recién después dejarlo tomar deja "
+       "una ventana en la que otro programa se lo lleva")
+
+    # --- Que parezca un programa y no una página de Streamlit --------------
+    # Lo que se vende es un programa instalado. El andamiaje de Streamlit —el
+    # menú de hamburguesa con "Rerun" y el enlace a streamlit.io, el botón
+    # Deploy, el "Running...", el pie "Made with Streamlit"— delata con qué
+    # está hecho y no tiene ninguna función para quien lo compró.
+    apariencia = _leer(os.path.join(RAIZ, "plania", "apariencia.py"))
+    # Se busca el selector completo con las comillas y no el id suelto: sin
+    # las comillas, "stToolbar" lo daba por presente el selector de al lado
+    # (stToolbarActions), y el control pasaba aunque la barra del botón
+    # Deploy hubiera quedado a la vista.
+    for testid, que in (("stToolbar", "la barra con el botón Deploy"),
+                        ("stStatusWidget", "el cartelito 'Running...'"),
+                        ("stMainMenu", "el menú de hamburguesa"),
+                        ("stDecoration", "la barra de colores de arriba")):
+        selector = f'[data-testid="{testid}"]'
+        ok(selector in apariencia, f"La ventana no muestra {que}",
+           f"falta ocultar {selector} en plania/apariencia.py")
+    ok("footer" in apariencia,
+       "La ventana no muestra el pie 'Made with Streamlit'",
+       "falta ocultar footer en plania/apariencia.py")
+    for pantalla in ("app.py", "owner.py"):
+        cuerpo = _leer(os.path.join(RAIZ, "app", pantalla))
+        ok("apariencia.css_programa()" in cuerpo,
+           f"app/{pantalla} usa la apariencia de programa",
+           "cada pantalla que se olvide de aplicarla vuelve a mostrar el "
+           "andamiaje de Streamlit")
+        ok("fonts.googleapis.com" not in cuerpo,
+           f"app/{pantalla} no depende de internet para su tipografía",
+           "un programa instalado tiene que verse igual sin red; además una "
+           "llamada a un servidor externo en cada arranque la puede bloquear "
+           "el área de sistemas del cliente")
 
     # --- Todo en el disco que el usuario elige ------------------------------
     config_py = _leer(os.path.join(RAIZ, "plania", "config.py"))

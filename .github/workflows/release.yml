@@ -132,6 +132,62 @@ jobs:
             }
           }
 
+      - name: Dejar los instaladores en descargas/ con sus checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force descargas | Out-Null
+          # Nombre estable, sin la versión: la carpeta guarda UNA copia de cada
+          # cosa y cada release pisa a la anterior. El historial de versiones
+          # vive en la página de Releases, no acá.
+          $setup = Get-ChildItem dist/Plania_Setup_v*.exe | Select-Object -First 1
+          if ($setup) { Copy-Item $setup.FullName descargas/Plania_Setup.exe -Force }
+          foreach ($n in @("Plania_portable.zip", "Plania_BAT.zip")) {
+            if (Test-Path "dist/$n") { Copy-Item "dist/$n" "descargas/$n" -Force }
+          }
+          # El panel del dueño NO se publica: lleva adentro la facturación, los
+          # clientes y el modelo financiero. Si alguna vez aparece acá, es un
+          # error y el paso corta.
+          if (Test-Path descargas/Plania_Owner.zip) {
+            Write-Error "Plania_Owner.zip no puede publicarse: es el panel del dueño."
+            exit 1
+          }
+          $lineas = @("# sha256 de los archivos de esta carpeta",
+                      "# generado por .github/workflows/release.yml")
+          Get-ChildItem descargas -File | Where-Object { $_.Name -ne "CHECKSUMS.txt" -and $_.Name -ne "README.md" } | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $mb = [math]::Round($_.Length / 1MB, 1)
+            $lineas += "$h  $($_.Name)  ($mb MB)"
+          }
+          Set-Content descargas/CHECKSUMS.txt ($lineas -join "`n")
+          Get-Content descargas/CHECKSUMS.txt
+
+      # Solo en las corridas manuales. Una corrida disparada por un tag está
+      # parada en el commit de ese tag, que puede ser viejo: empujar eso a la
+      # rama por defecto la haría retroceder. En esas corridas los archivos
+      # igual quedan publicados en la página de Releases, que es el paso
+      # siguiente.
+      - name: Commitear descargas/
+        if: github.ref_type != 'tag'
+        shell: bash
+        env:
+          RAMA: ${{ github.event.repository.default_branch }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f descargas/
+          if git diff --cached --quiet; then
+            echo "descargas/ sin cambios."
+            exit 0
+          fi
+          git commit -m "Instaladores de la release en descargas/"
+          # Alguien pudo haber pusheado mientras el build corría (tarda varios
+          # minutos): se rebasa antes de empujar en vez de fallar la corrida
+          # entera después de haber compilado todo.
+          git fetch origin "$RAMA"
+          git rebase "origin/$RAMA"
+          git push origin "HEAD:$RAMA"
+
       - name: Publicar release con las descargas
         uses: softprops/action-gh-release@v2
         with:

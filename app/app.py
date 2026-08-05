@@ -25,7 +25,7 @@ pd.set_option("mode.string_storage", "python")
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 
-from plania import analitica, catalogo, conectores, copiloto, exportes, licencia, rutas, sugerencias  # noqa: E402
+from plania import analitica, apariencia, catalogo, conectores, copiloto, exportes, licencia, rutas, sugerencias  # noqa: E402
 from plania import config as pconfig  # noqa: E402
 
 pconfig.aplicar()
@@ -45,10 +45,7 @@ st.set_page_config(page_title="Plania · Planificación Inteligente",
 
 st.markdown(f"""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-  html, body, [class*="css"], .stMarkdown, button, input, textarea {{
-      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-  }}
+  {apariencia.css_programa()}
   .block-container {{ padding-top: 1.4rem; max-width: 1240px; }}
   h1, h2, h3 {{ letter-spacing: -0.015em; }}
 
