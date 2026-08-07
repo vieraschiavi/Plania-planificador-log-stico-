@@ -3295,15 +3295,45 @@ def test_el_release_automatico_no_publica_en_la_pagina_de_releases():
 
 def test_el_job_caro_de_windows_esta_gateado_por_el_de_linux():
     """El job de windows-latest (caro: Cython + PyInstaller + Electron) no
-    puede arrancar si el gate, que corre en Linux, decidió que no hace falta."""
+    arranca si el gate, que corre en Linux, dijo que no hace falta."""
     wf = _release_yml()
     assert "runs-on: ubuntu-latest" in wf, "falta el job barato que decide"
     i_gate = wf.index("gate:")
     i_windows = wf.index("ejecutables-windows:")
     assert i_gate < i_windows
-    bloque_windows = wf[i_windows:i_windows + 200]
+    bloque_windows = wf[i_windows:i_windows + 1500]
     assert "needs: gate" in bloque_windows
-    assert "needs.gate.outputs.build == 'si'" in bloque_windows
+
+
+def test_el_gate_falla_hacia_construir_y_no_hacia_no_construir():
+    """Si el gate no llega a decidir, se construye igual.
+
+    Esto pasó de verdad: en la corrida que disparó el merge del PR #25 el
+    gate murió sin ejecutarse (GitHub no le asignó runner). Con la condición
+    original —`== 'si'`— el job de Windows quedó en "skipped": gris, idéntico
+    a "no había nada que construir". Resultado: ningún instalador y ningún
+    error que lo explicara.
+
+    La condición correcta es negativa: construir salvo que el gate haya dicho
+    explícitamente que no. Es la misma regla que el gate ya aplica por dentro
+    cuando no puede leer la lista de archivos del push.
+    """
+    wf = _release_yml()
+    i = wf.index("ejecutables-windows:")
+    bloque = wf[i:i + 1500]
+    linea_if = [l for l in bloque.splitlines() if l.strip().startswith("if:")][0]
+
+    assert "!= 'no'" in linea_if, \
+        "la condición tiene que ser negativa (fail-open): un gate que no pudo " \
+        "correr no puede dejar la release en silencio"
+    assert "== 'si'" not in linea_if, \
+        "condición positiva: si el gate no llega a emitir su salida, no se construye nada"
+    # Pero una corrida cancelada por `concurrency` sí tiene que cortar: llegó
+    # un push más nuevo y este build ya no interesa.
+    assert "!cancelled()" in linea_if, \
+        "sin !cancelled(), una corrida cancelada por concurrency igual construiría"
+    assert "always()" not in linea_if, \
+        "always() incluye las canceladas — usar !cancelled()"
 
 
 def test_release_tiene_concurrencia_para_no_amontonar_builds_caros():

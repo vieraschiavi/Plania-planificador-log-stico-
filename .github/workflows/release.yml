@@ -101,7 +101,24 @@ jobs:
 
   ejecutables-windows:
     needs: gate
-    if: needs.gate.outputs.build == 'si'
+    # Fail-open a propósito: construye salvo que el gate haya dicho
+    # explícitamente que NO hace falta.
+    #
+    # La primera versión de esto era `needs.gate.outputs.build == 'si'`, y en
+    # la corrida real que disparó el merge del PR #25 el gate murió sin
+    # ejecutarse (GitHub no le asignó runner: runner_id 0, sin logs). Con
+    # aquella condición este job quedó en "skipped" — gris, indistinguible de
+    # "no había nada que construir" — así que no hubo instalador y tampoco
+    # hubo un error que lo explicara.
+    #
+    # Es la misma regla que ya usa el gate por dentro cuando no puede leer la
+    # lista de archivos: si no se puede afirmar que NO hace falta construir,
+    # se construye. Un build de más cuesta minutos; un build que falta en
+    # silencio cuesta descubrir tarde que no hay nada para descargar.
+    #
+    # `!cancelled()` y no `always()`: si la corrida se canceló por
+    # `concurrency` (llegó un push más nuevo), no hay que seguir.
+    if: ${{ !cancelled() && needs.gate.outputs.build != 'no' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
