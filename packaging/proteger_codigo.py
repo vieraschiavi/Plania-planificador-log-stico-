@@ -91,12 +91,14 @@ MODULOS_PROTEGIDOS = [
 # en cada demo descargada. Un cliente no los necesita para nada —`app/app.py`
 # no importa ninguno— y son, literalmente, cómo se gana plata con esto.
 #
-# La edición "owner" sí los lleva: es la que corre el dueño en su máquina.
+# Se sacan SIEMPRE, sin excepción ni edición: el producto es un solo build y
+# ese archivo es el que corre el dueño y el que descarga un comprador. El
+# panel del dueño se arma como programa aparte (packaging/plania_owner.spec),
+# que no pasa por acá porque no sale de su máquina.
 MODULOS_SOLO_OWNER = {
     "app": ["owner.py"],
     "plania": ["owner.py", "negocio.py", "contenido.py", "verificacion.py"],
 }
-EDICIONES = ("cliente", "owner")
 
 _SETUP_PY = """\
 from setuptools import setup
@@ -151,7 +153,7 @@ def quitar_lo_del_dueno(destino: str) -> list[str]:
     return quitados
 
 
-def preparar_arbol(destino: str, edicion: str = "cliente") -> str:
+def preparar_arbol(destino: str) -> str:
     """Copia lo que hace falta para armar el ejecutable a una carpeta
     aparte, y deja `destino/plania/` lista para compilarse ahí sin tocar
     el repo real."""
@@ -176,29 +178,27 @@ def preparar_arbol(destino: str, edicion: str = "cliente") -> str:
         if os.path.isfile(origen):
             shutil.copy(origen, os.path.join(destino, archivo))
 
-    if edicion != "owner":
-        quitados = quitar_lo_del_dueno(destino)
-        if quitados:
-            print(f"[proteger] fuera del build de cliente: {', '.join(quitados)}")
+    quitados = quitar_lo_del_dueno(destino)
+    if quitados:
+        print(f"[proteger] fuera del producto: {', '.join(quitados)}")
 
     print(f"[proteger] árbol preparado en {os.path.relpath(destino, REPO)}")
     return destino
 
 
-def compilar_plania(destino: str, edicion: str = "cliente") -> None:
+def compilar_plania(destino: str) -> None:
     """Cythoniza cada módulo de MODULOS_PROTEGIDOS dentro de la copia y
     borra el .py de origen — si un módulo falla en compilar, se corta acá
     (nunca se sigue dejando el .py sin proteger de contrabando: eso
     volvería inútil todo lo demás sin que se note)."""
     carpeta_plania = os.path.join(destino, "plania")
 
-    # En un build de cliente los módulos del dueño ya no están: no es que
-    # falten, es que se sacaron a propósito unas líneas más arriba. Se los
-    # descuenta de lo esperado para que el control de abajo siga sirviendo
-    # para lo que sirve — avisar si falta algo que SÍ tenía que estar.
-    esperados = list(MODULOS_PROTEGIDOS)
-    if edicion != "owner":
-        esperados = [m for m in esperados if m not in MODULOS_SOLO_OWNER["plania"]]
+    # Los módulos del dueño ya no están: no es que falten, es que se sacaron
+    # a propósito unas líneas más arriba. Se los descuenta de lo esperado para
+    # que el control de abajo siga sirviendo para lo que sirve — avisar si
+    # falta algo que SÍ tenía que estar.
+    esperados = [m for m in MODULOS_PROTEGIDOS
+                 if m not in MODULOS_SOLO_OWNER["plania"]]
 
     presentes = [m for m in esperados
                  if os.path.isfile(os.path.join(carpeta_plania, m))]
@@ -285,15 +285,11 @@ def _barrer_pycache(destino: str) -> None:
             f"de volver a correr esto.")
 
 
-def main(edicion: str | None = None) -> str:
+def main() -> str:
     _verificar_cython()
-    edicion = edicion or os.environ.get("PLANIA_EDICION", "cliente")
-    if edicion not in EDICIONES:
-        raise SystemExit(f"[proteger] edición desconocida: {edicion!r} "
-                         f"(las que hay: {', '.join(EDICIONES)})")
     destino = os.environ.get("PLANIA_BUILD_FUENTE", DEFAULT_DESTINO)
-    preparar_arbol(destino, edicion)
-    compilar_plania(destino, edicion)
+    preparar_arbol(destino)
+    compilar_plania(destino)
     _barrer_pycache(destino)
 
     # Control final: que no haya quedado ningún .py de los protegidos, sea
@@ -304,21 +300,20 @@ def main(edicion: str | None = None) -> str:
     if filtrados:
         raise SystemExit(f"[proteger] quedaron sin proteger: {filtrados}")
 
-    # Y que lo del dueño no se haya colado en un build de cliente, ni como
-    # .py ni ya compilado: compilar no sirve de nada si igual se distribuye.
-    if edicion != "owner":
-        colados = []
-        for carpeta, archivos in MODULOS_SOLO_OWNER.items():
-            for archivo in archivos:
-                base = os.path.splitext(archivo)[0]
-                dir_ = os.path.join(destino, carpeta)
-                if not os.path.isdir(dir_):
-                    continue
-                colados += [f"{carpeta}/{n}" for n in os.listdir(dir_)
-                            if n == archivo or n.startswith(base + ".")]
-        if colados:
-            raise SystemExit(f"[proteger] esto es del dueño y quedó en un "
-                             f"build de cliente: {colados}")
+    # Y que lo del dueño no se haya colado en el producto, ni como .py ni ya
+    # compilado: compilar no sirve de nada si igual se distribuye.
+    colados = []
+    for carpeta, archivos in MODULOS_SOLO_OWNER.items():
+        for archivo in archivos:
+            base = os.path.splitext(archivo)[0]
+            dir_ = os.path.join(destino, carpeta)
+            if not os.path.isdir(dir_):
+                continue
+            colados += [f"{carpeta}/{n}" for n in os.listdir(dir_)
+                        if n == archivo or n.startswith(base + ".")]
+    if colados:
+        raise SystemExit(f"[proteger] esto es del dueño y quedó en el "
+                         f"producto: {colados}")
 
     print(f"\n[proteger] listo: {os.path.relpath(destino, REPO)}")
     print("  Para usarlo: PLANIA_BUILD_FUENTE=<esta carpeta> "

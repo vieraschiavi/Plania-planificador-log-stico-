@@ -18,21 +18,13 @@
 ; aplicación chica; se pide un margen para los .pyc del primer arranque.
 #define EspacioNecesarioMB 900
 
-; Edición que se está empaquetando. La pone packaging/build_release.py en el
-; entorno antes de llamar a iscc. Importa que el nombre del archivo las
-; distinga: las dos ediciones salen a la misma carpeta dist\, y con el mismo
-; nombre la del dueño pisaría a la del cliente sin decir nada — y se
-; terminaría publicando para descarga el instalador que lleva el panel del
-; negocio adentro.
-#define Edicion GetEnv('PLANIA_EDICION')
-#if Edicion == ""
-  #define Edicion "cliente"
-#endif
-#if Edicion == "owner"
-  #define Sufijo "_Owner"
-#else
-  #define Sufijo ""
-#endif
+; Este instalador arma UN solo Plania. No hay una edición del dueño y otra del
+; comprador: es el mismo archivo para los dos, y por eso el dueño prueba
+; exactamente lo que recibe quien le compra.
+;
+; El panel del negocio (facturación, clientes, modelo financiero) es un
+; programa separado — packaging/plania_owner.spec — que se instala solo en la
+; máquina del dueño y no se publica.
 
 [Setup]
 AppId={{B7E2C1A4-6F3D-4E2A-9C21-3A8F5D2E7B10}
@@ -63,7 +55,7 @@ DefaultGroupName={#AppName}
 ; aparece sin tamaño, como si fuera un accesorio suelto.
 UninstallDisplaySize=943718400
 OutputDir=..\dist
-OutputBaseFilename=Plania{#Sufijo}_Setup_v{#AppVersion}
+OutputBaseFilename=Plania_Setup_v{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

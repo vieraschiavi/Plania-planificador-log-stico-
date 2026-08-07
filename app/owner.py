@@ -29,7 +29,7 @@ pd.set_option("mode.string_storage", "python")
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 
-from plania import conectores, contenido, exportes, negocio, owner, verificacion  # noqa: E402
+from plania import apariencia, conectores, contenido, exportes, negocio, owner, verificacion  # noqa: E402
 from plania import config as pconfig  # noqa: E402
 
 pconfig.aplicar()
@@ -44,10 +44,7 @@ st.set_page_config(page_title="Plania · Panel del dueño", layout="wide",
 
 st.markdown(f"""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-  html, body, [class*="css"], .stMarkdown, button, input, textarea {{
-      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-  }}
+  {apariencia.css_programa()}
   .block-container {{ padding-top: 1.4rem; max-width: 1320px; }}
   section[data-testid="stSidebar"] {{
       background: linear-gradient(180deg, #101C33 0%, #0a1122 100%);

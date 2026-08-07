@@ -26,9 +26,14 @@ que responde consultas sobre los datos reales y exporta todo a
    [Python 3.11+](https://www.python.org/downloads/) instalado con
    "Add to PATH"); las siguientes abre directo.
 
-**Ejecutables .exe, sin requisitos:** se generan con el workflow **Release**
-(pestaña Actions → Release → *Run workflow*) y quedan publicados en
-[Releases](../../releases). Hay dos instaladores Windows, no uno solo:
+**Ejecutables .exe, sin requisitos:** los genera el workflow **Release**, y
+quedan siempre frescos en [`descargas/`](descargas/). Se dispara solo con
+cada push a `main` que toca el producto (`app/`, `plania/`, `packaging/`,
+`desktop/`, `data/`, `assets/`, `requirements.txt`) — no hay que ir a Actions
+a apretar nada. Publicar una versión con changelog en
+[Releases](../../releases) sigue siendo una decisión aparte: se hace
+pusheando un tag (`git tag v1.0.1 && git push --tags`) o con *Run workflow*.
+Hay dos instaladores Windows, no uno solo:
 
 | Archivo | Es | Elegís carpeta de instalación |
 |---|---|---|
@@ -110,9 +115,22 @@ Al primer arranque se activa sola la **demo de 7 días con todo habilitado**.
 Más detalle comercial: [`docs/COMPARATIVA_COMPETENCIA.md`](docs/COMPARATIVA_COMPETENCIA.md)
 y [`docs/MODELO_COMERCIAL.md`](docs/MODELO_COMERCIAL.md).
 
-## Para el dueño del negocio (versión owner)
+## Para el dueño del negocio (Plania Owner)
 
-Aplicación separada, en otro puerto y con token propio — el cliente nunca la ve:
+**Programa aparte, no una versión especial de Plania.** El producto es un solo
+build: el `Plania_Setup.exe` que corre el dueño es el mismo archivo que
+descarga cualquiera que lo compre. Si hubiera una versión propia, el dueño
+estaría probando un programa que ningún cliente tiene — y un problema
+reportado por un comprador podría no reproducírsele nunca.
+
+Lo del negocio vive en un ejecutable separado, que solo se instala en su
+máquina y no se publica:
+
+```bash
+python packaging/build_release.py --con-owner   # deja dist/Plania_Owner.zip
+```
+
+Desde el código, sin empaquetar:
 
 ```bash
 PLANIA_OWNER_TOKEN=tu-token streamlit run app/owner.py --server.port 8600

@@ -36,25 +36,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "dist")
 SIN_PROTEGER = "--sin-proteger" in sys.argv
 
-# Qué edición se está armando. "cliente" es la que se vende y se descarga;
-# "owner" es la que corre el dueño del producto y es la única que lleva el
-# panel del negocio (ver packaging/proteger_codigo.py::MODULOS_SOLO_OWNER).
-# Se pasa por entorno además de por argumento porque el .spec de PyInstaller
-# corre en otro proceso y lo lee de ahí.
-def _edicion() -> str:
-    for i, a in enumerate(sys.argv):
-        if a == "--edicion" and i + 1 < len(sys.argv):
-            return sys.argv[i + 1]
-        if a.startswith("--edicion="):
-            return a.split("=", 1)[1]
-    return os.environ.get("PLANIA_EDICION", "cliente")
-
-
-EDICION = _edicion()
-if EDICION not in ("cliente", "owner"):
-    raise SystemExit(f"[build] edición desconocida: {EDICION!r} "
-                     "(las que hay: cliente, owner)")
-os.environ["PLANIA_EDICION"] = EDICION
+# El producto NO tiene ediciones: se arma una sola vez y ese archivo es el que
+# usan tanto el dueño como cualquiera que lo compre. Antes había una edición
+# "owner" del producto, con el panel del negocio adentro, y eso significaba que
+# el dueño probaba un programa distinto del que recibían sus clientes.
+#
+# El panel del negocio se arma aparte, como programa propio, con --con-owner.
+CON_OWNER = "--con-owner" in sys.argv
 
 
 def _run(cmd: list[str]) -> None:
@@ -82,7 +70,7 @@ def paso_proteger_codigo() -> str | None:
               ".py legible. No usar este build para distribuir.")
         return None
     import proteger_codigo  # packaging/ ya está en sys.path por __file__
-    return proteger_codigo.main(EDICION)
+    return proteger_codigo.main()
 
 
 def paso_pyinstaller(fuente: str | None) -> str:
@@ -132,18 +120,44 @@ def paso_zip(carpeta: str) -> str:
     return zpath
 
 
+def paso_owner() -> str | None:
+    """Arma "Plania Owner", el panel del negocio, como programa aparte.
+
+    No pasa por proteger_codigo.py: ese paso existe para que el código de
+    negocio no viaje en texto plano a máquinas ajenas, y este ejecutable no
+    sale de la máquina del dueño.
+    """
+    print("[build] $ pyinstaller packaging/plania_owner.spec")
+    subprocess.run([sys.executable, "-m", "PyInstaller",
+                    os.path.join("packaging", "plania_owner.spec"), "--noconfirm"],
+                   check=True, cwd=ROOT)
+    carpeta = os.path.join(DIST, "Plania Owner")
+    if not os.path.isdir(carpeta):
+        raise SystemExit("PyInstaller no dejó 'dist/Plania Owner'.")
+    zpath = os.path.join(DIST, "Plania_Owner.zip")
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        for base, _dirs, files in os.walk(carpeta):
+            for f in files:
+                ruta = os.path.join(base, f)
+                z.write(ruta, os.path.relpath(ruta, os.path.dirname(carpeta)))
+    return zpath
+
+
 def main() -> None:
-    print(f"[build] edición: {EDICION}"
-          + ("" if EDICION == "owner" else
-             "  (sin el panel del dueño ni el modelo de negocio)"))
+    print("[build] producto: un solo build, idéntico para el dueño y para "
+          "quien lo compre (sin el panel del negocio adentro)")
     paso_datos_demo()
     fuente_protegida = paso_proteger_codigo()
     carpeta = paso_pyinstaller(fuente_protegida)
     setup = paso_instalador()
     zpath = paso_zip(carpeta)
+    owner_zip = paso_owner() if CON_OWNER else None
     print("\n[build] Listo:")
-    for p in filter(None, [setup, zpath]):
+    for p in filter(None, [setup, zpath, owner_zip]):
         print(f"  {p}\n    sha256: {_sha256(p)}")
+    if owner_zip:
+        print("  ! Plania_Owner.zip es tuyo: no se publica ni se sube a la "
+              "página de descargas.")
     if setup:
         print(f"  {os.path.join(DIST, 'Plania_Setup.exe')}  (copia sin versión "
               f"en el nombre — es la que sirve PLANIA_INSTALADOR_PATH por defecto)")
