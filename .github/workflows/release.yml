@@ -1,5 +1,5 @@
 name: Release
-# Construye los ejecutables descargables de Plania y los deja en descargas/
+# Construye los ejecutables descargables de Plania y los deja en INSTALADOR/
 # (y, cuando corresponde, en la página de Releases del repo):
 #
 #   - Plania Setup X.exe         instalador Windows (Electron + React, backend
@@ -16,11 +16,11 @@ name: Release
 #
 #   1. Push a main que toca app/, plania/, packaging/, desktop/, data/,
 #      assets/, requirements.txt o INICIAR_PLANIA.bat — AUTOMÁTICO. Refresca
-#      descargas/ con el binario más nuevo. NO publica en Releases: crear una
+#      INSTALADOR/ con el binario más nuevo. NO publica en Releases: crear una
 #      entrada de Release es una decisión de versión, no algo que tenga que
 #      pasar en cada commit.
 #   2. Push de un tag v* (ej. v1.0.0) — decisión humana de cortar una
-#      versión. Refresca descargas/ Y publica en Releases, toque lo que
+#      versión. Refresca INSTALADOR/ Y publica en Releases, toque lo que
 #      toque el commit (por eso el filtro de rutas de abajo NO se aplica acá:
 #      ver el job `gate`, que evalúa esto con la API en vez de con `paths:`,
 #      porque `paths:` a nivel de trigger se aplicaría también a los tags).
@@ -90,7 +90,7 @@ jobs:
             const archivos = commits.flatMap(c => [...(c.added || []), ...(c.removed || []), ...(c.modified || [])]);
             // Sin lista de archivos (payload inusual) no se puede afirmar que
             // NO tocó el producto, así que se construye para no arriesgar
-            // dejar descargas/ desactualizado en silencio.
+            // dejar INSTALADOR/ desactualizado en silencio.
             const construir = commits.length === 0 || archivos.length === 0 || archivos.some(tocaProducto);
 
             core.info(`Archivos del push: ${archivos.join(", ") || "(ninguno reportado)"}`);
@@ -221,41 +221,41 @@ jobs:
             }
           }
 
-      - name: Dejar los instaladores en descargas/ con sus checksums
+      - name: Dejar los instaladores en INSTALADOR/ con sus checksums
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force descargas | Out-Null
+          New-Item -ItemType Directory -Force INSTALADOR | Out-Null
           # Nombre estable, sin la versión: la carpeta guarda UNA copia de cada
           # cosa y cada release pisa a la anterior. El historial de versiones
           # vive en la página de Releases, no acá.
           $setup = Get-ChildItem dist/Plania_Setup_v*.exe | Select-Object -First 1
-          if ($setup) { Copy-Item $setup.FullName descargas/Plania_Setup.exe -Force }
+          if ($setup) { Copy-Item $setup.FullName INSTALADOR/Plania_Setup.exe -Force }
           foreach ($n in @("Plania_portable.zip", "Plania_BAT.zip")) {
-            if (Test-Path "dist/$n") { Copy-Item "dist/$n" "descargas/$n" -Force }
+            if (Test-Path "dist/$n") { Copy-Item "dist/$n" "INSTALADOR/$n" -Force }
           }
           # El panel del dueño NO se publica: lleva adentro la facturación, los
           # clientes y el modelo financiero. Si alguna vez aparece acá, es un
           # error y el paso corta.
-          if (Test-Path descargas/Plania_Owner.zip) {
+          if (Test-Path INSTALADOR/Plania_Owner.zip) {
             Write-Error "Plania_Owner.zip no puede publicarse: es el panel del dueño."
             exit 1
           }
           $lineas = @("# sha256 de los archivos de esta carpeta",
                       "# generado por .github/workflows/release.yml")
-          Get-ChildItem descargas -File | Where-Object { $_.Name -ne "CHECKSUMS.txt" -and $_.Name -ne "README.md" } | ForEach-Object {
+          Get-ChildItem INSTALADOR -File | Where-Object { $_.Name -ne "CHECKSUMS.txt" -and $_.Name -ne "README.md" } | ForEach-Object {
             $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             $mb = [math]::Round($_.Length / 1MB, 1)
             $lineas += "$h  $($_.Name)  ($mb MB)"
           }
-          Set-Content descargas/CHECKSUMS.txt ($lineas -join "`n")
-          Get-Content descargas/CHECKSUMS.txt
+          Set-Content INSTALADOR/CHECKSUMS.txt ($lineas -join "`n")
+          Get-Content INSTALADOR/CHECKSUMS.txt
 
       # Solo en las corridas manuales. Una corrida disparada por un tag está
       # parada en el commit de ese tag, que puede ser viejo: empujar eso a la
       # rama por defecto la haría retroceder. En esas corridas los archivos
       # igual quedan publicados en la página de Releases, que es el paso
       # siguiente.
-      - name: Commitear descargas/
+      - name: Commitear INSTALADOR/
         if: github.ref_type != 'tag'
         shell: bash
         env:
@@ -264,12 +264,12 @@ jobs:
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f descargas/
+          git add -f INSTALADOR/
           if git diff --cached --quiet; then
-            echo "descargas/ sin cambios."
+            echo "INSTALADOR/ sin cambios."
             exit 0
           fi
-          git commit -m "Instaladores de la release en descargas/"
+          git commit -m "Instaladores de la release en INSTALADOR/"
           # Alguien pudo haber pusheado mientras el build corría (tarda varios
           # minutos): se rebasa antes de empujar en vez de fallar la corrida
           # entera después de haber compilado todo.
@@ -279,7 +279,7 @@ jobs:
 
       # Solo para tags y corridas manuales: cortar una versión y publicarla en
       # Releases es una decisión, no algo que tenga que pasar en cada push
-      # automático a main. Esos push automáticos igual dejan descargas/ al
+      # automático a main. Esos push automáticos igual dejan INSTALADOR/ al
       # día (paso de arriba) — lo que cambia es que no generan una entrada
       # nueva en la página de Releases por cada commit.
       - name: Publicar release con las descargas

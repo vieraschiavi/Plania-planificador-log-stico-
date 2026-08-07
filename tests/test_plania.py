@@ -3230,11 +3230,11 @@ def test_el_gate_solo_construye_cuando_hace_falta():
          {"eventName": "push", "ref": "refs/heads/main",
           "payload": {"commits": [{"added": [], "removed": [], "modified": ["sitio/build.py", "web/es/index.html"]}]}},
          "no"),
-        ("push a main tocando SOLO descargas/: el propio commit del bot no "
+        ("push a main tocando SOLO INSTALADOR/: el propio commit del bot no "
          "se tiene que disparar a sí mismo",
          {"eventName": "push", "ref": "refs/heads/main",
-          "payload": {"commits": [{"added": ["descargas/Plania_Setup.exe"], "removed": [],
-                                   "modified": ["descargas/CHECKSUMS.txt"]}]}},
+          "payload": {"commits": [{"added": ["INSTALADOR/Plania_Setup.exe"], "removed": [],
+                                   "modified": ["INSTALADOR/CHECKSUMS.txt"]}]}},
          "no"),
         ("tag v1.0.0 que solo tocó documentación: SIEMPRE construye, un tag "
          "es una decisión humana explícita",
@@ -3281,7 +3281,7 @@ def test_el_gate_solo_construye_cuando_hace_falta():
 
 
 def test_el_release_automatico_no_publica_en_la_pagina_de_releases():
-    """El push automático a main refresca descargas/, pero NO tiene que crear
+    """El push automático a main refresca INSTALADOR/, pero NO tiene que crear
     una entrada nueva en Releases por cada commit — eso es una decisión de
     versión, reservada a un tag o a "Run workflow" manual."""
     wf = _release_yml()
@@ -3358,3 +3358,50 @@ def test_el_trigger_automatico_no_filtra_los_tags():
         "un filtro de rutas acá también aplicaría a los tags — usar el gate"
     assert 'tags: ["v*"]' in trigger.replace("'", '"')
     assert 'branches: ["main"]' in trigger.replace("'", '"')
+
+
+def test_el_panel_del_dueno_nunca_se_publica_en_el_repo():
+    """La carpeta INSTALADOR/ es lo que se sube a plania.uy. El ejecutable del
+    dueño lleva adentro la facturación, los clientes y el modelo financiero:
+    si alguna vez cae ahí, deja de ser tuyo y pasa a ser de cualquiera que
+    tenga acceso al repositorio — hoy, o el día que sumes a alguien.
+
+    Se controla en dos planos: que el archivo no esté, y que el workflow corte
+    si aparece (porque el archivo puede no estar hoy y aparecer mañana).
+    """
+    import os
+    for nombre in os.listdir(os.path.join(RAIZ, "INSTALADOR")):
+        assert "Owner" not in nombre and "owner" not in nombre, \
+            f"INSTALADOR/{nombre} parece ser el build del dueño"
+
+    # Se busca la comprobación que HACE el trabajo, no una mención del nombre.
+    # La primera versión de este control buscaba "Plania_Owner.zip" suelto, y
+    # el texto del mensaje de error ya la satisfacía: al sacar el `Test-Path`
+    # el control seguía en verde con la guarda borrada.
+    wf = _release_yml()
+    guarda = "Test-Path INSTALADOR/Plania_Owner.zip"
+    assert guarda in wf, \
+        f"falta la guarda real ({guarda}) que impide publicar el build del dueño"
+    i = wf.index(guarda)
+    bloque = wf[i:i + 300]
+    assert "exit 1" in bloque, \
+        "detectar el build del dueño en INSTALADOR/ tiene que cortar la corrida"
+
+
+def test_el_cliente_no_descarga_del_repositorio():
+    """Decisión de distribución: el repo es privado y es el código fuente, no
+    la tienda. El cliente descarga de plania.uy y del link post-pago. Si
+    alguien documenta lo contrario, el repo tendría que hacerse público — y
+    ahí el mismo ZIP entrega el código fuente completo."""
+    import os
+    readme = open(os.path.join(RAIZ, "INSTALADOR", "README.md"), encoding="utf-8").read()
+    assert "/descargar/{token}" in readme, \
+        "falta documentar el canal real de descarga post-pago"
+    assert "plania.uy" in readme
+
+    # Y el canal post-pago tiene que existir de verdad en el backend, no solo
+    # en la documentación.
+    backend = open(os.path.join(RAIZ, "backend_venta", "app.py"), encoding="utf-8").read()
+    assert "/descargar/{token}" in backend
+    assert "PLANIA_INSTALADOR_PATH" in backend, \
+        "el backend tiene que poder apuntar al instalador publicado"
