@@ -3175,3 +3175,156 @@ def test_el_ejecutable_empaqueta_el_modulo_de_la_ventana():
     assert '"ventana"' in spec, "falta 'ventana' en hiddenimports de plania.spec"
     assert "_PATHEX_EXTRA" in spec and "pathex=[REPO] + _PATHEX_EXTRA" in spec, \
         "packaging/ tiene que estar en el pathex para que `import ventana` resuelva"
+
+
+# ---------------------------------------------------------------------------
+# Release automático: el job "gate" decide si hace falta prender windows-latest
+# ---------------------------------------------------------------------------
+def _release_yml() -> str:
+    return open(os.path.join(RAIZ, ".github", "workflows", "release.yml"),
+                encoding="utf-8").read()
+
+
+def _extraer_script_gate(fuente: str) -> str:
+    """El cuerpo JS de `jobs.gate.steps[0].script`, tal cual corre en GitHub.
+
+    Se extrae con texto y no con un parser de YAML (que no es dependencia
+    declarada del proyecto — ver README, "no hace falta preguntarle a nadie
+    qué más hace falta") buscando el marcador `script: |` y juntando las
+    líneas indentadas que siguen, igual que ya se hace en este archivo para
+    aislar `escaparHtml()` de plania.js.
+    """
+    i = fuente.index("script: |")
+    resto = fuente[i:].splitlines()[1:]
+    lineas = []
+    for l in resto:
+        if l.strip() and not l.startswith(" " * 12):
+            break
+        lineas.append(l[12:] if len(l) >= 12 else "")
+    return "\n".join(lineas)
+
+
+def test_el_gate_solo_construye_cuando_hace_falta():
+    """Prueba el JS del gate DE VERDAD (con Node), no una reimplementación en
+    Python que se podría desincronizar del archivo real. Cubre el caso que
+    motivó separar esto en un job aparte: un tag siempre construye aunque el
+    filtro de rutas del push automático lo hubiera descartado."""
+    import json
+    import subprocess
+
+    assert _node_disponible(), "hace falta node para este test"
+    script = _extraer_script_gate(_release_yml())
+    assert "tocaProducto" in script and "core.setOutput" in script, \
+        "no se pudo aislar el script del gate — revisá la indentación en release.yml"
+
+    CASOS = [
+        ("push a main, toca plania/",
+         {"eventName": "push", "ref": "refs/heads/main",
+          "payload": {"commits": [{"added": [], "removed": [], "modified": ["plania/analitica.py"]}]}},
+         "si"),
+        ("push a main, solo docs/ y README (no van al binario)",
+         {"eventName": "push", "ref": "refs/heads/main",
+          "payload": {"commits": [{"added": [], "removed": [], "modified": ["docs/x.md", "README.md"]}]}},
+         "no"),
+        ("push a main, solo la web de venta (sitio/, web/)",
+         {"eventName": "push", "ref": "refs/heads/main",
+          "payload": {"commits": [{"added": [], "removed": [], "modified": ["sitio/build.py", "web/es/index.html"]}]}},
+         "no"),
+        ("push a main tocando SOLO descargas/: el propio commit del bot no "
+         "se tiene que disparar a sí mismo",
+         {"eventName": "push", "ref": "refs/heads/main",
+          "payload": {"commits": [{"added": ["descargas/Plania_Setup.exe"], "removed": [],
+                                   "modified": ["descargas/CHECKSUMS.txt"]}]}},
+         "no"),
+        ("tag v1.0.0 que solo tocó documentación: SIEMPRE construye, un tag "
+         "es una decisión humana explícita",
+         {"eventName": "push", "ref": "refs/tags/v1.0.0",
+          "payload": {"commits": [{"added": [], "removed": [], "modified": ["README.md"]}]}},
+         "si"),
+        ("workflow_dispatch manual",
+         {"eventName": "workflow_dispatch", "ref": "refs/heads/main", "payload": {}},
+         "si"),
+        ("push sin lista de commits en el payload: no se puede afirmar que "
+         "no tocó el producto, así que construye",
+         {"eventName": "push", "ref": "refs/heads/main", "payload": {}},
+         "si"),
+    ]
+
+    for descripcion, ctx, esperado in CASOS:
+        # github-script corre el `script:` adentro de una función async (así
+        # es como puede usar `await`); por eso el propio código del gate
+        # tiene un `return` "suelto" en el caso de tag/dispatch — válido ahí,
+        # un SyntaxError si se evalúa top-level. Se envuelve en una IIFE para
+        # correr el texto real tal cual, y `context`/`core` quedan AFUERA de
+        # esa IIFE (visibles por clausura) para poder leer `core._out` una
+        # vez que la promesa resuelve — leerlo desde adentro, después del
+        # script, se salteaba en los casos que retornan temprano.
+        arnes = f"""
+        const context = {json.dumps(ctx)};
+        const core = {{
+          _out: {{}},
+          setOutput(k, v) {{ this._out[k] = v; }},
+          info() {{}}, notice() {{}},
+        }};
+        (async () => {{
+          {script}
+        }})().then(() => {{
+          console.log(JSON.stringify(core._out));
+        }});
+        """
+        r = subprocess.run(["node", "-e", arnes], capture_output=True, text=True, timeout=30)
+        assert r.returncode == 0, f"[{descripcion}] el gate no corrió:\n{r.stderr}"
+        assert r.stdout.strip(), f"[{descripcion}] stdout vacío. stderr={r.stderr!r}"
+        salida = json.loads(r.stdout.strip().splitlines()[-1])
+        assert salida.get("build") == esperado, \
+            f"[{descripcion}] build={salida.get('build')!r}, esperaba {esperado!r}"
+
+
+def test_el_release_automatico_no_publica_en_la_pagina_de_releases():
+    """El push automático a main refresca descargas/, pero NO tiene que crear
+    una entrada nueva en Releases por cada commit — eso es una decisión de
+    versión, reservada a un tag o a "Run workflow" manual."""
+    wf = _release_yml()
+    i = wf.index("Publicar release con las descargas")
+    bloque = wf[i:i + 400]
+    assert "if:" in bloque, "el paso que publica en Releases tiene que estar condicionado"
+    linea_if = [l for l in bloque.splitlines() if "if:" in l][0]
+    assert "github.ref_type == 'tag'" in linea_if and "workflow_dispatch" in linea_if, \
+        "el paso de Releases tiene que saltearse en un push automático a main"
+
+
+def test_el_job_caro_de_windows_esta_gateado_por_el_de_linux():
+    """El job de windows-latest (caro: Cython + PyInstaller + Electron) no
+    puede arrancar si el gate, que corre en Linux, decidió que no hace falta."""
+    wf = _release_yml()
+    assert "runs-on: ubuntu-latest" in wf, "falta el job barato que decide"
+    i_gate = wf.index("gate:")
+    i_windows = wf.index("ejecutables-windows:")
+    assert i_gate < i_windows
+    bloque_windows = wf[i_windows:i_windows + 200]
+    assert "needs: gate" in bloque_windows
+    assert "needs.gate.outputs.build == 'si'" in bloque_windows
+
+
+def test_release_tiene_concurrencia_para_no_amontonar_builds_caros():
+    """Sin esto, dos push seguidos a main dejan dos corridas de windows-latest
+    compitiendo por minutos pagos cuando solo el resultado del último push
+    importa."""
+    wf = _release_yml()
+    assert "concurrency:" in wf
+    bloque = wf[wf.index("concurrency:"):wf.index("concurrency:") + 200]
+    assert "cancel-in-progress: true" in bloque
+
+
+def test_el_trigger_automatico_no_filtra_los_tags():
+    """`paths:` a nivel de trigger se aplicaría también a los push de tags —
+    y un tag sobre un commit que no tocó código se saltearía sin avisar justo
+    cuando alguien decidió a propósito cortar una versión. El filtro tiene
+    que vivir en el gate (evaluado con el listado real de archivos), no en
+    `on.push.paths`."""
+    wf = _release_yml()
+    trigger = wf[wf.index("\non:"):wf.index("permissions:")]
+    assert "paths:" not in trigger, \
+        "un filtro de rutas acá también aplicaría a los tags — usar el gate"
+    assert 'tags: ["v*"]' in trigger.replace("'", '"')
+    assert 'branches: ["main"]' in trigger.replace("'", '"')

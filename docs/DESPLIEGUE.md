@@ -205,9 +205,17 @@ adjunta a la release y el propio workflow corta si aparece ahí.
 ### Dónde quedan los instaladores
 
 La carpeta [`descargas/`](../descargas/) del repositorio, con sus `sha256`.
-La llena la corrida de **Actions → Release → Run workflow**, que compila en
-Windows y commitea el resultado. Los mismos archivos quedan además en la
-página de *Releases*.
+Se llena sola: el workflow **Release** se dispara con cada push a `main` que
+toca `app/`, `plania/`, `packaging/`, `desktop/`, `data/`, `assets/`,
+`requirements.txt` o `INICIAR_PLANIA.bat` (un job en Linux revisa esto antes
+de prender `windows-latest`, que es lo caro — si el push no tocó nada de esa
+lista, no arranca nada). Compila en Windows y commitea el resultado sin
+intervención.
+
+Eso mantiene `descargas/` al día, pero no publica en *Releases* por cada
+commit: cortar una versión con changelog sigue siendo pushear un tag `v*` o
+usar **Actions → Release → Run workflow** — ahí sí construye y además
+publica, toque lo que toque el commit.
 
 Este instalador **permite elegir dónde instalar** (`DisableDirPage=no` en
 `packaging/instalador.iss`, explícito), valida la carpeta elegida antes de

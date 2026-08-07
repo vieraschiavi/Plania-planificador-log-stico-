@@ -1,6 +1,6 @@
 name: Release
-# Construye los ejecutables descargables de Plania y los publica en la
-# página de Releases del repo:
+# Construye los ejecutables descargables de Plania y los deja en descargas/
+# (y, cuando corresponde, en la página de Releases del repo):
 #
 #   - Plania Setup X.exe         instalador Windows (Electron + React, backend
 #                                Python embebido — el cliente no necesita nada)
@@ -12,9 +12,32 @@ name: Release
 #   - Plania_portable.zip        bundle PyInstaller puro (sin Electron)
 #   - Plania_BAT.zip             código + INICIAR_PLANIA.bat (requiere Python)
 #
-# Cómo generar una release: pestaña Actions → Release → "Run workflow"
-# (o pushear un tag v1.0.0). Requiere que GitHub Actions tenga runners
-# habilitados para este repo (ver nota en ci.yml).
+# Tres formas de disparar la corrida, con comportamiento distinto:
+#
+#   1. Push a main que toca app/, plania/, packaging/, desktop/, data/,
+#      assets/, requirements.txt o INICIAR_PLANIA.bat — AUTOMÁTICO. Refresca
+#      descargas/ con el binario más nuevo. NO publica en Releases: crear una
+#      entrada de Release es una decisión de versión, no algo que tenga que
+#      pasar en cada commit.
+#   2. Push de un tag v* (ej. v1.0.0) — decisión humana de cortar una
+#      versión. Refresca descargas/ Y publica en Releases, toque lo que
+#      toque el commit (por eso el filtro de rutas de abajo NO se aplica acá:
+#      ver el job `gate`, que evalúa esto con la API en vez de con `paths:`,
+#      porque `paths:` a nivel de trigger se aplicaría también a los tags).
+#   3. Actions → Release → "Run workflow" — igual que un tag, manual.
+#
+# El disparador automático (1) tiene un costo real: windows-latest en un repo
+# privado consume minutos pagos a tarifa más alta que Linux, y cada corrida
+# tarda bastante (Cython + PyInstaller + Electron). El job `gate` de abajo
+# evita correrlo cuando el push no tocó nada que vaya al producto — pero si
+# el ritmo de commits es alto, esto igual puede sumar. `concurrency` cancela
+# la corrida vieja si llega un push más nuevo antes de que termine.
+#
+# Requiere que GitHub Actions tenga runners habilitados para este repo (ver
+# nota en ci.yml) — eso no lo puede resolver este archivo. Si después de
+# activar esto los pushes a main quedan con un ✗ que muere en segundos sin
+# log, es ese problema y no el código: probá primero un "Run workflow" manual
+# para confirmar que los runners están asignados.
 on:
   workflow_dispatch:
     inputs:
@@ -24,12 +47,61 @@ on:
         required: true
   push:
     tags: ["v*"]
+    branches: ["main"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
+  # Corre en Linux (barato) para decidir si hace falta prender el job de
+  # windows-latest (caro). Un tag o un "Run workflow" manual SIEMPRE
+  # construyen: son una decisión humana explícita. Un push a main solo
+  # construye si tocó algo que va al producto empaquetado.
+  #
+  # Por qué esto no es un `paths:` en el trigger de arriba: `paths:` se
+  # aplicaría a CUALQUIER push que matchee el trigger, incluidos los tags —
+  # y un tag puesto sobre un commit que no cambió código (por ejemplo,
+  # después de una tanda de commits de solo documentación) se saltearía
+  # solo, sin avisar, justo cuando alguien decidió a propósito cortar una
+  # versión. Evaluar la condición acá, con el listado de archivos del propio
+  # evento, deja los tags sin filtrar y solo filtra los push a main.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decidir.outputs.build }}
+    steps:
+      - id: decidir
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tocaProducto = (archivo) => /^(app\/|plania\/|packaging\/|desktop\/|data\/|assets\/|requirements\.txt$|INICIAR_PLANIA\.bat$)/.test(archivo);
+
+            if (context.eventName !== "push" || context.ref.startsWith("refs/tags/")) {
+              core.setOutput("build", "si");
+              core.info("Tag o workflow_dispatch: construye siempre.");
+              return;
+            }
+
+            const commits = context.payload.commits || [];
+            const archivos = commits.flatMap(c => [...(c.added || []), ...(c.removed || []), ...(c.modified || [])]);
+            // Sin lista de archivos (payload inusual) no se puede afirmar que
+            // NO tocó el producto, así que se construye para no arriesgar
+            // dejar descargas/ desactualizado en silencio.
+            const construir = commits.length === 0 || archivos.length === 0 || archivos.some(tocaProducto);
+
+            core.info(`Archivos del push: ${archivos.join(", ") || "(ninguno reportado)"}`);
+            core.setOutput("build", construir ? "si" : "no");
+            if (!construir) {
+              core.notice("Ningún archivo del producto cambió en este push. Sin build.");
+            }
+
   ejecutables-windows:
+    needs: gate
+    if: needs.gate.outputs.build == 'si'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -188,7 +260,13 @@ jobs:
           git rebase "origin/$RAMA"
           git push origin "HEAD:$RAMA"
 
+      # Solo para tags y corridas manuales: cortar una versión y publicarla en
+      # Releases es una decisión, no algo que tenga que pasar en cada push
+      # automático a main. Esos push automáticos igual dejan descargas/ al
+      # día (paso de arriba) — lo que cambia es que no generan una entrada
+      # nueva en la página de Releases por cada commit.
       - name: Publicar release con las descargas
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', inputs.version) }}

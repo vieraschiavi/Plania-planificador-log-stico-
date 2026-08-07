@@ -26,9 +26,14 @@ que responde consultas sobre los datos reales y exporta todo a
    [Python 3.11+](https://www.python.org/downloads/) instalado con
    "Add to PATH"); las siguientes abre directo.
 
-**Ejecutables .exe, sin requisitos:** se generan con el workflow **Release**
-(pestaña Actions → Release → *Run workflow*) y quedan publicados en
-[Releases](../../releases). Hay dos instaladores Windows, no uno solo:
+**Ejecutables .exe, sin requisitos:** los genera el workflow **Release**, y
+quedan siempre frescos en [`descargas/`](descargas/). Se dispara solo con
+cada push a `main` que toca el producto (`app/`, `plania/`, `packaging/`,
+`desktop/`, `data/`, `assets/`, `requirements.txt`) — no hay que ir a Actions
+a apretar nada. Publicar una versión con changelog en
+[Releases](../../releases) sigue siendo una decisión aparte: se hace
+pusheando un tag (`git tag v1.0.1 && git push --tags`) o con *Run workflow*.
+Hay dos instaladores Windows, no uno solo:
 
 | Archivo | Es | Elegís carpeta de instalación |
 |---|---|---|

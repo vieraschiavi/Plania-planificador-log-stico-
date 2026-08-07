@@ -29,13 +29,34 @@ gana plata con esto.
 
 ## Cómo se llena esta carpeta
 
-Pestaña **Actions → Release → Run workflow**. La corrida compila en Windows
-—PyInstaller, Inno Setup y electron-builder solo funcionan ahí—, escribe los
-archivos en esta carpeta con sus checksums y los adjunta además a la página de
-*Releases*.
+**Sola.** El workflow **Release** se dispara con cada push a `main` que toca
+`app/`, `plania/`, `packaging/`, `desktop/`, `data/`, `assets/`,
+`requirements.txt` o `INICIAR_PLANIA.bat` — nadie tiene que entrar a Actions.
+Un job barato en Linux (`gate`) revisa qué archivos trajo el push antes de
+prender el caro (`ejecutables-windows`): si el commit no tocó nada de la
+lista, no arranca Windows y no se gasta nada.
+
+Eso SÍ deja `descargas/` al día en cada push relevante, pero **no** publica
+una entrada nueva en [Releases](../../releases) por cada commit — cortar una
+versión con su changelog sigue siendo una decisión aparte: pusheando un tag
+(`git tag v1.0.1 && git push --tags`) o desde **Actions → Release → Run
+workflow**. Un tag siempre construye, toque lo que toque el commit.
+
+La corrida compila en Windows —PyInstaller, Inno Setup y electron-builder
+solo funcionan ahí—, escribe los archivos en esta carpeta con sus checksums,
+y los commitea sola. Cuando además hay tag o corrida manual, los adjunta a la
+página de *Releases*.
 
 Los binarios se **reemplazan**, no se acumulan: cada versión pisa a la
 anterior, así la carpeta tiene siempre una sola copia de cada cosa.
+
+Otro costo, distinto del anterior: `windows-latest` se cobra a una tarifa más
+alta que Linux, y cada corrida (Cython + PyInstaller + Electron) tarda un
+rato largo. El `gate` evita correrlo cuando el push no tocó el producto, y
+`concurrency` cancela una corrida vieja si llega un push más nuevo antes de
+que termine — pero si el ritmo de commits a los paths vigilados es alto,
+igual puede sumar. Se ajusta editando la lista de rutas del job `gate` en
+`.github/workflows/release.yml`.
 
 Conviene saber el costo, porque no es gratis: aunque el archivo se reemplace,
 cada versión que pasó por acá queda guardada en el historial de git para
