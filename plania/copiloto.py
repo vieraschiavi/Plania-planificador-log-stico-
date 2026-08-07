@@ -55,6 +55,19 @@ def _buscar_producto(texto: str, productos: pd.DataFrame) -> pd.DataFrame:
     return productos[mask]
 
 
+def _m(n, decimales: int = 0) -> str:
+    """Número con los separadores de acá: 1.234.567,89 — punto para los miles
+    y coma para los decimales.
+
+    Python los escribe al revés con `:,`. Sin esto, las respuestas del
+    copiloto salían con formato de Estados Unidos ($1,430,318) mientras la
+    tabla de evidencia que va debajo, y todas las tarjetas del panel, usan el
+    de acá ($1.430.318). Dos formatos distintos para el mismo importe, en la
+    misma pantalla, delante de un cliente.
+    """
+    return f"{n:,.{decimales}f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 def _n(texto: str, default: int = 10) -> int:
     m = re.search(r"\b(\d{1,3})\b", texto)
     return int(m.group(1)) if m else default
@@ -84,10 +97,10 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
                       "Ofertas sugeridas")
         cap = of["capital_inmovilizado"].sum()
         return _r(f"Hay {len(of)} productos con sobrestock que inmovilizan "
-                  f"${cap:,.0f}. Sugiero ofertas con descuentos de "
-                  f"{of['descuento_pct'].min():.0f}% a {of['descuento_pct'].max():.0f}% "
+                  f"${_m(cap)}. Sugiero ofertas con descuentos de "
+                  f"{_m(of['descuento_pct'].min(), 0)}% a {_m(of['descuento_pct'].max(), 0)}% "
                   f"(siempre sobre el piso de costo+8%). Los 3 más urgentes: "
-                  + "; ".join(f"{x['nombre']} ({x['descuento_pct']:.0f}% off)"
+                  + "; ".join(f"{x['nombre']} ({_m(x['descuento_pct'], 0)}% off)"
                               for _, x in of.head(3).iterrows()) + ".",
                   of, "Ofertas sugeridas por sobrestock")
 
@@ -98,8 +111,8 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
         if not len(rep):
             return _r("No hay riesgo de quiebre con la rotación actual.", None, "Reposición")
         return _r(f"Hay {len(rep)} productos en riesgo de quiebre "
-                  f"(${rep['venta_en_riesgo'].sum():,.0f}/mes de venta en juego). "
-                  f"Inversión sugerida: ${rep['inversion'].sum():,.0f}. "
+                  f"(${_m(rep['venta_en_riesgo'].sum())}/mes de venta en juego). "
+                  f"Inversión sugerida: ${_m(rep['inversion'].sum())}. "
                   f"El más urgente: {rep.iloc[0]['nombre']} "
                   f"({rep.iloc[0]['dias_stock']:.0f} días de stock, proveedor demora "
                   f"{rep.iloc[0]['lead_time_dias']} días).",
@@ -114,10 +127,10 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
             m = prods.merge(mp[["sku", "venta", "margen", "margen_pct", "unidades"]],
                             on="sku", how="left")
             x = m.iloc[0]
-            return _r(f"{x['nombre']}: precio ${x['precio']:,.2f}, costo ${x['costo']:,.2f} "
-                      f"(margen {(x['precio'] / x['costo'] - 1) * 100 if x['costo'] else 0:.1f}%). "
+            return _r(f"{x['nombre']}: precio ${_m(x['precio'], 2)}, costo ${_m(x['costo'], 2)} "
+                      f"(margen {_m((x['precio'] / x['costo'] - 1) * 100 if x['costo'] else 0, 1)}%). "
                       f"En el período vendió {x['unidades'] if pd.notna(x['unidades']) else 0:.0f} "
-                      f"unidades con margen real {x['margen_pct'] if pd.notna(x['margen_pct']) else 0:.1f}%.",
+                      f"unidades con margen real {_m(x['margen_pct'] if pd.notna(x['margen_pct']) else 0, 1)}%.",
                       m, "Precio y margen")
         if any(k in t for k in ["mejorar", "subir", "suger", "bajo", "oportunidad"]):
             pr = sugerencias.precios(productos, v)
@@ -125,15 +138,15 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
                 return _r("Los márgenes están alineados con su categoría; no hay subas obvias.",
                           None, "Precios")
             return _r(f"Hay {len(pr)} productos con margen por debajo de su categoría. "
-                      f"Ajustarlos suma ${pr['margen_extra_mensual'].sum():,.0f}/mes "
+                      f"Ajustarlos suma ${_m(pr['margen_extra_mensual'].sum())}/mes "
                       f"sin tocar volumen. Mayor impacto: {pr.iloc[0]['nombre']} "
-                      f"(de ${pr.iloc[0]['precio']:,.2f} a ${pr.iloc[0]['precio_sugerido']:,.2f}).",
+                      f"(de ${_m(pr.iloc[0]['precio'], 2)} a ${_m(pr.iloc[0]['precio_sugerido'], 2)}).",
                       pr, "Sugerencias de precios")
         mp = analitica.margen_por_producto(v, top=_n(t, 15))
         asc = "peor" in t or "menor" in t or "bajo" in t
         mp = mp.sort_values("margen_pct", ascending=asc)
         return _r(f"Margen promedio ponderado: "
-                  f"{v['margen'].sum() / v['venta'].sum() * 100:.1f}%. "
+                  f"{_m(v['margen'].sum() / v['venta'].sum() * 100, 1)}%. "
                   f"Te muestro los {len(mp)} productos con "
                   f"{'menor' if asc else 'mayor'} venta/margen.",
                   mp, "Márgenes por producto")
@@ -144,8 +157,8 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
         if len(prods) == 0:
             val = (productos["stock"] * productos["costo"]).sum()
             r90 = analitica.rotacion(productos, v)
-            return _r(f"Stock total: {productos['stock'].sum():,} unidades en "
-                      f"{len(productos)} SKUs, valorizado en ${val:,.0f} al costo. "
+            return _r(f"Stock total: {_m(productos['stock'].sum())} unidades en "
+                      f"{len(productos)} SKUs, valorizado en ${_m(val)} al costo. "
                       f"{int((productos['stock'] <= 0).sum())} quiebres y "
                       f"{int((r90['dias_stock'] > 90).sum())} productos con más de 90 días de stock.",
                       r90[["sku", "nombre", "categoria", "stock", "venta_diaria", "dias_stock"]]
@@ -159,7 +172,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
             return _r(f"{p0['nombre']} (SKU {p0['sku']}): {p0['stock']} unidades "
                       f"(mínimo {p0['stock_min']}, estado: {estado}).", detalle, "Stock")
         return _r(f"Encontré {len(prods)} productos que matchean: suman "
-                  f"{prods['stock'].sum():,} unidades.", detalle, "Stock")
+                  f"{_m(prods['stock'].sum())} unidades.", detalle, "Stock")
 
     # --- zonas / departamentos / tipo de negocio --------------------------------
     if any(k in t for k in ["zona", "departamento", "barrio", "region", "donde"]):
@@ -167,13 +180,13 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
         g = analitica.por_dimension(v, dim)
         op = sugerencias.oportunidades_zona(v)
         extra = (f" Detecté {len(op)} oportunidades de venta cruzada por zona "
-                 f"(${op['venta_potencial'].sum():,.0f} potenciales)." if len(op) else "")
+                 f"(${_m(op['venta_potencial'].sum())} potenciales)." if len(op) else "")
         if not len(g):
             return _r("Los datos conectados no traen zona/departamento de los clientes.",
                       None, "Zonas")
         return _r(f"La {dim} que más vende es {g.iloc[0][dim]} "
-                  f"(${g.iloc[0]['venta']:,.0f}, margen {g.iloc[0]['margen_pct']:.1f}%) "
-                  f"y la que menos, {g.iloc[-1][dim]} (${g.iloc[-1]['venta']:,.0f}).{extra}",
+                  f"(${_m(g.iloc[0]['venta'], 0)}, margen {_m(g.iloc[0]['margen_pct'], 1)}%) "
+                  f"y la que menos, {g.iloc[-1][dim]} (${_m(g.iloc[-1]['venta'], 0)}).{extra}",
                   g if not len(op) else op, f"Análisis por {dim}")
 
     if any(k in t for k in ["tipo de negocio", "tipo negocio", "giro", "canal",
@@ -183,10 +196,10 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
             return _r("Los datos conectados no traen el tipo de negocio de los clientes.",
                       None, "Tipo de negocio")
         return _r(f"Por tipo de negocio: lidera {g.iloc[0]['tipo_negocio']} con "
-                  f"${g.iloc[0]['venta']:,.0f} ({g.iloc[0]['clientes']} clientes). "
+                  f"${_m(g.iloc[0]['venta'], 0)} ({g.iloc[0]['clientes']} clientes). "
                   f"El mejor margen lo deja "
                   f"{g.sort_values('margen_pct').iloc[-1]['tipo_negocio']} "
-                  f"({g['margen_pct'].max():.1f}%).",
+                  f"({_m(g['margen_pct'].max(), 1)}%).",
                   g, "Ventas por tipo de negocio")
 
     # --- proveedores --------------------------------------------------------------
@@ -199,11 +212,11 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
         if len(rep):
             top_prov = rep.groupby("proveedor")["venta_en_riesgo"].sum().idxmax()
             urgente = (f" Ojo: el pedido más urgente es a {top_prov} "
-                       f"(${rep[rep['proveedor'] == top_prov]['inversion'].sum():,.0f} "
+                       f"(${_m(rep[rep['proveedor'] == top_prov]['inversion'].sum(), 0)} "
                        "de compra sugerida).")
         return _r(f"Tu proveedor principal es {g.iloc[0]['proveedor']} "
-                  f"(${g.iloc[0]['venta']:,.0f} de venta asociada, margen "
-                  f"{g.iloc[0]['margen_pct']:.1f}%).{urgente}",
+                  f"(${_m(g.iloc[0]['venta'], 0)} de venta asociada, margen "
+                  f"{_m(g.iloc[0]['margen_pct'], 1)}%).{urgente}",
                   g, "Análisis por proveedor")
 
     # --- venta de un producto puntual ----------------------------------------------
@@ -220,7 +233,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
             x = m.iloc[0]
             que = "Ese producto" if len(m) == 1 else f"Esos {len(m)} productos"
             extra = f" El que más mueve: {x['nombre']}." if len(m) > 1 else ""
-            return _r(f"{que} vendió {tot_u:,.0f} unidades por ${tot_v:,.0f} "
+            return _r(f"{que} vendió {_m(tot_u, 0)} unidades por ${_m(tot_v, 0)} "
                       f"en el período.{extra}",
                       m.head(30), "Venta del producto")
 
@@ -231,15 +244,15 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
             if not len(rec):
                 return _r("No hay clientes inactivos relevantes.", None, "Clientes")
             return _r(f"Hay {len(rec)} clientes que dejaron de comprar; valían "
-                      f"${rec['venta_historica'].sum():,.0f}. Priorizá: "
+                      f"${_m(rec['venta_historica'].sum(), 0)}. Priorizá: "
                       + "; ".join(f"{x.get('nombre', x['cliente_id'])} "
                                   f"({x['dias_sin_comprar']}d)"
                                   for _, x in rec.head(3).iterrows()) + ".",
                       rec, "Clientes a recuperar")
         tc = analitica.top_clientes(v, _n(t, 15))
-        return _r(f"Tus {len(tc)} mejores clientes concentran ${tc['venta'].sum():,.0f}. "
+        return _r(f"Tus {len(tc)} mejores clientes concentran ${_m(tc['venta'].sum(), 0)}. "
                   f"El primero hace {tc.iloc[0]['pedidos']} pedidos por "
-                  f"${tc.iloc[0]['venta']:,.0f}.", tc, "Top clientes")
+                  f"${_m(tc.iloc[0]['venta'], 0)}.", tc, "Top clientes")
 
     # --- ventas / resumen ----------------------------------------------------------
     if any(k in t for k in ["venta", "vendi", "facturacion", "resumen", "como viene",
@@ -247,15 +260,15 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
         if "tendencia" in t or "mes a mes" in t or "evolucion" in t:
             tm = analitica.tendencia_mensual(v)
             delta = (tm.iloc[-1]["venta"] / tm.iloc[-2]["venta"] - 1) * 100 if len(tm) > 1 else 0
-            return _r(f"Último mes: ${tm.iloc[-1]['venta']:,.0f} "
-                      f"({delta:+.1f}% vs el anterior), margen {tm.iloc[-1]['margen_pct']:.1f}%.",
+            return _r(f"Último mes: ${_m(tm.iloc[-1]['venta'], 0)} "
+                      f"({delta:+.1f}% vs el anterior), margen {_m(tm.iloc[-1]['margen_pct'], 1)}%.",
                       tm, "Tendencia mensual")
         mp = analitica.margen_por_producto(v, top=_n(t, 10))
         k = analitica.kpis(productos, v)
-        return _r(f"Últimos 30 días: ${k['venta_periodo']:,.0f} de venta, margen "
-                  f"{k['margen_pct']:.1f}% (${k['margen_periodo']:,.0f}), "
+        return _r(f"Últimos 30 días: ${_m(k['venta_periodo'], 0)} de venta, margen "
+                  f"{_m(k['margen_pct'], 1)}% (${_m(k['margen_periodo'], 0)}), "
                   f"{k['clientes_activos']} clientes activos. El más vendido: "
-                  f"{mp.iloc[0]['nombre']} (${mp.iloc[0]['venta']:,.0f}).",
+                  f"{mp.iloc[0]['nombre']} (${_m(mp.iloc[0]['venta'], 0)}).",
                   mp, "Top ventas")
 
     # --- fallback: resumen ejecutivo -------------------------------------------------
@@ -264,9 +277,9 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
     res = paq["resumen"]
     return _r("Puedo responder sobre stock, precios, márgenes, ofertas, reposición, "
               "zonas, tipos de negocio y clientes. Mientras tanto, el resumen de hoy: "
-              f"${res['capital_liberable']:,.0f} inmovilizados en sobrestock, "
-              f"${res['venta_en_riesgo']:,.0f} de venta en riesgo por quiebres, "
-              f"${res['margen_extra_mensual']:,.0f}/mes de margen recuperable con "
+              f"${_m(res['capital_liberable'], 0)} inmovilizados en sobrestock, "
+              f"${_m(res['venta_en_riesgo'], 0)} de venta en riesgo por quiebres, "
+              f"${_m(res['margen_extra_mensual'], 0)}/mes de margen recuperable con "
               "ajustes de precio. Preguntame, por ejemplo: «¿qué ofertas armo esta "
               "semana?», «¿qué repongo ya?», «¿qué zona está floja?».",
               None, "Resumen ejecutivo")

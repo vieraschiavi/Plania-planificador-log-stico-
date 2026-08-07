@@ -3516,3 +3516,47 @@ def test_la_api_local_no_es_el_backend_de_venta():
     fuente = open(os.path.join(RAIZ, "plania", "api.py"), encoding="utf-8").read()
     assert "backend_venta" not in fuente.replace("`backend_venta`", "").replace(
         "backend_venta/", ""), "la API local no puede importar el backend de venta"
+
+
+def test_el_copiloto_usa_el_formato_de_numeros_de_aca():
+    """1.234.567,89 — punto para los miles, coma para los decimales.
+
+    Python escribe al revés con `:,` y `:.1f`, así que las respuestas salían
+    con formato de Estados Unidos ($1,430,318 · 24.5%) mientras la tabla de
+    evidencia que va justo debajo, y todas las tarjetas del panel, usan el de
+    acá. Dos formatos para el mismo importe en la misma pantalla, delante de
+    un cliente.
+
+    Se recorre el motor completo de intenciones, no una respuesta: cada rama
+    arma su texto por su cuenta y alcanza con que una se olvide.
+    """
+    import re
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    preguntas = [
+        "¿qué ofertas armo esta semana?", "¿qué tengo que reponer?",
+        "¿qué precios están dejando margen?", "¿cómo está el stock?",
+        "¿qué zona vende más?", "¿quiénes son mis mejores clientes?",
+        "¿qué clientes perdí?", "¿qué proveedor me conviene?",
+        "¿cómo viene la venta?", "¿qué tipo de negocio compra más?",
+    ]
+    # Miles separados por coma (1,430,318) o decimales con punto (24.5%).
+    miles_us = re.compile(r"\d{1,3}(?:,\d{3})+")
+    decimal_us = re.compile(r"\d+\.\d+\s*%")
+
+    problemas = []
+    for pregunta in preguntas:
+        texto = copiloto.responder(pregunta, datos)["respuesta"]
+        hallados = miles_us.findall(texto) + decimal_us.findall(texto)
+        if hallados:
+            problemas.append((pregunta, hallados[:3]))
+    assert not problemas, f"respuestas con formato de Estados Unidos: {problemas}"
+
+
+def test_el_formateador_del_copiloto_da_vuelta_los_separadores():
+    from plania import copiloto
+    assert copiloto._m(1430318) == "1.430.318"
+    assert copiloto._m(1430318.5, 2) == "1.430.318,50"
+    assert copiloto._m(24.5, 1) == "24,5"
+    assert copiloto._m(0) == "0"

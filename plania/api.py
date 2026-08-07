@@ -148,6 +148,25 @@ def activar(a: Activacion) -> dict:
 # ---------------------------------------------------------------------------
 # Pantallas
 # ---------------------------------------------------------------------------
+@app.get("/inicio")
+def inicio() -> dict:
+    """Lo primero que ve el usuario: cuánto vendió, con qué margen, y las dos
+    cifras que justifican el producto — plata inmovilizada que puede liberar y
+    venta que está por perder.
+
+    El resumen sale de `generar_todas`, el mismo paquete que se exporta a
+    PDF: así el número de la pantalla y el del informe que el cliente le pasa
+    a su jefe son el mismo.
+    """
+    d, v = _datos(), _ventas()
+    resumen = sugerencias.generar_todas(d)["resumen"]
+    return {
+        "kpis": {k: _limpiar(x) for k, x in analitica.kpis(d["productos"], v).items()},
+        "resumen": {k: _limpiar(x) for k, x in resumen.items()},
+        "licencia": licencia.estado(),
+    }
+
+
 @app.get("/panel")
 def panel(dias: int = 30) -> dict:
     d, v = _datos(), _ventas()
