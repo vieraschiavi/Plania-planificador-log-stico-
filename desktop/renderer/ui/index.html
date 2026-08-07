@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Plania</title>
+<!--
+  Favicon vacío y embebido, a propósito. En Electron no hay barra de pestañas
+  —el ícono de la ventana y de la barra de tareas lo pone el .exe, vía
+  build.win.icon— así que un favicon no se ve en ningún lado. Pero si no se
+  declara ninguno, el navegador embebido pide /favicon.ico igual y deja un 404
+  en la consola: ruido justo donde se busca el error de verdad cuando algo
+  falla. Va como data: y no como archivo para que no dependa de una ruta
+  relativa que cambia entre el repo y el paquete instalado.
+-->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<div id="root"></div>
+
+<!--
+  React y Plotly desde node_modules, no desde una CDN: el programa se instala
+  y tiene que abrir igual sin internet. Una máquina de depósito con la red
+  caída, o una oficina que bloquea dominios externos, dejaría la ventana en
+  blanco si esto se trajera de afuera.
+-->
+<script src="../../node_modules/react/umd/react.production.min.js"></script>
+<script src="../../node_modules/react-dom/umd/react-dom.production.min.js"></script>
+<script src="../../node_modules/plotly.js-dist-min/plotly.min.js"></script>
+
+<script src="base.js"></script>
+<script src="pantallas.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

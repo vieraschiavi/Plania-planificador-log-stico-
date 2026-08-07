@@ -27,7 +27,7 @@ que responde consultas sobre los datos reales y exporta todo a
    "Add to PATH"); las siguientes abre directo.
 
 **Ejecutables .exe, sin requisitos:** los genera el workflow **Release**, y
-quedan siempre frescos en [`descargas/`](descargas/). Se dispara solo con
+quedan siempre frescos en [`INSTALADOR/`](INSTALADOR/). Se dispara solo con
 cada push a `main` que toca el producto (`app/`, `plania/`, `packaging/`,
 `desktop/`, `data/`, `assets/`, `requirements.txt`) — no hay que ir a Actions
 a apretar nada. Publicar una versión con changelog en

@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "plotly.js-dist-min": "^2.35.2"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -22,13 +23,32 @@
   "build": {
     "appId": "uy.plania.desktop",
     "productName": "Plania",
-    "directories": { "output": "dist_electron" },
-    "files": ["main.js", "preload.js", "renderer/**", "node_modules/react/**", "node_modules/react-dom/**", "node_modules/scheduler/**"],
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "node_modules/react/**",
+      "node_modules/react-dom/**",
+      "node_modules/plotly.js-dist-min/**",
+      "node_modules/scheduler/**"
+    ],
     "extraResources": [
-      { "from": "../dist/Plania", "to": "backend", "filter": ["**/*"] }
+      {
+        "from": "../dist/Plania",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "../assets/brand/plania.ico"
     },
     "nsis": {
@@ -39,7 +59,9 @@
       "shortcutName": "Plania",
       "uninstallDisplayName": "Plania",
       "license": false,
-      "installerLanguages": ["es_ES"]
+      "installerLanguages": [
+        "es_ES"
+      ]
     }
   }
 }
