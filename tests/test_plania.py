@@ -3405,3 +3405,114 @@ def test_el_cliente_no_descarga_del_repositorio():
     assert "/descargar/{token}" in backend
     assert "PLANIA_INSTALADOR_PATH" in backend, \
         "el backend tiene que poder apuntar al instalador publicado"
+
+
+# ---------------------------------------------------------------------------
+# API local: la capa que va a consumir la interfaz React de escritorio
+# ---------------------------------------------------------------------------
+def _cliente_api():
+    from fastapi.testclient import TestClient
+    from plania import api
+    api.invalidar_cache()
+    return TestClient(api.app)
+
+
+def test_la_api_local_responde_todas_las_pantallas():
+    """Cada pantalla del producto tiene que poder alimentarse de la API. Si un
+    endpoint devuelve 500 con la base demo, con una base real va a fallar
+    igual: la demo es el caso fácil."""
+    c = _cliente_api()
+    for metodo, ruta, cuerpo in [
+        ("GET", "/salud", None), ("GET", "/licencia", None),
+        ("GET", "/panel", None), ("GET", "/stock", None),
+        ("GET", "/precios", None), ("GET", "/zonas", None),
+        ("GET", "/ofertas", None), ("GET", "/clientes/inactivos", None),
+        ("POST", "/rutas", {"vehiculos": 2}),
+        ("POST", "/copiloto", {"pregunta": "¿qué ofertas armo esta semana?"}),
+    ]:
+        r = c.request(metodo, ruta, json=cuerpo)
+        assert r.status_code == 200, f"{metodo} {ruta} -> {r.status_code}: {r.text[:200]}"
+
+
+def test_la_api_da_los_mismos_numeros_que_la_pantalla_actual():
+    """El control central de la migración a React.
+
+    La API no puede recalcular nada por su cuenta: tiene que devolver lo que
+    devuelven los módulos que ya usa `app/app.py`. Si acá apareciera una
+    cuenta propia habría dos fuentes de verdad, y el día que difieran, la
+    diferencia se ve delante de un cliente.
+    """
+    from plania import analitica, conectores, sugerencias
+
+    d = conectores.cargar_datos()
+    v = analitica.enriquecer_ventas(d["ventas"], d["productos"], d["clientes"])
+    c = _cliente_api()
+
+    esperados = analitica.kpis(d["productos"], v, 30)
+    obtenidos = c.get("/panel").json()["kpis"]
+    for clave, valor in esperados.items():
+        if isinstance(valor, float):
+            assert abs(obtenidos[clave] - valor) < 1e-6, f"kpi {clave} difiere"
+        else:
+            assert obtenidos[clave] == valor, f"kpi {clave} difiere"
+
+    # Y las tablas: mismo total de filas que la función que las produce.
+    assert (c.get("/ofertas").json()["ofertas"]["total"]
+            == len(sugerencias.ofertas_por_sobrestock(d["productos"], v)))
+    assert (c.get("/stock").json()["reposicion"]["total"]
+            == len(sugerencias.reposicion(d["productos"], v)))
+
+
+def test_la_api_no_emite_json_invalido_con_datos_vacios():
+    """NaN e Infinity no existen en JSON: `json.dumps` los escribe igual y del
+    otro lado `JSON.parse` rechaza el documento entero — la pantalla queda en
+    blanco sin explicación. Un promedio sobre cero filas alcanza para
+    producirlos, así que no es un caso raro: es un cliente cuyo período no
+    tiene ventas."""
+    import json
+    import math
+
+    import pandas as pd
+    from plania import api
+
+    vacio = pd.DataFrame({"a": [float("nan")], "b": [float("inf")], "c": [1.0]})
+    salida = api.tabla_json(vacio)
+    texto = json.dumps(salida)          # falla si quedó un NaN suelto
+    assert "NaN" not in texto and "Infinity" not in texto
+    assert salida["filas"][0]["a"] is None and salida["filas"][0]["b"] is None
+    assert salida["filas"][0]["c"] == 1.0
+
+    # Y el caso de verdad: KPIs sobre un período sin ventas.
+    assert api._limpiar(float("nan")) is None
+    assert api._limpiar(math.inf) is None
+
+
+def test_la_api_recorta_pero_dice_cuanto_recorto():
+    """Mandar 50.000 filas a la interfaz la cuelga; recortarlas sin avisar
+    hace que el usuario crea que eso es todo lo que hay."""
+    import pandas as pd
+    from plania import api
+
+    df = pd.DataFrame({"n": range(1000)})
+    salida = api.tabla_json(df, limite=200)
+    assert len(salida["filas"]) == 200
+    assert salida["total"] == 1000, "sin el total, la pantalla no puede avisar que recortó"
+
+
+def test_la_api_local_no_es_el_backend_de_venta():
+    """Son dos servidores distintos y no pueden mezclarse: éste corre en la
+    máquina del cliente con SUS datos; `backend_venta` corre en internet con
+    las licencias y el cobro. Si la API local expusiera cobro o emisión de
+    licencias, cada cliente tendría en su máquina el mecanismo para emitirse
+    licencias solo."""
+    from plania import api
+
+    rutas_api = {r.path for r in api.app.routes}
+    for prohibida in ("/checkout", "/webhooks/mercadopago", "/licencias/emitir",
+                      "/licencias/trial", "/gateway/copiloto"):
+        assert prohibida not in rutas_api, \
+            f"{prohibida} es del backend de venta y no puede estar en la API local"
+
+    fuente = open(os.path.join(RAIZ, "plania", "api.py"), encoding="utf-8").read()
+    assert "backend_venta" not in fuente.replace("`backend_venta`", "").replace(
+        "backend_venta/", ""), "la API local no puede importar el backend de venta"
