@@ -12,9 +12,12 @@
  */
 const e = React.createElement;
 
-// El puerto lo elige el lanzador y se lo pasa a la ventana. Hay valor por
-// defecto para poder abrir la interfaz en un navegador durante el desarrollo.
-const API = (window.PLANIA_API || "http://127.0.0.1:8777").replace(/\/$/, "");
+// El puerto lo elige el lanzador —no la ventana— y llega en la query, que
+// está disponible desde la primera línea que corre. El valor por defecto es
+// para poder abrir la interfaz en un navegador durante el desarrollo.
+const API = (new URLSearchParams(location.search).get("api")
+             || window.PLANIA_API
+             || "http://127.0.0.1:8777").replace(/\/$/, "");
 
 async function pedir(ruta, cuerpo) {
   const opciones = cuerpo

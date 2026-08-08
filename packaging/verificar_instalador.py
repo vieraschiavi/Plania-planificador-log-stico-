@@ -333,6 +333,51 @@ def controles() -> list[tuple[bool, str, str]]:
        "comprobar que un puerto está libre y recién después dejarlo tomar deja "
        "una ventana en la que otro programa se lo lleva")
 
+    # --- La ventana dibuja su propia interfaz -----------------------------
+    # El escritorio dejó de embeber la pantalla Streamlit: tiene interfaz React
+    # propia y le pide los datos a la API local. Estas piezas tienen que estar
+    # las tres o la ventana arranca y se queda en la pantalla de carga.
+    ui = os.path.join(RAIZ, "desktop", "renderer", "ui")
+    for archivo in ("index.html", "base.js", "pantallas.js", "app.js", "estilo.css"):
+        ok(os.path.exists(os.path.join(ui, archivo)),
+           f"Existe la interfaz de escritorio: {archivo}",
+           f"falta desktop/renderer/ui/{archivo}")
+
+    ok("PLANIA_MOTOR" in main_js and "PLANIA_MOTOR" in lanzador,
+       "La ventana le pide al motor la API, no la pantalla Streamlit",
+       "sin ese acuerdo el motor sirve Streamlit y la interfaz React no "
+       "encuentra a quién pedirle los datos")
+    ok('renderer", "ui", "index.html"' in main_js,
+       "La ventana carga su propia interfaz desde el disco",
+       "si vuelve a cargar la URL del servidor, se ve Streamlit otra vez")
+    # El puerto tiene que llegar por la query: inyectarlo con executeJavaScript
+    # obliga a recargar, y la recarga crea un contexto nuevo que borra
+    # justamente lo inyectado.
+    ok("query: { api: url }" in main_js,
+       "El puerto de la API le llega a la interfaz al arrancar",
+       "sin esto la interfaz pide siempre al puerto por defecto")
+
+    spec_txt = _leer(SPEC)
+    for modulo in ("plania.api", "uvicorn"):
+        ok(f'"{modulo}"' in spec_txt,
+           f"El ejecutable empaqueta {modulo}",
+           f"el lanzador importa {modulo} dentro de una función y PyInstaller "
+           "no lo ve solo: el .exe se arma y la ventana no encuentra el motor")
+
+    paquete = os.path.join(RAIZ, "desktop", "package.json")
+    if os.path.exists(paquete):
+        import json as _json
+        pkg = _json.load(open(paquete, encoding="utf-8"))
+        archivos = " ".join(pkg.get("build", {}).get("files", []))
+        for dep in ("react", "plotly.js-dist-min"):
+            ok(dep in pkg.get("dependencies", {}),
+               f"{dep} está declarado como dependencia",
+               f"sin declararlo, npm ci no lo instala y la interfaz no carga")
+            ok(dep in archivos,
+               f"electron-builder empaqueta {dep}",
+               f"sin esto el instalador se arma igual y la ventana levanta sin "
+               f"{dep}: falla que sólo se ve en la máquina del cliente")
+
     # --- Que parezca un programa y no una página de Streamlit --------------
     # Lo que se vende es un programa instalado. El andamiaje de Streamlit —el
     # menú de hamburguesa con "Rerun" y el enlace a streamlit.io, el botón

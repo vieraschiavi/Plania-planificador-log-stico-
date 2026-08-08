@@ -34,9 +34,12 @@ from typing import Any
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
-from plania import analitica, conectores, copiloto, exportes, licencia, rutas, sugerencias
+from plania import (analitica, conectores, copiloto, exportes, licencia, rutas,
+                    sugerencias)
+from plania import config as pconfig
 
 app = FastAPI(title="Plania · API local", docs_url="/_docs")
 
@@ -178,38 +181,81 @@ def panel(dias: int = 30) -> dict:
     }
 
 
+
+
 @app.get("/stock")
 def stock() -> dict:
     d, v = _datos(), _ventas()
+    rot = analitica.rotacion(d["productos"], v)
     return {
-        "rotacion": tabla_json(analitica.rotacion(d["productos"], v), limite=500),
+        "kpis": {
+            "skus": int(len(rot)),
+            "quiebres": int((rot["stock"] <= 0).sum()),
+            "sobrestock": int((rot["dias_stock"] > 90).sum()),
+        },
+        "rotacion": tabla_json(rot, limite=500),
         "reposicion": tabla_json(sugerencias.reposicion(d["productos"], v), limite=500),
+        # Para el filtro por categoría de la pantalla: sale de los datos, no
+        # de una lista fija, porque las categorías las pone el ERP del cliente.
+        "categorias": sorted(rot["categoria"].dropna().unique().tolist())
+        if "categoria" in rot.columns else [],
     }
 
 
 @app.get("/precios")
 def precios() -> dict:
     d, v = _datos(), _ventas()
+    pr = sugerencias.precios(d["productos"], v)
+    venta = float(v["venta"].sum())
     return {
+        "kpis": {
+            "margen_ponderado_pct": _limpiar(
+                float(v["margen"].sum()) / venta * 100 if venta else 0.0),
+            "margen_extra_mensual": _limpiar(
+                float(pr["margen_extra_mensual"].sum()) if len(pr) else 0.0),
+        },
         "margen_por_producto": tabla_json(analitica.margen_por_producto(v), limite=500),
-        "ajustes": tabla_json(sugerencias.precios(d["productos"], v), limite=500),
+        "ajustes": tabla_json(pr, limite=500),
     }
 
 
 @app.get("/zonas")
-def zonas() -> dict:
-    d, v = _datos(), _ventas()
+def zonas(dim: str = "zona") -> dict:
+    """La dimensión es un parámetro y no tres endpoints porque la pantalla la
+    cambia con un selector. Se valida contra una lista blanca: `por_dimension`
+    agrupa por el nombre de columna que reciba, así que sin esta comprobación
+    la pantalla podría pedir cualquier columna de la base del cliente."""
+    if dim not in ("zona", "departamento", "tipo_negocio"):
+        raise HTTPException(400, f"Dimensión no válida: {dim!r}")
+    v = _ventas()
+    if dim not in v.columns:
+        return {"dim": dim, "grupo": tabla_json(None), "oportunidades": tabla_json(None),
+                "aviso": f"Los datos conectados no traen {dim} de los clientes."}
     return {
-        "por_zona": tabla_json(analitica.por_dimension(v, "zona")),
-        "por_tipo_negocio": tabla_json(analitica.por_dimension(v, "tipo_negocio")),
+        "dim": dim,
+        "grupo": tabla_json(analitica.por_dimension(v, dim)),
         "oportunidades": tabla_json(sugerencias.oportunidades_zona(v), limite=200),
     }
 
 
 @app.get("/ofertas")
 def ofertas() -> dict:
-    d, v = _datos(), _ventas()
-    return {"ofertas": tabla_json(sugerencias.ofertas_por_sobrestock(d["productos"], v), limite=300)}
+    """El paquete completo, igual que la pantalla: los cinco motores más el
+    resumen en pesos. Es el mismo `generar_todas` que alimenta el informe
+    exportado, así que la pantalla y el PDF no pueden dar distinto."""
+    d = _datos()
+    paq = sugerencias.generar_todas(d)
+    return {
+        "resumen": {k: _limpiar(x) for k, x in paq["resumen"].items()},
+        "secciones": {
+            clave: {
+                "titulo": exportes.TITULOS.get(clave, (clave, ""))[0],
+                "descripcion": exportes.TITULOS.get(clave, ("", ""))[1],
+                "tabla": tabla_json(paq[clave], limite=400),
+            }
+            for clave in ("ofertas", "reposicion", "precios", "zonas", "recupero")
+        },
+    }
 
 
 @app.get("/clientes/inactivos")
@@ -221,35 +267,71 @@ def clientes_inactivos(dias: int = 60) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Rutas
+# ---------------------------------------------------------------------------
+@app.get("/rutas/opciones")
+def opciones_rutas() -> dict:
+    """Lo que la pantalla necesita para armar los filtros antes de planificar."""
+    d = _datos()
+    deptos = (sorted(d["clientes"]["departamento"].dropna().unique().tolist())
+              if "departamento" in d["clientes"].columns else [])
+    return {"departamentos": deptos, "habilitado": licencia.tiene("rutas")}
+
+
 class PedidoRutas(BaseModel):
     vehiculos: int = 2
-    zona: str | None = None
+    paradas_max: int = 25
+    departamentos: list[str] = []
+    modo: str = "todos"          # activos | inactivos | todos
 
 
 @app.post("/rutas")
 def planificar_rutas(p: PedidoRutas) -> dict:
-    d = _datos()
+    # El plan sin rutas no incluye el planificador. Se controla en el servidor
+    # y no sólo escondiendo el botón: una pantalla se puede saltear, un
+    # endpoint abierto no.
+    if not licencia.tiene("rutas"):
+        raise HTTPException(403, "El plan actual no incluye el planificador de rutas "
+                                 "— disponible en Pro y Enterprise.")
     if p.vehiculos < 1:
         raise HTTPException(400, "Hace falta al menos un vehículo.")
-    clientes = d["clientes"]
-    if p.zona:
-        clientes = clientes[clientes["zona"] == p.zona]
-        if not len(clientes):
-            raise HTTPException(404, f"No hay clientes en la zona {p.zona!r}.")
-    # `planificar` devuelve varios DataFrames, no uno: las paradas en orden,
-    # el resumen por vehículo, y los clientes que quedaron afuera por no tener
-    # GPS. Los tres importan en pantalla — sobre todo `sin_gps`, que explica
-    # por qué la ruta tiene menos paradas de las que el usuario esperaba.
-    plan = rutas.planificar(clientes, vehiculos=p.vehiculos)
-    return {clave: tabla_json(df) for clave, df in plan.items()}
+
+    d, v = _datos(), _ventas()
+    base = d["clientes"]
+    if p.departamentos and "departamento" in base.columns:
+        base = base[base["departamento"].isin(p.departamentos)]
+
+    if p.modo == "inactivos":
+        inact = analitica.clientes_inactivos(v, base)[["cliente_id"]]
+        objetivo = base.merge(inact, on="cliente_id")
+    elif p.modo == "activos":
+        corte = v["fecha"].max() - pd.Timedelta(days=30)
+        activos = v[v["fecha"] > corte]["cliente_id"].unique()
+        objetivo = base[base["cliente_id"].isin(activos)]
+    else:
+        objetivo = base
+
+    if not len(objetivo):
+        raise HTTPException(404, "No hay clientes que cumplan ese filtro.")
+
+    plan = rutas.planificar(objetivo, vehiculos=p.vehiculos, paradas_max=p.paradas_max)
+    salida = {clave: tabla_json(df) for clave, df in plan.items()}
+    salida["clientes_a_rutear"] = int(len(objetivo))
+    return salida
 
 
+# ---------------------------------------------------------------------------
+# Copiloto
+# ---------------------------------------------------------------------------
 class Consulta(BaseModel):
     pregunta: str
 
 
 @app.post("/copiloto")
 def preguntar(c: Consulta) -> dict:
+    if not licencia.tiene("copiloto"):
+        raise HTTPException(403, "El plan actual no incluye el Copiloto.")
     if not c.pregunta.strip():
         raise HTTPException(400, "La consulta viene vacía.")
     r = copiloto.responder(c.pregunta, _datos())
@@ -260,3 +342,191 @@ def preguntar(c: Consulta) -> dict:
         # el copiloto es una opinión. Va completa, no recortada.
         "tabla": tabla_json(r.get("tabla")),
     }
+
+
+# ---------------------------------------------------------------------------
+# Exportes
+# ---------------------------------------------------------------------------
+_MIME = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+@app.get("/exportar/{clave}.{formato}")
+def exportar(clave: str, formato: str) -> Response:
+    """Descarga de un informe en PDF, Word o Excel.
+
+    El archivo se arma en el servidor con los mismos módulos que ya usa la
+    pantalla actual: si se generara en el navegador habría dos versiones del
+    informe, y la que el cliente le manda a su proveedor podría no coincidir
+    con la que vio en pantalla.
+    """
+    if formato not in _MIME:
+        raise HTTPException(400, f"Formato no soportado: {formato!r}")
+    if not licencia.tiene("exportes"):
+        raise HTTPException(403, "El plan actual no incluye los exportes.")
+
+    d = _datos()
+    paq = sugerencias.generar_todas(d)
+    if clave == "completo":
+        secciones = exportes.secciones_desde_paquete(paq)
+        titulo = "Informe de Plania"
+    elif clave in ("ofertas", "reposicion", "precios", "zonas", "recupero"):
+        if paq[clave] is None or not len(paq[clave]):
+            raise HTTPException(404, "No hay nada para exportar en esa sección.")
+        secciones = exportes.secciones_desde_paquete(paq, incluir=[clave])
+        titulo = exportes.TITULOS.get(clave, (clave, ""))[0]
+    else:
+        raise HTTPException(404, f"No hay informe {clave!r}.")
+
+    cuerpo = {"pdf": lambda: exportes.a_pdf(titulo, secciones),
+              "docx": lambda: exportes.a_word(titulo, secciones),
+              "xlsx": lambda: exportes.a_excel(secciones)}[formato]()
+    return Response(
+        content=cuerpo, media_type=_MIME[formato],
+        headers={"Content-Disposition": f'attachment; filename="plania_{clave}.{formato}"'})
+
+
+# ---------------------------------------------------------------------------
+# Conectar ERP
+# ---------------------------------------------------------------------------
+class Conexion(BaseModel):
+    url: str
+
+
+@app.post("/erp/probar")
+def probar_erp(c: Conexion) -> dict:
+    """Prueba la conexión sin guardarla: el usuario tiene que poder verificar
+    antes de que toda la aplicación pase a leer de ahí."""
+    try:
+        eng = conectores.conectar_sql(c.url)
+        tablas = conectores.listar_tablas(eng)
+        auto = {e: conectores.autodescubrir_tabla(eng, e)
+                for e in ("productos", "clientes", "ventas")}
+    except Exception as ex:
+        raise HTTPException(400, f"No conectó: {ex}")
+
+    # Conectar no alcanza. SQLite crea el archivo si no existe, así que una
+    # ruta mal escrita "conecta" contra una base vacía y el usuario lee
+    # "Conectado" cuando en realidad apuntó a la nada. Y aunque haya tablas,
+    # si no se reconoce ninguna como productos/clientes/ventas, guardar esa
+    # conexión deja la aplicación sin datos.
+    avisos = []
+    if not tablas:
+        avisos.append("La conexión abrió pero la base no tiene ninguna tabla. "
+                      "Si es SQLite, puede que la ruta esté mal y se haya creado "
+                      "un archivo vacío.")
+    faltan = [e for e, t in auto.items() if not t]
+    if faltan and tablas:
+        avisos.append("No se reconocieron las tablas de: " + ", ".join(faltan)
+                      + ". Se pueden elegir a mano antes de guardar.")
+    return {"ok": True, "tablas": tablas, "autodetectado": auto, "avisos": avisos}
+
+
+@app.post("/erp/guardar")
+def guardar_erp(c: Conexion) -> dict:
+    try:
+        conectores.conectar_sql(c.url)
+    except Exception as ex:
+        # Guardar una URL que no conecta deja la aplicación sin datos en el
+        # próximo arranque, y el usuario no relaciona una cosa con la otra.
+        raise HTTPException(400, f"No se guardó porque no conecta: {ex}")
+    pconfig.guardar_extra("ERP_DB_URL", c.url)
+    invalidar_cache()
+    return {"ok": True}
+
+
+@app.get("/erp/estado")
+def estado_erp() -> dict:
+    url = pconfig.leer_extra("ERP_DB_URL") or ""
+    return {"conectado": bool(url), "url_enmascarada": pconfig.enmascarar(url) if url else ""}
+
+
+# ---------------------------------------------------------------------------
+# Planes, licencia y configuración
+# ---------------------------------------------------------------------------
+@app.get("/planes")
+def planes() -> dict:
+    """Catálogo para la pantalla de compra. Los precios están acá y no en el
+    frontend para que no haya dos listas de precios que se desincronicen."""
+    return {"planes": [
+        {"id": "starter", "titulo": "Starter", "precio": "USD 59/mes",
+         "detalle": "Copiloto + ERP + exportes · 500 consultas/mes"},
+        {"id": "pro", "titulo": "Pro — recomendado", "precio": "USD 129/mes",
+         "detalle": "Todo Starter + rutas + excedente · 2.000 consultas/mes"},
+        {"id": "enterprise", "titulo": "Enterprise", "precio": "a medida",
+         "detalle": "Multi-sucursal, white label, SSO, SLA"},
+    ]}
+
+
+class Checkout(BaseModel):
+    plan: str
+    email: str
+
+
+@app.post("/checkout")
+def checkout(c: Checkout) -> dict:
+    """Le pide el link de pago al backend de venta y lo devuelve.
+
+    La API local NO emite licencias ni cobra: sólo reenvía. Si emitiera, cada
+    cliente tendría en su propia máquina el mecanismo para darse licencias.
+    """
+    import requests
+
+    backend = os.environ.get("PLANIA_BACKEND_URL") or pconfig.leer_extra("BACKEND_URL")
+    if not backend:
+        raise HTTPException(503, "No hay backend de venta configurado "
+                                 "(PLANIA_BACKEND_URL).")
+    try:
+        r = requests.post(f"{backend.rstrip('/')}/checkout",
+                          json={"plan": c.plan, "email": c.email}, timeout=15)
+    except Exception as ex:
+        raise HTTPException(502, f"No pude contactar el backend de venta: {ex}")
+    if not r.ok:
+        try:
+            detalle = r.json().get("detail", r.text)
+        except Exception:
+            detalle = r.text
+        raise HTTPException(r.status_code, detalle)
+    return r.json()
+
+
+@app.get("/config")
+def leer_config() -> dict:
+    """Las claves configurables y si están puestas — nunca su valor.
+
+    Se devuelve el valor enmascarado y no el real: esta respuesta viaja por
+    HTTP y queda en el historial de red de la ventana. Que la interfaz no
+    pueda mostrar una clave que ya está guardada es a propósito.
+    """
+    cfg = pconfig.cargar()
+    return {
+        "backend_activo": pconfig.backend_activo(),
+        "claves": [
+            {"clave": clave, "descripcion": desc,
+             "configurada": bool(cfg.get(clave)),
+             "enmascarado": pconfig.enmascarar(cfg.get(clave, "")) if cfg.get(clave) else "",
+             "sensible": any(x in clave for x in ("KEY", "TOKEN", "PASSWORD"))}
+            for clave, desc in pconfig.CLAVES.items()
+        ],
+    }
+
+
+class CambioConfig(BaseModel):
+    valores: dict[str, str]
+
+
+@app.post("/config")
+def guardar_config(c: CambioConfig) -> dict:
+    # Sólo lo que trae valor: un campo vacío significa "dejalo como está", no
+    # "borralo". Guardar los vacíos borraría claves que el usuario ni tocó.
+    cambios = {k: v for k, v in c.valores.items()
+               if v.strip() and k in pconfig.CLAVES}
+    if not cambios:
+        return {"ok": True, "guardadas": []}
+    pconfig.guardar(cambios)
+    pconfig.aplicar()
+    invalidar_cache()
+    return {"ok": True, "guardadas": sorted(cambios)}
