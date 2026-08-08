@@ -106,9 +106,15 @@ for _archivo in ["README.md", "LICENSE-EULA.md"]:
         datas.append((_ruta, "."))
 
 hiddenimports += [
-    "plania", "plania.analitica", "plania.auditoria", "plania.conectores",
-    "plania.config", "plania.copiloto", "plania.exportes", "plania.licencia",
-    "plania.rutas", "plania.sugerencias",
+    "plania", "plania.analitica", "plania.apariencia", "plania.auditoria",
+    "plania.conectores", "plania.config", "plania.copiloto", "plania.exportes",
+    "plania.licencia", "plania.rutas", "plania.sugerencias",
+    # La API local que consume la interfaz React de la ventana. El lanzador la
+    # importa dentro de _servir_api, así que el análisis estático no la ve:
+    # sin declararla el .exe se arma igual y la ventana no encuentra el motor.
+    "plania.api", "uvicorn", "uvicorn.logging", "uvicorn.loops.auto",
+    "uvicorn.protocols.http.auto", "uvicorn.protocols.websockets.auto",
+    "uvicorn.lifespan.on",
     "data.generate_dataset",
     # El módulo que abre la ventana propia del programa. Va declarado porque
     # el lanzador lo importa dentro de un try/except —para poder correr tanto

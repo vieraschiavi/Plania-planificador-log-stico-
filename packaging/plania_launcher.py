@@ -313,6 +313,16 @@ def _pantalla(base: str) -> str:
     return os.path.join(base, "app", "app.py")
 
 
+def _modo_api() -> bool:
+    """Si este arranque tiene que servir la API en vez de la pantalla Streamlit.
+
+    Lo fija quien lanza: la ventana de Electron pide la API porque dibuja su
+    propia interfaz React; la versión web y el arranque por .bat siguen
+    pidiendo Streamlit, que es lo que ya tienen.
+    """
+    return os.environ.get("PLANIA_MOTOR", "").lower() == "api"
+
+
 def main():
     base = _base_dir()
     app_path = _pantalla(base)
@@ -348,7 +358,42 @@ def main():
     except Exception as e:
         print(f"[Plania] No pude determinar la carpeta de datos: {e}")
 
-    _servir(app_path, preferido, electron)
+    if _modo_api():
+        _servir_api(preferido)
+    else:
+        _servir(app_path, preferido, electron)
+
+
+def _servir_api(preferido: int) -> None:
+    """Levanta la API local que consume la interfaz React de Electron.
+
+    Misma disciplina de puertos que el camino de Streamlit —reservar de
+    verdad antes de anunciar, y mudarse si otro programa gana la carrera—
+    porque el problema es idéntico: si la ventana espera en un puerto que se
+    llevó otro programa, se queda en la pantalla de carga para siempre.
+    """
+    import uvicorn
+
+    for puerto in [preferido] + [p for p in _candidatos() if p != preferido]:
+        reserva = _reservar(puerto)
+        if reserva is None:
+            continue
+        puerto = reserva.getsockname()[1]
+        _publicar_puerto(str(puerto))
+        print(f"[Plania] API local escuchando en http://127.0.0.1:{puerto}")
+        # Se suelta justo antes de que uvicorn haga su propio bind.
+        reserva.close()
+        try:
+            from plania import api
+            # Sólo 127.0.0.1: los datos del cliente no salen de su máquina.
+            uvicorn.run(api.app, host="127.0.0.1", port=puerto, log_level="warning")
+            return
+        except SystemExit:
+            if _ocupado(puerto):
+                print(f"[Plania] Otro programa tomó el puerto {puerto}. Pruebo con otro.")
+                continue
+            raise
+    raise SystemExit("[Plania] No quedó ningún puerto libre para la API.")
 
 
 def _servir(app_path: str, preferido: int, electron: bool) -> None:

@@ -2626,15 +2626,30 @@ def test_activar_una_licencia_no_rompe_el_arranque(tmp_path, monkeypatch):
     from plania import config as pconfig
     importlib.reload(pconfig)
 
-    pconfig.guardar_extra("LICENCIA_CLAIMS", {"cliente": "x@y.uy", "plan": "pro"})
-    pconfig.guardar_extra("ANTHROPIC_API_KEY", "sk-ant-de-prueba")
+    try:
+        pconfig.guardar_extra("LICENCIA_CLAIMS", {"cliente": "x@y.uy", "plan": "pro"})
+        pconfig.guardar_extra("ANTHROPIC_API_KEY", "sk-ant-de-prueba")
 
-    pconfig.aplicar()          # esto es lo que corre app/app.py al arrancar
+        pconfig.aplicar()      # esto es lo que corre app/app.py al arrancar
 
-    assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-de-prueba", \
-        "dejó de exportar las credenciales que sí van al entorno"
-    assert "LICENCIA_CLAIMS" not in os.environ, \
-        "las claims no son una variable de entorno"
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-de-prueba", \
+            "dejó de exportar las credenciales que sí van al entorno"
+        assert "LICENCIA_CLAIMS" not in os.environ, \
+            "las claims no son una variable de entorno"
+    finally:
+        # `CONFIG_DIR` se resuelve al importar el módulo, así que recargarlo
+        # con la carpeta temporal puesta lo deja apuntando ahí para el resto
+        # de la sesión: todo test posterior que lea configuración leía de una
+        # carpeta de otro test. Se veía como un fallo ajeno y difícil de
+        # explicar — el gateway devolvía 502 en vez de 503 porque "encontraba"
+        # una ANTHROPIC_API_KEY que este test había guardado.
+        #
+        # `monkeypatch` deshace la variable recién al terminar la función, así
+        # que hay que deshacerla a mano antes de recargar.
+        monkeypatch.undo()
+        importlib.reload(pconfig)
+        # `aplicar()` exporta al entorno, y eso monkeypatch no lo revierte.
+        os.environ.pop("ANTHROPIC_API_KEY", None)
 
 
 # ---------------------------------------------------------------------------
@@ -3457,7 +3472,8 @@ def test_la_api_da_los_mismos_numeros_que_la_pantalla_actual():
             assert obtenidos[clave] == valor, f"kpi {clave} difiere"
 
     # Y las tablas: mismo total de filas que la función que las produce.
-    assert (c.get("/ofertas").json()["ofertas"]["total"]
+    secciones = c.get("/ofertas").json()["secciones"]
+    assert (secciones["ofertas"]["tabla"]["total"]
             == len(sugerencias.ofertas_por_sobrestock(d["productos"], v)))
     assert (c.get("/stock").json()["reposicion"]["total"]
             == len(sugerencias.reposicion(d["productos"], v)))
@@ -3500,18 +3516,33 @@ def test_la_api_recorta_pero_dice_cuanto_recorto():
 
 
 def test_la_api_local_no_es_el_backend_de_venta():
-    """Son dos servidores distintos y no pueden mezclarse: éste corre en la
-    máquina del cliente con SUS datos; `backend_venta` corre en internet con
-    las licencias y el cobro. Si la API local expusiera cobro o emisión de
-    licencias, cada cliente tendría en su máquina el mecanismo para emitirse
-    licencias solo."""
+    """Son dos servidores distintos: éste corre en la máquina del cliente con
+    SUS datos; `backend_venta` corre en internet con las licencias y el cobro.
+
+    Lo que la API local no puede tener es la capacidad de **emitir** licencias
+    ni de procesar pagos: eso le daría a cada cliente, en su propia máquina, el
+    mecanismo para darse licencias solo.
+
+    `/checkout` sí está, y es a propósito: no emite ni cobra nada, sólo le pide
+    el link de pago al backend de venta y lo devuelve. Es un reenvío — el
+    cliente podría llamar a ese backend por su cuenta igual, así que no agrega
+    ninguna capacidad. Lo que importa es que la emisión siga estando del otro
+    lado.
+    """
     from plania import api
 
     rutas_api = {r.path for r in api.app.routes}
-    for prohibida in ("/checkout", "/webhooks/mercadopago", "/licencias/emitir",
+    for prohibida in ("/webhooks/mercadopago", "/licencias/emitir",
                       "/licencias/trial", "/gateway/copiloto"):
         assert prohibida not in rutas_api, \
             f"{prohibida} es del backend de venta y no puede estar en la API local"
+
+    # Y el reenvío tiene que ser eso: reenviar. Si algún día calculara precios
+    # o firmara algo, deja de ser un reenvío.
+    fuente = open(os.path.join(RAIZ, "plania", "api.py"), encoding="utf-8").read()
+    for prohibido in ("jwt.encode", "PLANIA_LICENSE_SECRET", "mercadopago"):
+        assert prohibido not in fuente, \
+            f"la API local no puede usar {prohibido}: eso es del backend de venta"
 
     fuente = open(os.path.join(RAIZ, "plania", "api.py"), encoding="utf-8").read()
     assert "backend_venta" not in fuente.replace("`backend_venta`", "").replace(
@@ -3560,3 +3591,127 @@ def test_el_formateador_del_copiloto_da_vuelta_los_separadores():
     assert copiloto._m(1430318.5, 2) == "1.430.318,50"
     assert copiloto._m(24.5, 1) == "24,5"
     assert copiloto._m(0) == "0"
+
+
+def test_la_api_cubre_las_doce_pantallas():
+    """Toda pantalla de la interfaz de escritorio tiene su endpoint. Si falta
+    uno, esa pantalla queda en blanco en la máquina del cliente."""
+    from plania import api
+    rutas = {r.path for r in api.app.routes}
+    for ruta in ("/inicio", "/panel", "/stock", "/precios", "/zonas", "/ofertas",
+                 "/clientes/inactivos", "/rutas", "/rutas/opciones", "/copiloto",
+                 "/licencia", "/licencia/activar", "/planes", "/checkout",
+                 "/config", "/erp/probar", "/erp/guardar", "/erp/estado",
+                 "/exportar/{clave}.{formato}", "/salud"):
+        assert ruta in rutas, f"falta el endpoint {ruta}"
+
+
+def test_las_funciones_de_pago_se_controlan_en_el_servidor(monkeypatch):
+    """Esconder el botón no alcanza: un endpoint abierto se llama igual.
+
+    Rutas, copiloto y exportes son features de plan. El control tiene que
+    estar en la API, no sólo en la pantalla — si no, cualquiera con la
+    ventana abierta y la consola del navegador los usa gratis.
+    """
+    from fastapi.testclient import TestClient
+    from plania import api, licencia
+
+    monkeypatch.setattr(licencia, "tiene", lambda feature: False)
+    c = TestClient(api.app)
+    for metodo, ruta, cuerpo in [
+        ("POST", "/rutas", {"vehiculos": 2}),
+        ("POST", "/copiloto", {"pregunta": "hola"}),
+        ("GET", "/exportar/completo.pdf", None),
+    ]:
+        r = c.request(metodo, ruta, json=cuerpo)
+        assert r.status_code == 403, \
+            f"{metodo} {ruta} devolvió {r.status_code} con la feature apagada"
+
+
+def test_la_api_no_deja_agrupar_por_una_columna_cualquiera():
+    """`por_dimension` agrupa por el nombre de columna que reciba. Sin lista
+    blanca, la pantalla —o cualquiera que llame al endpoint— podría pedir
+    agrupar por una columna arbitraria de la base del cliente."""
+    from fastapi.testclient import TestClient
+    from plania import api
+
+    c = TestClient(api.app)
+    assert c.get("/zonas?dim=zona").status_code == 200
+    for malicioso in ("costo", "cliente_id", "../etc", ""):
+        assert c.get(f"/zonas?dim={malicioso}").status_code == 400, \
+            f"dim={malicioso!r} tendría que rechazarse"
+
+
+def test_la_configuracion_nunca_devuelve_el_valor_de_una_clave(tmp_path, monkeypatch):
+    """La respuesta viaja por HTTP y queda en el historial de red de la
+    ventana. Que la interfaz no pueda mostrar una clave guardada es a
+    propósito.
+
+    Corre contra una carpeta de configuración propia, no la compartida. La
+    primera versión guardaba el secreto en la real y lo "borraba" con una
+    cadena vacía — que `guardar` ignora, porque vacío significa "dejalo como
+    está". El secreto quedaba en disco y hacía fallar, mil líneas más
+    adelante, un test del gateway que encontraba una ANTHROPIC_API_KEY donde
+    no tenía que haber ninguna. El síntoma (502 en vez de 503) no se parecía
+    en nada a la causa.
+    """
+    import importlib
+
+    from fastapi.testclient import TestClient
+    from plania import config as pconfig
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    importlib.reload(pconfig)
+    try:
+        from plania import api
+        importlib.reload(api)
+        secreto = "sk-secretisimo-1234567890"
+        pconfig.guardar({"ANTHROPIC_API_KEY": secreto})
+        cuerpo = TestClient(api.app).get("/config").text
+        assert secreto not in cuerpo, "la API devolvió una clave en texto plano"
+    finally:
+        # `CONFIG_DIR` se fija al importar: sin volver a cargar el módulo con
+        # la variable ya deshecha, el resto de la sesión sigue leyendo de esta
+        # carpeta temporal.
+        monkeypatch.undo()
+        importlib.reload(pconfig)
+        from plania import api as _api
+        importlib.reload(_api)
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_la_interfaz_de_escritorio_no_calcula_numeros_por_su_cuenta():
+    """Las pantallas dibujan lo que devuelve la API. Si el JavaScript sumara,
+    promediara o aplicara un descuento, habría dos fuentes de verdad y el día
+    que difieran la diferencia se ve delante de un cliente.
+
+    Se permite formatear (miles, plata, porcentaje) y recortar listas para
+    mostrar; lo que no se permite es aritmética sobre los datos.
+    """
+    import os
+    import re
+
+    fuente = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "pantallas.js"),
+                  encoding="utf-8").read()
+
+    # Multiplicar o dividir un campo que vino de la API: `r.capital * 1.21`.
+    # Se mira `*` y `/` y no `+`, porque `+` es concatenación de texto en casi
+    # todo el archivo y marcaría cada mensaje que arma la pantalla.
+    #
+    # La primera versión sólo miraba `f.<campo>` —el nombre que usan las filas
+    # de tabla— y no detectaba un IVA inyectado en `r.capital_liberable`, que
+    # es otra variable con datos de la API. Ahora cubre cualquier acceso a
+    # propiedad.
+    sospechosas = [x.strip() for x in
+                   re.findall(r"\b[a-z]\w*\.\w+\s*[*/]\s*[\w.]", fuente)]
+
+    # Acumuladores. Se exceptúan los que sólo miran `.length`: medir el texto
+    # más largo para calcular el margen de un gráfico es maquetación, no una
+    # cuenta sobre los datos del cliente. La primera versión de este control
+    # no hacía la distinción y marcaba ese caso como si fuera un cálculo.
+    for reduccion in re.findall(r"\.reduce\(\s*\(.{0,120}", fuente, re.S):
+        if ".length" not in reduccion:
+            sospechosas.append(reduccion.strip()[:60])
+
+    assert not sospechosas, \
+        f"la interfaz parece calcular en vez de mostrar: {sospechosas[:5]}"

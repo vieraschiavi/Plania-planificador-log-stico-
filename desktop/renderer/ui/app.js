@@ -8,30 +8,21 @@
  * funciones.
  */
 
-// El orden es el de app/app.py. `listo: false` = todavía en Streamlit.
+// El orden es el de app/app.py: la migración no reordena el producto.
 const MENU = [
-  { id: "inicio", nombre: "Inicio", listo: true, componente: PantallaInicio },
-  { id: "panel", nombre: "Panel ejecutivo", listo: true, componente: PantallaPanel },
-  { id: "stock", nombre: "Stock y reposición", listo: false },
-  { id: "precios", nombre: "Precios y márgenes", listo: false },
-  { id: "zonas", nombre: "Zonas y negocios", listo: false },
-  { id: "rutas", nombre: "Rutas de reparto", listo: false },
-  { id: "ofertas", nombre: "Ofertas y sugerencias", listo: false },
-  { id: "copiloto", nombre: "Copiloto IA", listo: true, componente: PantallaCopiloto },
-  { id: "erp", nombre: "Conectar ERP", listo: false },
-  { id: "licencia", nombre: "Planes y licencia", listo: false },
-  { id: "config", nombre: "Configuración", listo: false },
+  { id: "inicio", nombre: "Inicio", componente: PantallaInicio },
+  { id: "panel", nombre: "Panel ejecutivo", componente: PantallaPanel },
+  { id: "stock", nombre: "Stock y reposición", componente: PantallaStock },
+  { id: "precios", nombre: "Precios y márgenes", componente: PantallaPrecios },
+  { id: "zonas", nombre: "Zonas y negocios", componente: PantallaZonas },
+  { id: "rutas", nombre: "Rutas de reparto", componente: PantallaRutas },
+  { id: "ofertas", nombre: "Ofertas y sugerencias", componente: PantallaOfertas },
+  { id: "copiloto", nombre: "Copiloto IA", componente: PantallaCopiloto },
+  { id: "erp", nombre: "Conectar ERP", componente: PantallaERP },
+  { id: "licencia", nombre: "Planes y licencia", componente: PantallaLicencia },
+  { id: "config", nombre: "Configuración", componente: PantallaConfig },
+  { id: "ayuda", nombre: "Ayuda", componente: PantallaAyuda },
 ];
-
-function PantallaPendiente({ nombre }) {
-  return e("div", null,
-    e("h1", null, nombre),
-    e("div", { className: "pendiente" },
-      e("p", null, "Esta pantalla todavía se muestra en la versión anterior de la interfaz."),
-      e("p", { className: "chico" },
-        "Está migrándose una por una para que ninguna cambie los números al pasar. "
-        + "Mientras tanto se usa normalmente desde la versión instalada.")));
-}
 
 function Lateral({ actual, ir, licencia }) {
   return e("aside", { className: "lateral" },
@@ -40,16 +31,15 @@ function Lateral({ actual, ir, licencia }) {
       MENU.map((m) =>
         e("button", {
           key: m.id,
-          className: "item" + (m.id === actual ? " activo" : "") + (m.listo ? "" : " pendiente-item"),
+          className: "item" + (m.id === actual ? " activo" : ""),
           onClick: () => ir(m.id),
-          title: m.listo ? m.nombre : `${m.nombre} — todavía en la versión anterior`,
         }, m.nombre))),
     e("div", { className: "pie-lateral" },
       licencia
         ? (licencia.modo === "demo"
             ? e("div", null,
                 e("b", null, "Demo full"), e("br", null),
-                `quedan ${miles(licencia.horas_restantes ?? (licencia.dias_restantes || 0) * 24)} h`)
+                `quedan ${miles(licencia.horas_restantes)} h`)
             : licencia.modo === "licencia"
               ? e("div", null, e("b", null, `Plan ${licencia.plan}`), e("br", null),
                   `vence en ${miles(licencia.dias_restantes)} días`)
@@ -64,10 +54,11 @@ function App() {
   const item = MENU.find((m) => m.id === actual) || MENU[0];
   return e("div", { className: "app" },
     e(Lateral, { actual, ir: setActual, licencia }),
+    // La `key` fuerza a React a desmontar la pantalla anterior al cambiar de
+    // sección. Sin eso, el estado interno (filtros, hilo del copiloto, un plan
+    // de rutas ya calculado) se filtraba de una pantalla a la siguiente.
     e("main", { className: "contenido" },
-      item.listo && item.componente
-        ? e(item.componente, null)
-        : e(PantallaPendiente, { nombre: item.nombre })));
+      e(item.componente, { key: item.id })));
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(e(App, null));

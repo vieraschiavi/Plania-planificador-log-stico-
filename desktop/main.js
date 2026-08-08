@@ -76,6 +76,10 @@ function lanzarBackend(port, archivoPuerto) {
     STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false",
     PLANIA_NO_BROWSER: "1", // que el launcher no abra otro navegador
     PLANIA_PUERTO_ARCHIVO: archivoPuerto,
+    // La ventana dibuja su propia interfaz en React, así que el motor sirve
+    // la API local y no la pantalla Streamlit. La versión web y el arranque
+    // por .bat siguen usando Streamlit: esta variable sólo la pone Electron.
+    PLANIA_MOTOR: "api",
   };
   // Solo en desarrollo se impone el puerto: en producción lo decide el
   // lanzador, que es el único que puede comprobarlo justo antes de usarlo.
@@ -109,8 +113,8 @@ function lanzarBackend(port, archivoPuerto) {
   const raiz = path.join(__dirname, "..");
   const python = process.platform === "win32" ? "python" : "python3";
   return spawn(python,
-    ["-m", "streamlit", "run", path.join("app", "app.py"),
-     `--server.port=${port}`, "--server.headless=true"],
+    ["-m", "uvicorn", "plania.api:app", "--host", "127.0.0.1",
+     `--port=${port}`, "--log-level", "warning"],
     { env, cwd: raiz, windowsHide: true });
 }
 
@@ -160,8 +164,19 @@ async function crearVentana() {
 
     const port = puertoFijo || await esperarPuerto(archivo);
     const url = `http://127.0.0.1:${port}`;
-    await esperarServidor(url);
-    if (win && !win.isDestroyed()) await win.loadURL(url);
+    await esperarServidor(url + "/salud");
+
+    // La interfaz se carga desde el disco, no desde el servidor: es un
+    // programa instalado, no una página. Al motor sólo se le piden datos.
+    //
+    // El puerto viaja en la query y no inyectado con executeJavaScript: eso
+    // último obliga a recargar para que los scripts lo vean, y la recarga
+    // crea un contexto nuevo que borra justamente lo que se acababa de
+    // inyectar. Con la query está disponible desde la primera línea que corre.
+    if (win && !win.isDestroyed()) {
+      await win.loadFile(path.join(__dirname, "renderer", "ui", "index.html"),
+        { query: { api: url } });
+    }
   } catch (e) {
     mostrarError(e.message);
   }
