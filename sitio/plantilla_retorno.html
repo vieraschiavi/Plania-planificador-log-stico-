@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plania</title>
+<link rel="icon" type="image/png" href="/assets/plania_icon.png">
+<!--
+  Página de retorno de MercadoPago (/gracias, /error, /pendiente).
+
+  Existe porque el checkout la nombra: `back_urls` en backend_venta/app.py
+  manda al comprador acá después de pagar. Sin estos tres archivos, alguien
+  que paga de verdad termina en un 404 del sitio estático — cobrado y sin
+  nada en la mano.
+
+  Es una sola plantilla para las tres porque comparten todo menos el estado.
+  A diferencia del resto del sitio, elige idioma en el navegador en vez de
+  generarse tres veces: MercadoPago vuelve a una URL fija sin prefijo de
+  idioma (`/gracias`, no `/es/gracias`), y no vale la pena redirigir a
+  alguien que acaba de pagar. Como no se indexa (`noindex`), lo que la i18n
+  estática aportaba —SEO y nada de parpadeo— acá no aplica.
+-->
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="/assets/plania.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="marca" href="/">{{_marca}}</a>
+  </div>
+</header>
+
+<main id="contenido">
+<section class="claro">
+  <div class="wrap estrecho c">
+    <h1 id="titulo">·</h1>
+    <p class="sub-c" id="bajada"></p>
+
+    <!-- Solo en /gracias: la licencia y la descarga. Arranca oculto y lo
+         muestra el script cuando el backend confirma el pago. -->
+    <div id="entrega" hidden>
+      <p class="nota-c" id="lic-nota"></p>
+      <textarea id="licencia" readonly rows="4" style="width:100%"></textarea>
+      <p><a class="btn btn-amber" id="bajar" href="#" hidden>·</a></p>
+    </div>
+
+    <p class="nota-c" id="ayuda"></p>
+    <p><a class="btn btn-dark btn-sm" id="volver" href="/">·</a></p>
+  </div>
+</section>
+</main>
+
+<footer class="pie">
+  <div class="wrap pie-in">
+    <p class="marca marca-pie">{{_marca}}</p>
+  </div>
+</footer>
+
+<script>{{_backend_js}}
+(function () {
+  "use strict";
+  var ESTADO = "{{_estado}}";
+  var BACKEND = (window.PLANIA_BACKEND || "").replace(/\/$/, "");
+  var idioma = (navigator.language || "es").slice(0, 2).toLowerCase();
+  if (["es", "en", "pt"].indexOf(idioma) < 0) idioma = "es";
+  document.documentElement.lang = idioma;
+
+  var T = {
+    es: {
+      gracias_t: "Gracias por tu compra",
+      gracias_b: "Estamos confirmando el pago con MercadoPago…",
+      pendiente_t: "Tu pago quedó pendiente",
+      pendiente_b: "MercadoPago todavía no lo confirmó. Cuando lo apruebe te llega la licencia; también podés volver a esta página más tarde.",
+      error_t: "El pago no se completó",
+      error_b: "No se hizo ningún cargo. Podés intentar de nuevo o escribirnos y lo resolvemos.",
+      lic_nota: "Esta es tu licencia. Copiala y pegala en Plania, en «Planes y licencia» → Activar.",
+      bajar: "Descargar el instalador",
+      buscando: "Buscando tu licencia…",
+      sin_pago: "No encontramos el identificador del pago en la dirección. Escribinos a ventas@plania.uy con tu comprobante y te la mandamos.",
+      no_aprobado: "MercadoPago todavía no aprobó el pago. Refrescá esta página en un rato; si en una hora sigue igual, escribinos a ventas@plania.uy.",
+      sin_backend: "Escribinos a ventas@plania.uy con tu comprobante y te enviamos la licencia.",
+      error_red: "No pudimos conectar con el servidor. Refrescá en un rato o escribinos a ventas@plania.uy.",
+      volver: "Volver al inicio"
+    },
+    en: {
+      gracias_t: "Thank you for your purchase",
+      gracias_b: "We are confirming the payment with MercadoPago…",
+      pendiente_t: "Your payment is pending",
+      pendiente_b: "MercadoPago has not confirmed it yet. Your licence arrives once it is approved; you can also come back to this page later.",
+      error_t: "The payment did not go through",
+      error_b: "You were not charged. You can try again or write to us and we will sort it out.",
+      lic_nota: "This is your licence. Copy it into Plania, under “Plans and licence” → Activate.",
+      bajar: "Download the installer",
+      buscando: "Looking for your licence…",
+      sin_pago: "We could not find the payment id in the address. Write to ventas@plania.uy with your receipt and we will send it.",
+      no_aprobado: "MercadoPago has not approved the payment yet. Refresh this page shortly; if it is still the same in an hour, write to ventas@plania.uy.",
+      sin_backend: "Write to ventas@plania.uy with your receipt and we will send you the licence.",
+      error_red: "We could not reach the server. Refresh shortly or write to ventas@plania.uy.",
+      volver: "Back to home"
+    },
+    pt: {
+      gracias_t: "Obrigado pela sua compra",
+      gracias_b: "Estamos confirmando o pagamento com o MercadoPago…",
+      pendiente_t: "Seu pagamento ficou pendente",
+      pendiente_b: "O MercadoPago ainda não confirmou. Assim que aprovar, a licença chega; você também pode voltar a esta página mais tarde.",
+      error_t: "O pagamento não foi concluído",
+      error_b: "Nenhuma cobrança foi feita. Você pode tentar de novo ou falar conosco que resolvemos.",
+      lic_nota: "Esta é a sua licença. Copie e cole no Plania, em “Planos e licença” → Ativar.",
+      bajar: "Baixar o instalador",
+      buscando: "Procurando a sua licença…",
+      sin_pago: "Não encontramos o identificador do pagamento no endereço. Escreva para ventas@plania.uy com o comprovante e enviamos.",
+      no_aprobado: "O MercadoPago ainda não aprovou o pagamento. Atualize esta página em instantes; se em uma hora continuar igual, escreva para ventas@plania.uy.",
+      sin_backend: "Escreva para ventas@plania.uy com o comprovante e enviamos a licença.",
+      error_red: "Não conseguimos conectar ao servidor. Atualize em instantes ou escreva para ventas@plania.uy.",
+      volver: "Voltar ao início"
+    }
+  };
+  var t = T[idioma];
+
+  var $ = function (s) { return document.querySelector(s); };
+  $("#titulo").textContent = t[ESTADO + "_t"];
+  $("#bajada").textContent = t[ESTADO + "_b"];
+  $("#volver").textContent = t.volver;
+  $("#volver").setAttribute("href", "/" + idioma + "/");
+
+  if (ESTADO !== "gracias") return;
+
+  // MercadoPago vuelve con ?payment_id=…&status=…&preference_id=…
+  var q = new URLSearchParams(window.location.search);
+  var pago = q.get("payment_id") || q.get("collection_id");
+  if (!pago) { $("#ayuda").textContent = t.sin_pago; return; }
+  if (!BACKEND) { $("#ayuda").textContent = t.sin_backend; return; }
+
+  $("#ayuda").textContent = t.buscando;
+  fetch(BACKEND + "/licencias/por-pago/" + encodeURIComponent(pago))
+    .then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
+    })
+    .then(function (res) {
+      if (!res.ok) {
+        $("#ayuda").textContent = res.status === 404 ? t.no_aprobado : t.error_red;
+        return;
+      }
+      $("#bajada").textContent = "";
+      $("#ayuda").textContent = "";
+      $("#lic-nota").textContent = t.lic_nota;
+      // textContent y no innerHTML: la licencia viene del backend y nunca se
+      // interpreta como HTML, aunque hoy sea un JWT que no puede contenerlo.
+      $("#licencia").textContent = res.d.licencia || "";
+      $("#entrega").hidden = false;
+      if (res.d.token_descarga) {
+        var b = $("#bajar");
+        b.setAttribute("href", BACKEND + "/descargar/" + encodeURIComponent(res.d.token_descarga));
+        b.textContent = t.bajar;
+        b.hidden = false;
+      }
+    })
+    .catch(function () { $("#ayuda").textContent = t.error_red; });
+})();
+</script>
+</body>
+</html>

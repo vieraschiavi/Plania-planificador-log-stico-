@@ -158,6 +158,19 @@ def _mp_token() -> str:
     return t
 
 
+def _url_propia(request: Request) -> str:
+    """URL pública de ESTE servicio, deducida del pedido entrante.
+
+    Se fuerza `https` salvo en localhost: detrás del proxy de Render/Fly la
+    conexión interna llega en claro, así que `request.base_url` diría `http://`
+    — y MercadoPago rechaza un `notification_url` que no sea HTTPS.
+    """
+    url = str(request.base_url).rstrip("/")
+    if url.startswith("http://") and "localhost" not in url and "127.0.0.1" not in url:
+        url = "https://" + url[len("http://"):]
+    return url
+
+
 @app.post("/checkout")
 @limiter.limit("10/minute")
 async def checkout(request: Request, payload: dict):
@@ -185,8 +198,14 @@ async def checkout(request: Request, payload: dict):
         "back_urls": {"success": f"{base}/gracias", "failure": f"{base}/error",
                       "pending": f"{base}/pendiente"},
         "auto_return": "approved",
+        # El webhook lo atiende ESTE servicio, no la landing. Antes el valor
+        # por defecto se armaba sobre `base` (plania.uy), que es un sitio
+        # estático en Vercel: MercadoPago notificaba a una URL que devuelve
+        # 404, así que un pago aprobado no emitía licencia salvo que el
+        # comprador entrara a /gracias y la rescatara a mano. Ahora sale de la
+        # URL por la que llegó este mismo pedido.
         "notification_url": os.environ.get(
-            "PLANIA_WEBHOOK_URL", f"{base}/webhooks/mercadopago"),
+            "PLANIA_WEBHOOK_URL", f"{_url_propia(request)}/webhooks/mercadopago"),
     }
     r = requests.post(f"{MP_API}/checkout/preferences", json=pref,
                       headers={"Authorization": f"Bearer {_mp_token()}"}, timeout=15)

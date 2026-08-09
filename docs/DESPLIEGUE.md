@@ -32,6 +32,35 @@ JWT. Sin esa variable apuntando al backend real, nadie puede activar nada
 
 ## 2. Backend de venta (licencias + MercadoPago)
 
+> **Mientras esto no esté desplegado, Plania no cobra y nadie puede activar
+> una licencia** — ni una paga: activar consulta `GET
+> {backend}/licencias/estado`. No es una limitación del código, es que el
+> servicio no está corriendo en ningún lado. Todo lo demás de esta guía
+> depende de este paso.
+
+### La vía corta: blueprint de Render
+
+`render.yaml` en la raíz deja el servicio desplegable sin decidir nada:
+
+1. render.com → **New → Blueprint** → conectar este repositorio.
+2. Render lee `render.yaml` y pide los dos secretos que no puede inventar
+   (`MP_ACCESS_TOKEN` y `ANTHROPIC_API_KEY`).
+3. Deploy. Queda una URL tipo `https://plania-backend.onrender.com`.
+
+Ese archivo ya resuelve las tres cosas que se rompen en silencio si se
+despliega a mano: el secreto de firma queda fijo (`generateValue`) en vez de
+regenerarse en cada reinicio e invalidar todas las licencias emitidas; la
+SQLite y la config cifrada van a un disco persistente en vez del sistema de
+archivos efímero del contenedor; y se instala `requirements-backend.txt`
+—unos 20 MB— en lugar del `requirements.txt` completo con pandas, pyarrow y
+streamlit, que el backend no usa.
+
+No hace falta usar Render: el `Procfile` sirve igual en Railway o Fly.io. Lo
+que no se puede saltear, se despliegue donde se despliegue, es el disco
+persistente y el secreto fijo.
+
+### A mano
+
 ```bash
 uvicorn backend_venta.app:app --host 0.0.0.0 --port $PORT
 ```
@@ -48,8 +77,15 @@ uvicorn backend_venta.app:app --host 0.0.0.0 --port $PORT
 | `PLANIA_WEBHOOK_URL` | URL pública de `/webhooks/mercadopago` |
 | `PLANIA_INSTALADOR_PATH` | ruta del `Plania_Setup.exe` publicado para `/descargar/{token}` |
 
-Después del deploy: cargar `PLANIA_WEBHOOK_URL` en el panel de MercadoPago
-(Tus integraciones → Webhooks → evento `payment`).
+Después del deploy: cargar la URL del webhook en el panel de MercadoPago
+(Tus integraciones → Webhooks → evento `payment`), y ponerla también en
+`PLANIA_WEBHOOK_URL` para que las dos digan exactamente lo mismo.
+
+Si no se setea, el checkout la deduce de la URL por la que le llegó el
+pedido (`https://<este-servicio>/webhooks/mercadopago`), que es lo correcto.
+Antes la deducía de `PLANIA_PUBLIC_URL` —la landing— y eso mandaba las
+notificaciones de pago contra un 404 de Vercel: el pago se cobraba y la
+licencia no se emitía sola.
 
 ### Tu propia licencia, sin restricciones
 
@@ -122,10 +158,36 @@ PLANIA_BACKEND=https://api.plania.uy PLANIA_DOMINIO=https://plania.uy \
 Si el sitio queda en `plania-xxxx.vercel.app` y `dominio` sigue diciendo
 `plania.uy`, Google va a indexar mal.
 
-**Con `backend` vacío la web informa pero no vende**: el formulario de demo
-muestra la dirección de contacto y los botones de plan llevan a "Hablar con
-ventas". Es a propósito — es preferible eso a simular un checkout que
-fallaría. El propio `build.py` lo dice en pantalla al terminar.
+**Con `backend` vacío la web informa pero no vende**, y además *lo dice*: los
+botones de plan pasan a "Hablar con ventas", la nota de la demo pasa de "la
+licencia llega al instante" a "te la enviamos a mano, en el día", y no se
+nombra MercadoPago en ninguna página. Los textos alternativos están en
+`SIN_BACKEND`, en `sitio/build.py`.
+
+Esto no era así: el botón decía "Pagar con MercadoPago" y, sin backend, lo
+que hacía era bajar hasta el formulario de contacto (que abre el cliente de
+correo). Que el JavaScript se comporte distinto no alcanza — el visitante lee
+el botón, no el JavaScript. Un botón que promete cobro automático y entrega un
+mailto es publicidad de algo que no existe.
+
+Para que no vuelva a pasar por descuido, `build.py` **corta el build** si una
+página generada sin backend nombra MercadoPago, venga el texto de `i18n/` o de
+la plantilla. En cuanto `backend` se configura, los textos de venta vuelven
+solos: ahí la promesa es cierta.
+
+### Páginas de retorno del pago
+
+`sitio/build.py` genera también `/gracias/`, `/pendiente/` y `/error/` (una
+sola plantilla, `sitio/plantilla_retorno.html`, que elige idioma en el
+navegador). Son las direcciones que el checkout le pasa a MercadoPago en
+`back_urls`: sin ellas, quien paga de verdad vuelve a un 404 del sitio
+estático, cobrado y con las manos vacías.
+
+`/gracias/` no se limita a agradecer: toma el `payment_id` que MercadoPago
+deja en la URL, pide `GET {backend}/licencias/por-pago/{payment_id}` y le
+muestra al comprador su licencia y el link de descarga del instalador. Ese
+endpoint verifica el pago contra la API real de MercadoPago y es idempotente,
+así que sirve igual si el webhook todavía no llegó.
 
 ### Dominio
 
@@ -261,11 +323,19 @@ a pedir la aceptación.
 
 ## Checklist de salida a producción
 
-1. [ ] Backend desplegado con los 7 secretos de arriba.
+1. [ ] Backend desplegado con los 7 secretos de arriba (blueprint de Render o
+       el host que sea). **Hasta acá el producto no cobra ni activa
+       licencias**: todo lo de abajo depende de este punto.
 2. [ ] Webhook cargado en MercadoPago y probado con un pago de $1 (modo test).
+       Verificar que la URL cargada en MP sea la del backend, no la de la
+       landing.
 3. [ ] Web publicada en Vercel apuntando al backend, y `plania.uy` apuntando a
-       Vercel. Probar `/es/`, `/en/` y `/pt/`, y que `/` mande al idioma del
-       navegador.
+       Vercel. Probar `/es/`, `/en/` y `/pt/`, que `/` mande al idioma del
+       navegador, y que `/gracias/`, `/pendiente/` y `/error/` abran (son el
+       retorno del pago).
+3b. [ ] Con el backend puesto, confirmar que el botón de plan volvió a decir
+       "Pagar con MercadoPago". Si sigue diciendo "Hablar con ventas", el
+       `build.py` corrió sin `backend` configurado.
 4. [ ] `python3 sitio/verificar_layout.py` en verde (nada se solapa).
 4b. [ ] `python3 packaging/verificar_pantallas.py` en verde: las 12 pantallas
        se dibujan sin un traceback a la vista. Tarda unos minutos porque abre
