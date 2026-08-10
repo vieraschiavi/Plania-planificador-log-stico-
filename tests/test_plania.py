@@ -379,6 +379,149 @@ def test_checkout_exito_crea_preferencia_con_el_token_correcto():
         os.environ.pop("MP_ACCESS_TOKEN", None)
 
 
+def test_el_blueprint_de_despliegue_no_pierde_las_licencias_en_cada_deploy():
+    """`render.yaml` tiene que dejar el backend desplegable sin pisar ninguna
+    de las tres minas del despliegue a mano.
+
+    Las tres son silenciosas —el servicio arranca igual y se ve sano— y las
+    tres se pagan con licencias de clientes:
+
+      1. Secreto de firma autogenerado: si `PLANIA_LICENSE_SECRET` no está
+         fijo, cada reinicio puede generar uno nuevo y TODAS las licencias ya
+         emitidas dejan de validar de golpe.
+      2. Base efímera: la SQLite de `uso.py` (quién consumió su prueba, qué
+         pagos ya se procesaron, qué tokens de descarga siguen vivos) tiene
+         que vivir en el disco persistente, no en el contenedor.
+      3. Config efímera: `plania/config.py` cae al archivo cifrado porque en
+         un servidor no hay keyring del SO, así que también necesita el disco.
+    """
+    import yaml
+
+    cfg = yaml.safe_load(open(os.path.join(RAIZ, "render.yaml"), encoding="utf-8"))
+    servicio = cfg["services"][0]
+    envs = {e["key"]: e for e in servicio["envVars"]}
+
+    assert envs["PLANIA_LICENSE_SECRET"].get("generateValue") is True, \
+        "el secreto de firma tiene que quedar fijo, no autogenerarse en cada arranque"
+
+    montaje = servicio["disk"]["mountPath"]
+    for clave in ("PLANIA_USO_DB", "PLANIA_CONFIG_DIR"):
+        assert envs[clave]["value"].startswith(montaje), \
+            f"{clave} no apunta al disco persistente ({montaje}): se pierde en cada deploy"
+
+    # Los planes gratuitos de Render no admiten discos: declarar uno con
+    # plan free es un blueprint que ni siquiera arranca.
+    assert servicio["plan"] != "free", "un plan free no puede montar el disco de arriba"
+    assert servicio["healthCheckPath"] == "/salud"
+    assert "backend_venta.app:app" in servicio["startCommand"]
+    assert "requirements-backend.txt" in servicio["buildCommand"]
+
+    # Los secretos que no se pueden inventar por defecto se piden, no se
+    # hardcodean.
+    for clave in ("MP_ACCESS_TOKEN", "ANTHROPIC_API_KEY"):
+        assert envs[clave].get("sync") is False, f"{clave} tiene que pedirse al desplegar"
+        assert "value" not in envs[clave], f"{clave} no puede venir escrito en el repo"
+
+
+def test_los_requisitos_del_backend_cubren_lo_que_el_backend_importa():
+    """`requirements-backend.txt` existe para no subir pandas ni streamlit al
+    servidor. El riesgo de esa poda es quedarse corto: el deploy construye
+    bien y el servicio muere en el primer import."""
+    import re
+
+    declarados = set()
+    for linea in open(os.path.join(RAIZ, "requirements-backend.txt"), encoding="utf-8"):
+        linea = linea.split("#")[0].strip()
+        if linea:
+            declarados.add(re.split(r"[><=\[]", linea)[0].strip().lower())
+
+    # Módulos de terceros que importa el backend y todo lo que el backend
+    # importa de plania/ (config y auditoria).
+    fuentes = [os.path.join(RAIZ, "backend_venta", f)
+               for f in os.listdir(os.path.join(RAIZ, "backend_venta")) if f.endswith(".py")]
+    fuentes += [os.path.join(RAIZ, "plania", "config.py"),
+                os.path.join(RAIZ, "plania", "auditoria.py")]
+
+    paquete = {"jwt": "pyjwt", "fastapi": "fastapi", "uvicorn": "uvicorn",
+               "requests": "requests", "slowapi": "slowapi",
+               "portalocker": "portalocker", "cryptography": "cryptography"}
+    estandar_o_propio = {"os", "sys", "json", "re", "time", "secrets", "sqlite3",
+                         "hashlib", "getpass", "shutil", "contextlib", "datetime",
+                         "typing", "__future__", "backend_venta", "plania", "keyring"}
+
+    faltan = set()
+    for ruta in fuentes:
+        for m in re.finditer(r"^\s*(?:import|from)\s+([\w.]+)", open(ruta, encoding="utf-8").read(),
+                             re.MULTILINE):
+            raiz_mod = m.group(1).split(".")[0]
+            if raiz_mod in estandar_o_propio:
+                continue
+            esperado = paquete.get(raiz_mod, raiz_mod).lower()
+            if esperado not in declarados:
+                faltan.add(f"{raiz_mod} (en {os.path.basename(ruta)})")
+    assert not faltan, f"requirements-backend.txt no declara: {sorted(faltan)}"
+
+
+def test_el_webhook_de_mercadopago_no_apunta_a_la_landing_estatica():
+    """`notification_url` tiene que apuntar a ESTE backend, no a plania.uy.
+
+    plania.uy es un sitio estático en Vercel: no existe
+    `/webhooks/mercadopago` ahí. Si el checkout le da esa dirección a
+    MercadoPago, un pago aprobado notifica contra un 404 y la licencia no se
+    emite sola — el cliente paga y no recibe nada hasta que alguien lo
+    resuelve a mano. El default salía de PLANIA_PUBLIC_URL, que es justamente
+    la landing.
+    """
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token"
+    os.environ["PLANIA_PUBLIC_URL"] = "https://plania.uy"
+    os.environ.pop("PLANIA_WEBHOOK_URL", None)
+    try:
+        with patch("backend_venta.app.requests.post") as mock_post:
+            mock_post.return_value = _RespuestaFalsa(
+                ok=True, json_data={"id": "pref-1", "init_point": "https://mp.example/x"})
+            c = TestClient(app, base_url="https://api.plania.uy",
+                           client=("203.0.113.64", 51000))
+            assert c.post("/checkout",
+                          json={"plan": "pro", "email": "x@y.uy"}).status_code == 200
+            pref = mock_post.call_args.kwargs["json"]
+            assert pref["notification_url"] == "https://api.plania.uy/webhooks/mercadopago"
+            # Las back_urls SÍ van a la landing: ahí vuelve el comprador.
+            assert pref["back_urls"]["success"] == "https://plania.uy/gracias"
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+        os.environ.pop("PLANIA_PUBLIC_URL", None)
+
+
+def test_las_paginas_de_retorno_de_mercadopago_existen_en_la_web():
+    """Las tres direcciones a las que el checkout devuelve al comprador tienen
+    que existir en el sitio publicado. Si `back_urls` nombra `/gracias` y en
+    `web/` no hay `gracias/index.html`, quien paga termina en un 404."""
+    import re
+
+    fuente = open(os.path.join(RAIZ, "backend_venta", "app.py"), encoding="utf-8").read()
+    nombradas = set(re.findall(r'\{base\}/(\w+)"', fuente))
+    assert nombradas == {"gracias", "error", "pendiente"}, \
+        f"cambiaron las back_urls del checkout: {nombradas}"
+
+    for pagina in nombradas:
+        ruta = os.path.join(RAIZ, "web", pagina, "index.html")
+        assert os.path.exists(ruta), \
+            f"el checkout manda a /{pagina}/ y no existe {ruta} — correr sitio/build.py"
+
+    # La de gracias es la única que tiene que entregar algo: rescata la
+    # licencia del pago con el payment_id que MercadoPago deja en la URL.
+    gracias = open(os.path.join(RAIZ, "web", "gracias", "index.html"), encoding="utf-8").read()
+    assert "payment_id" in gracias
+    assert "/licencias/por-pago/" in gracias
+    assert "noindex" in gracias, "una página de retorno de pago no se indexa"
+
+
 def test_checkout_plan_no_comprable_y_email_invalido():
     from fastapi.testclient import TestClient
 
@@ -1011,6 +1154,80 @@ def test_la_web_no_finge_vender_sin_backend():
     del entorno["PLANIA_BACKEND"]
     subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
                    check=True, capture_output=True, env=entorno, cwd=RAIZ)
+
+
+def test_la_web_no_promete_mercadopago_si_no_hay_con_que_cobrar():
+    """Sin backend, el botón de plan no puede seguir diciendo «Pagar con
+    MercadoPago».
+
+    Que el JavaScript ya se comporte distinto (baja al formulario de contacto,
+    que abre el cliente de correo) no arregla nada por sí solo: el visitante
+    lee el botón, no el JavaScript. Un botón que promete un cobro automático y
+    entrega un mailto es publicidad de algo que no existe. Con el backend
+    configurado la promesa vuelve sola, porque ahí sí es cierta.
+    """
+    import os, subprocess, sys
+    entorno = {k: v for k, v in os.environ.items() if not k.startswith("PLANIA_")}
+    entorno["PATH"] = os.environ["PATH"]
+
+    def generar():
+        subprocess.run([sys.executable, os.path.join(RAIZ, "sitio", "build.py")],
+                       check=True, capture_output=True, env=entorno, cwd=RAIZ)
+
+    generar()
+    for idioma in ("es", "en", "pt"):
+        for pagina in ("index.html", os.path.join("implementadores", "index.html")):
+            html = open(os.path.join(RAIZ, "web", idioma, pagina), encoding="utf-8").read()
+            assert "MercadoPago" not in html, \
+                f"web/{idioma}/{pagina} nombra MercadoPago sin backend que cobre"
+    es = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
+    assert "Hablar con ventas" in es
+    assert "llega al instante" not in es, "sin backend la licencia se manda a mano"
+
+    entorno["PLANIA_BACKEND"] = "https://api.ejemplo.uy"
+    try:
+        generar()
+        es = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
+        assert "Pagar con MercadoPago" in es, \
+            "con backend configurado el botón vuelve a ser el de pago"
+        assert "llega al instante" in es
+    finally:
+        del entorno["PLANIA_BACKEND"]
+        generar()
+
+
+def test_el_guardarrail_de_promesas_corta_de_verdad():
+    """El control del párrafo anterior no sirve si no puede fallar.
+
+    `verificar_promesas` mira el HTML ya renderizado justamente para agarrar
+    una promesa que entre por un texto nuevo de i18n/ o por la plantilla, sin
+    que nadie se acuerde de actualizar SIN_BACKEND. Acá se comprueba que ese
+    caso corta el build en vez de publicarse.
+    """
+    import sys
+    sys.path.insert(0, os.path.join(RAIZ, "sitio"))
+    import build as sitio_build
+
+    sin_backend = {"backend": ""}
+    con_backend = {"backend": "https://api.ejemplo.uy"}
+    originales = {"p_cta": "Pagar con MercadoPago"}
+
+    with pytest.raises(RuntimeError, match="cobro automático"):
+        sitio_build.verificar_promesas("<p>Pagá con MercadoPago</p>", "es",
+                                       sin_backend, "index.html", {})
+
+    # También si el texto original sobrevivió al reemplazo, aunque no nombre
+    # la marca de la pasarela.
+    with pytest.raises(RuntimeError, match="cobro automático"):
+        sitio_build.verificar_promesas("<button>Pagar con MercadoPago</button>", "es",
+                                       sin_backend, "index.html", originales)
+
+    # Con backend no corta: ahí la promesa es cierta.
+    sitio_build.verificar_promesas("<p>Pagá con MercadoPago</p>", "es",
+                                   con_backend, "index.html", originales)
+    # Y sin promesas tampoco.
+    sitio_build.verificar_promesas("<button>Hablar con ventas</button>", "es",
+                                   sin_backend, "index.html", originales)
 
 
 def test_web_generada_en_los_tres_idiomas():
@@ -1751,6 +1968,43 @@ def _limpiar_licencia_local():
         pconfig.guardar_extra(clave, None)
 
 
+def test_activar_sin_backend_configurado_no_le_echa_la_culpa_a_la_conexion(monkeypatch):
+    """Sin backend desplegado no se puede activar NINGUNA licencia, ni siquiera
+    una paga: activar consulta `GET {backend}/licencias/estado`. Eso hoy es así
+    y el código no lo puede arreglar solo — lo que sí puede es no mentir sobre
+    la causa.
+
+    El mensaje viejo era «Probá de nuevo con internet», que manda a revisar la
+    conexión a alguien cuya conexión anda bien, por un problema que además no
+    es suyo. Cuando el backend quedó en el valor sin configurar, el mensaje lo
+    dice y apunta a dónde escribir.
+    """
+    import jwt as pyjwt
+
+    from plania import config as pconfig
+    from plania import licencia
+
+    monkeypatch.delenv("PLANIA_BACKEND_URL", raising=False)
+    monkeypatch.setattr(pconfig, "leer_extra", lambda *a, **kw: None)
+    token = pyjwt.encode({"sub": "x", "plan": "pro"}, "cualquiera", algorithm="HS256")
+
+    class _SinNadieEscuchando:
+        def get(self, *a, **kw):
+            raise OSError("connection refused")
+
+    r = licencia.activar_licencia(token, cliente_http=_SinNadieEscuchando())
+    assert r["ok"] is False
+    assert r["motivo"] == "sin_backend"
+    assert "internet" not in r["error"].lower()
+    assert "ventas@plania.uy" in r["error"]
+
+    # Con un backend real configurado y caído, sí es un problema de red y el
+    # mensaje vuelve a ser el de siempre.
+    monkeypatch.setenv("PLANIA_BACKEND_URL", "https://api.plania.uy")
+    r = licencia.activar_licencia(token, cliente_http=_SinNadieEscuchando())
+    assert r["motivo"] == "red"
+
+
 def test_un_token_forjado_no_activa_ninguna_licencia():
     """La regresión central: hasta esta versión, activar_licencia() decodificaba
     el JWT con verify_signature=False y solo miraba el vencimiento — cualquiera
@@ -1802,9 +2056,19 @@ def test_activar_licencia_sin_red_no_se_confunde_con_rechazada():
         def get(self, *a, **k):
             raise ConnectionError("simulado: no hay red")
 
-    r = licencia.activar_licencia("a.b.c", cliente_http=_SiempreFalla())
+    r = licencia.activar_licencia("a.b.c", backend_url="https://api.plania.uy",
+                                  cliente_http=_SiempreFalla())
     assert r["ok"] is False
     assert r["motivo"] == "red"
+
+    # La instalación sin backend configurado también falla sin ser un rechazo
+    # —`estado()` la trata igual que a la caída de red, con su tolerancia de
+    # días— pero se distingue para poder explicarle al usuario que el problema
+    # no es su conexión (ver el test de más abajo).
+    r = licencia.activar_licencia("a.b.c", backend_url=licencia._BACKEND_SIN_CONFIGURAR,
+                                  cliente_http=_SiempreFalla())
+    assert r["motivo"] == "sin_backend"
+    assert r["motivo"] != "rechazada"
 
 
 def test_estado_revalida_y_descarta_si_el_backend_rechaza(monkeypatch):

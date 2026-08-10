@@ -1,0 +1,18 @@
+# Plania · dependencias del backend de venta (backend_venta/)
+# ============================================================
+# Aparte de requirements.txt a propósito: el backend NO necesita pandas,
+# numpy, pyarrow, streamlit ni plotly (unos 400 MB entre todos), que son del
+# producto que corre en la PC del cliente. Instalar el requirements completo
+# en el servidor hace que cada deploy tarde varios minutos de más y que la
+# imagen entre justo o no entre en los planes chicos de Render/Fly.
+#
+# Si se agrega un import nuevo en backend_venta/, va acá — y si además lo usa
+# el producto, va en los dos archivos.
+
+fastapi>=0.110
+uvicorn>=0.27
+requests>=2.31        # llamadas a la API de MercadoPago y a la de Anthropic
+PyJWT>=2.7            # licencias firmadas HS256
+slowapi>=0.1.9        # rate limiting de todos los endpoints públicos
+portalocker>=2.8      # plania/auditoria.py escribe el log con lock
+cryptography>=42.0    # plania/config.py cifra config.enc; sin esto cae a texto plano

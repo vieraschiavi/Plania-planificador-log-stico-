@@ -75,9 +75,16 @@ def _ahora() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Valor que queda cuando nadie configuró el backend. Es el puerto donde lo
+# levanta el Procfile en desarrollo, así que sigue sirviendo para probar el
+# circuito en la máquina propia; lo que NO se puede es tratarlo como si fuera
+# un servidor real: en una instalación de cliente ahí no hay nada escuchando.
+_BACKEND_SIN_CONFIGURAR = "http://localhost:8100"
+
+
 def _backend_url() -> str:
     return (os.environ.get("PLANIA_BACKEND_URL")
-            or pconfig.leer_extra("BACKEND_URL") or "http://localhost:8100")
+            or pconfig.leer_extra("BACKEND_URL") or _BACKEND_SIN_CONFIGURAR)
 
 
 def iniciar_demo_si_corresponde() -> None:
@@ -108,9 +115,13 @@ def activar_licencia(jwt_token: str, backend_url: str | None = None,
     Starlette) para poder probar el circuito completo sin sockets reales.
 
     Devuelve `{"ok": bool, "claims": {...}|None, "error": str|None,
-    "motivo": "rechazada"|"red"|None}`. `motivo` distingue "el backend dijo
-    que no" de "no se pudo preguntar", porque `estado()` reacciona distinto
-    a cada caso.
+    "motivo": "rechazada"|"red"|"sin_backend"|"formato"|None}`. `motivo`
+    distingue "el backend dijo que no" de "no se pudo preguntar", porque
+    `estado()` reacciona distinto a cada caso: solo `rechazada` borra la
+    licencia guardada. `sin_backend` es el caso de que esta instalación no
+    tenga backend configurado — se comporta como `red` (tolerancia de días
+    sin reconfirmar), pero el mensaje al usuario no lo manda a revisar su
+    conexión por un problema que no es suyo.
     """
     jwt_token = (jwt_token or "").strip()
     if jwt_token.count(".") != 2:
@@ -131,6 +142,18 @@ def activar_licencia(jwt_token: str, backend_url: str | None = None,
             kwargs["timeout"] = 15
         r = cliente.get(f"{backend}/licencias/estado", **kwargs)
     except Exception:
+        # Distinguir "no hay servidor de licencias configurado" de "no hay
+        # internet": mandar a revisar la conexión a alguien cuya conexión
+        # anda perfecto lo deja dando vueltas por un problema que no es suyo
+        # ni puede resolver. Con el backend sin configurar el problema es del
+        # lado de Plania, y el mensaje tiene que decirlo.
+        if backend == _BACKEND_SIN_CONFIGURAR:
+            return {"ok": False, "motivo": "sin_backend",
+                    "error": "Esta instalación todavía no tiene servidor de "
+                             "licencias configurado, así que no se puede "
+                             "activar. Escribinos a ventas@plania.uy. "
+                             "(Mientras tanto la prueba de 7 días funciona "
+                             "igual, no necesita activación.)"}
         return {"ok": False, "motivo": "red",
                 "error": "No se pudo contactar el servidor de licencias. "
                          "Probá de nuevo con internet."}

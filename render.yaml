@@ -1,0 +1,90 @@
+# Plania · despliegue del backend de venta en un clic
+# ====================================================
+# Este archivo existe porque el backend "estaba listo pero sin desplegar", y
+# eso no es un detalle: sin backend la web no cobra (los botones de plan
+# terminan en el formulario de contacto) y NADIE puede activar una licencia,
+# ni siquiera una paga — activar consulta GET {backend}/licencias/estado.
+#
+# Cómo usarlo:
+#   1. render.com → New → Blueprint → conectar este repositorio.
+#   2. Render lee este archivo y pide los dos secretos de abajo.
+#   3. Deploy. Queda una URL tipo https://plania-backend.onrender.com
+#   4. Con esa URL:
+#        - sitio/sitio.json → "backend": "https://…"  y  python3 sitio/build.py
+#          (recién ahí la web vuelve a decir "Pagar con MercadoPago", porque
+#          recién ahí es verdad — ver SIN_BACKEND en sitio/build.py)
+#        - MercadoPago → Tus integraciones → Webhooks → https://…/webhooks/mercadopago
+#        - PLANIA_BACKEND_URL en el build del programa de escritorio.
+#
+# Render no es obligatorio: el Procfile sirve igual en Railway o Fly.io y el
+# servicio es un uvicorn común. Lo que aporta este archivo es que los tres
+# errores caros del despliegue a mano ya vengan resueltos:
+#   - el secreto de firma se genera UNA vez y queda fijo (generateValue), en
+#     vez de regenerarse en cada reinicio e invalidar las licencias emitidas;
+#   - la base SQLite vive en un disco persistente, no en el sistema de
+#     archivos efímero del contenedor (ahí se perdería en cada deploy: quién
+#     consumió su prueba, qué pagos se procesaron, qué tokens de descarga
+#     siguen vivos);
+#   - se instala requirements-backend.txt, no el completo con pandas y
+#     streamlit, que el backend no usa.
+
+services:
+  - type: web
+    name: plania-backend
+    runtime: python
+    region: oregon
+    # 'starter' y no 'free': los planes gratuitos de Render no admiten discos
+    # persistentes, y sin disco esto pierde las licencias en cada deploy.
+    # También duermen tras 15 minutos sin tráfico, y un webhook de MercadoPago
+    # que llega mientras el servicio duerme puede expirar antes de que
+    # despierte — es decir, un pago cobrado sin licencia emitida.
+    plan: starter
+    buildCommand: pip install -r requirements-backend.txt
+    startCommand: uvicorn backend_venta.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /salud
+    disk:
+      name: datos
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      # --- Se generan solos y quedan fijos -------------------------------
+      # Firma de las licencias. Si esto cambia, TODAS las licencias ya
+      # emitidas dejan de validar de golpe. Por eso se fija acá y no se deja
+      # que backend_venta/licencias.py lo autogenere en cada arranque.
+      - key: PLANIA_LICENSE_SECRET
+        generateValue: true
+      # Token de /licencias/emitir (emisión manual). Se lee desde el panel de
+      # Render → Environment cuando haga falta.
+      - key: PLANIA_BACKEND_ADMIN_TOKEN
+        generateValue: true
+
+      # --- Persistencia en el disco montado ------------------------------
+      # SQLite de uso, trials, pagos procesados y tokens de descarga.
+      - key: PLANIA_USO_DB
+        value: /var/data/uso_licencias.db
+      # Config cifrada de plania/config.py (en el servidor no hay keyring del
+      # SO, así que cae al archivo cifrado: tiene que estar en el disco).
+      - key: PLANIA_CONFIG_DIR
+        value: /var/data/config
+
+      # --- Los tenés que cargar vos (Render los pide al desplegar) -------
+      # Access Token del vendedor en MercadoPago. Sin esto /checkout devuelve
+      # error y el webhook no puede verificar el pago contra la API de MP.
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      # Clave de Anthropic para el gateway medido del copiloto. El cliente
+      # nunca la ve: pega contra este backend, no contra Anthropic.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # URL pública de la landing (back_urls del checkout de MercadoPago).
+      - key: PLANIA_PUBLIC_URL
+        value: https://plania.uy
+      # URL pública de este mismo servicio + /webhooks/mercadopago. Va a mano
+      # porque recién se conoce después del primer deploy, y porque tiene que
+      # coincidir carácter por carácter con la que se cargue en el panel de
+      # MercadoPago.
+      - key: PLANIA_WEBHOOK_URL
+        sync: false
+
+      - key: PYTHON_VERSION
+        value: "3.11"

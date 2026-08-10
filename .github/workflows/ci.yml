@@ -28,7 +28,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Instalar dependencias
-        run: pip install -r requirements.txt pytest httpx
+        # pyyaml: los tests leen render.yaml como YAML de verdad (no como
+        # texto), para que una clave en el nivel equivocado del árbol se note
+        # acá y no en un despliegue.
+        run: pip install -r requirements.txt pytest httpx pyyaml
       - name: Generar base demo
         run: python data/generate_dataset.py --seed 42
       - name: Tests

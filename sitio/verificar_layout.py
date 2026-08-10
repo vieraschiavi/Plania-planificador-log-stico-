@@ -49,6 +49,10 @@ ANCHOS = [(360, 780, "celular"), (768, 1024, "tablet"), (1440, 900, "escritorio"
 # y no se agrega acá, queda sin verificar — y "sin solapamientos" dejaría de
 # ser cierto para lo que no se miró.
 PAGINAS = [("", "inicio"), ("implementadores/", "implementadores")]
+# Páginas sin prefijo de idioma: el retorno de MercadoPago vuelve a una URL
+# fija (`/gracias`, no `/es/gracias`) y elige idioma en el navegador. Se miran
+# una vez cada una, no tres.
+SUELTAS = ["gracias/", "pendiente/", "error/"]
 
 # Contenedores cuyos hijos comparten fila o grilla: son los que pueden
 # pisarse si un texto crece.
@@ -176,11 +180,15 @@ def main() -> int:
     ap.add_argument("--capturas", action="store_true", help="guardar los PNG en sitio/capturas")
     args = ap.parse_args()
 
-    for idioma in IDIOMAS:
-        for ruta, _ in PAGINAS:
-            if not os.path.exists(os.path.join(WEB, idioma, ruta, "index.html")):
-                print(f"Falta web/{idioma}/{ruta}index.html. Corré antes: python3 sitio/build.py")
-                return 1
+    # (URL a visitar, etiqueta para el informe). Las de idioma se multiplican
+    # por los tres; las sueltas van una sola vez.
+    objetivos = [(f"/{i}/{ruta}", f"{i}/{etq}") for i in IDIOMAS for ruta, etq in PAGINAS]
+    objetivos += [(f"/{ruta}", ruta.rstrip("/")) for ruta in SUELTAS]
+
+    for url, _ in objetivos:
+        if not os.path.exists(os.path.join(WEB, url.strip("/"), "index.html")):
+            print(f"Falta web{url}index.html. Corré antes: python3 sitio/build.py")
+            return 1
 
     from playwright.sync_api import sync_playwright
 
@@ -194,32 +202,34 @@ def main() -> int:
             ejecutable = os.environ.get("PLANIA_CHROMIUM", "/opt/pw-browsers/chromium")
             nav = (p.chromium.launch(executable_path=ejecutable)
                    if os.path.exists(ejecutable) else p.chromium.launch())
-            for idioma in IDIOMAS:
-                for ruta, etiqueta_pag in PAGINAS:
-                    for ancho, alto, etiqueta in ANCHOS:
-                        ctx = nav.new_context(viewport={"width": ancho, "height": alto},
-                                              locale=idioma, device_scale_factor=1)
-                        pag = ctx.new_page()
-                        pag.goto(f"http://127.0.0.1:{puerto}/{idioma}/{ruta}", wait_until="load")
-                        pag.wait_for_timeout(700)
+            for url, etiqueta_pag in objetivos:
+                idioma = url.strip("/").split("/")[0]
+                for ancho, alto, etiqueta in ANCHOS:
+                    ctx = nav.new_context(viewport={"width": ancho, "height": alto},
+                                          locale=idioma if idioma in IDIOMAS else "es",
+                                          device_scale_factor=1)
+                    pag = ctx.new_page()
+                    pag.goto(f"http://127.0.0.1:{puerto}{url}", wait_until="load")
+                    pag.wait_for_timeout(700)
 
-                        fallas = pag.evaluate(SONDA, CONTENEDORES)
-                        marca = "OK  " if not fallas else "FALLA"
-                        print(f"  {marca} {idioma}/{etiqueta_pag} · {etiqueta} ({ancho}px)"
-                              + ("" if not fallas else f" · {len(fallas)} problema(s)"))
-                        vistos = set()
-                        for f in fallas:
-                            clave = (f["tipo"], f.get("el", ""), f["detalle"])
-                            if clave in vistos:
-                                continue
-                            vistos.add(clave)
-                            print(f"        [{f['tipo']}] {f.get('el', '')} — {f['detalle']}")
-                        total += len(fallas)
+                    fallas = pag.evaluate(SONDA, CONTENEDORES)
+                    marca = "OK  " if not fallas else "FALLA"
+                    print(f"  {marca} {etiqueta_pag} · {etiqueta} ({ancho}px)"
+                          + ("" if not fallas else f" · {len(fallas)} problema(s)"))
+                    vistos = set()
+                    for f in fallas:
+                        clave = (f["tipo"], f.get("el", ""), f["detalle"])
+                        if clave in vistos:
+                            continue
+                        vistos.add(clave)
+                        print(f"        [{f['tipo']}] {f.get('el', '')} — {f['detalle']}")
+                    total += len(fallas)
 
-                        if args.capturas:
-                            destino = os.path.join(CAPTURAS, f"{idioma}_{etiqueta_pag}_{ancho}.png")
-                            pag.screenshot(path=destino, full_page=True)
-                        ctx.close()
+                    if args.capturas:
+                        nombre = etiqueta_pag.replace("/", "_")
+                        pag.screenshot(path=os.path.join(CAPTURAS, f"{nombre}_{ancho}.png"),
+                                       full_page=True)
+                    ctx.close()
             nav.close()
     finally:
         srv.shutdown()
@@ -228,8 +238,9 @@ def main() -> int:
     if total:
         print(f"{total} problema(s) de maquetación. La web NO está lista para publicar.")
         return 1
-    print(f"Sin solapamientos ni desbordes en 3 idiomas x {len(PAGINAS)} páginas x "
-          f"{len(ANCHOS)} anchos.")
+    print(f"Sin solapamientos ni desbordes en {len(objetivos)} páginas x "
+          f"{len(ANCHOS)} anchos "
+          f"({len(PAGINAS)} en tres idiomas + {len(SUELTAS)} sin idioma).")
     return 0
 
 

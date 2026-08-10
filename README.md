@@ -145,7 +145,7 @@ Al primer arranque se activa sola la **demo de 7 días con todo habilitado**.
 | 📄 **Exportes profesionales** PDF / Word / Excel de cualquier análisis o respuesta del copiloto | `plania/exportes.py` |
 | 🚛 **Rutas de reparto** optimizadas (vecino más cercano + 2-opt, con o sin GPS) | `plania/rutas.py` |
 | 🎁 **Demo 7 días full** sin tarjeta, autoactivada; licencias JWT por plan | `plania/licencia.py` |
-| 💳 **Venta automática con MercadoPago**: checkout + webhook verificado + emisión de licencia + descarga del instalador | `backend_venta/` |
+| 💳 **Venta automática con MercadoPago**: checkout + webhook verificado + emisión de licencia + descarga del instalador — **hace falta desplegar el backend** (`render.yaml`, un clic); sin eso la web no cobra y no se puede activar ninguna licencia | `backend_venta/` |
 | 💻 **Programa PC**: PyInstaller + Inno Setup → `Plania_Setup.exe` y ZIP portable | `packaging/` |
 
 Más detalle comercial: [`docs/COMPARATIVA_COMPETENCIA.md`](docs/COMPARATIVA_COMPETENCIA.md)
