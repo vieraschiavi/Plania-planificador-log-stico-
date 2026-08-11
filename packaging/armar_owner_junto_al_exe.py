@@ -77,20 +77,31 @@ echo.
 echo  === Panel del dueno de Plania ===
 echo.
 
-rem 1. Comprobar que esto se descomprimio DONDE va.
-if not exist "Plania.exe" (
-  echo  [X] No encuentro Plania.exe en esta carpeta.
+rem 1. Encontrar el MOTOR. Hay dos instalaciones posibles y no
+rem    tienen la misma estructura:
+rem
+rem      Instalador liviano / portable:
+rem        <carpeta>\Plania.exe  +  <carpeta>\_internal\
+rem
+rem      Instalador de Electron (ventana propia):
+rem        <carpeta>\Plania.exe            <- la ventana
+rem        <carpeta>\resources\backend\Plania.exe  <- el motor
+rem        <carpeta>\resources\backend\_internal\
+rem
+rem    El panel es una pantalla del MOTOR, asi que el codigo va al
+rem    lado del motor, no al lado de la ventana. Buscar solo
+rem    _internal\ al lado del .exe fallaba en la instalacion de
+rem    Electron, que es justo la que trae el instalador con icono.
+set "MOTOR="
+if exist "_internal\" if exist "Plania.exe" set "MOTOR=."
+if not defined MOTOR if exist "resources\backend\_internal\" set "MOTOR=resources\backend"
+
+if not defined MOTOR (
+  echo  [X] Esta carpeta no parece una instalacion de Plania.
   echo.
   echo      Este archivo va adentro de la carpeta donde instalaste
   echo      Plania. Para encontrarla: boton derecho en el acceso
   echo      directo de Plania ^> Abrir ubicacion del archivo.
-  echo.
-  pause
-  exit /b 1
-)
-if not exist "_internal\" (
-  echo  [X] Encontre Plania.exe pero no la carpeta _internal.
-  echo      Esta no parece una instalacion completa de Plania.
   echo.
   pause
   exit /b 1
@@ -102,22 +113,33 @@ if not exist "owner\" (
   pause
   exit /b 1
 )
+if "%MOTOR%"=="." (
+  echo  Instalacion detectada: Plania liviano / portable.
+) else (
+  echo  Instalacion detectada: Plania con ventana propia ^(Electron^).
+)
 
 rem 2. Copiar el codigo del panel al lado del motor. /Y para que
 rem    volver a correrlo actualice en vez de preguntar por cada uno.
 echo  Copiando el panel...
-xcopy "owner\app\*"    "_internal\app\"    /Y /Q >nul
+xcopy "owner\app\*"    "%MOTOR%\_internal\app\"    /Y /Q >nul
 if errorlevel 1 goto :fallo
-xcopy "owner\plania\*" "_internal\plania\" /Y /Q >nul
+xcopy "owner\plania\*" "%MOTOR%\_internal\plania\" /Y /Q >nul
 if errorlevel 1 goto :fallo
 
-rem 3. Lanzador propio. Es lo unico que cambia respecto de abrir
-rem    Plania normal: la variable que le dice al programa cual de
-rem    las dos pantallas levantar.
+rem 3. Lanzador propio. Llama al MOTOR, nunca a la ventana de
+rem    Electron: esa dibuja la interfaz React, que no tiene las
+rem    pantallas del panel. El motor arranca en modo Streamlit y
+rem    abre el panel en el navegador.
+rem
+rem    PLANIA_MOTOR se limpia a proposito: si quedo puesta de una
+rem    corrida anterior, el motor levantaria la API en vez de la
+rem    pantalla y no se veria nada.
 > "Plania Owner.bat" echo @echo off
 >>"Plania Owner.bat" echo cd /d "%%~dp0"
 >>"Plania Owner.bat" echo set PLANIA_PANEL=owner
->>"Plania Owner.bat" echo start "" "%%~dp0Plania.exe"
+>>"Plania Owner.bat" echo set PLANIA_MOTOR=
+>>"Plania Owner.bat" echo start "" "%%~dp0%MOTOR%\Plania.exe"
 
 rem 4. Accesos directos, con el icono de Plania. Se arman con
 rem    PowerShell porque batch no sabe crear un .lnk.
@@ -173,6 +195,16 @@ setlocal
 cd /d "%~dp0"
 title Plania Owner - desactivar
 
+rem Las dos instalaciones posibles, igual que en ACTIVAR_OWNER.bat.
+set "MOTOR="
+if exist "_internal\" if exist "Plania.exe" set "MOTOR=."
+if not defined MOTOR if exist "resources\backend\_internal\" set "MOTOR=resources\backend"
+if not defined MOTOR (
+  echo  [X] Esta carpeta no parece una instalacion de Plania.
+  pause
+  exit /b 1
+)
+
 echo.
 echo  Sacando el panel del dueno de esta carpeta...
 echo.
@@ -209,6 +241,19 @@ menú Inicio. Abre sin pedir ninguna clave.
 
 El Plania normal sigue funcionando igual, con su propio acceso directo. Son
 dos pantallas del mismo programa, no dos programas.
+
+SIRVE PARA LAS DOS INSTALACIONES
+---------------------------------
+Da igual cuál instalaste: el .bat se da cuenta solo.
+
+  · "Plania Setup 1.0.0.exe"  (ventana propia, Electron + React)
+  · "Plania_Setup_v1.0.0.exe" (liviano, abre en el navegador)
+  · el portable, descomprimido
+
+En la instalación con ventana propia, el panel del dueño abre en el
+navegador y no en la ventana de Electron. No es un error: la ventana dibuja
+la interfaz React, que tiene las pantallas del producto y no las del panel.
+El panel es la pantalla Streamlit del mismo motor.
 
 PARA VOLVER ATRÁS
 -----------------
@@ -253,7 +298,8 @@ def archivos_del_panel() -> list[str]:
 
 def _desactivar(rutas: list[str]) -> str:
     """El .bat de vuelta atrás, con la lista real de archivos a borrar."""
-    lineas = [f'del /q "_internal\\{r.replace("/", chr(92))}" 2>nul' for r in rutas]
+    lineas = [f'del /q "%MOTOR%\\_internal\\{r.replace("/", chr(92))}" 2>nul'
+              for r in rutas]
     return DESACTIVAR.replace("__BORRADOS__", "\n".join(lineas))
 
 
@@ -300,9 +346,15 @@ def verificar(zip_path: str) -> list[str]:
 
     # El .bat tiene que comprobar dónde se está ejecutando antes de copiar:
     # corrido en la carpeta equivocada, dejaría archivos sueltos en cualquier
-    # lado sin decir nada.
-    if 'if not exist "Plania.exe"' not in activar:
-        problemas.append("el .bat no comprueba que esté en la carpeta de Plania")
+    # lado sin decir nada. Y tiene que reconocer las DOS instalaciones: la
+    # liviana (_internal\ al lado del .exe) y la de Electron (el motor vive en
+    # resources\backend\).
+    if 'set "MOTOR=."' not in activar:
+        problemas.append("el .bat no reconoce la instalación liviana/portable")
+    if 'set "MOTOR=resources\\backend"' not in activar:
+        problemas.append("el .bat no reconoce la instalación de Electron")
+    if "if not defined MOTOR (" not in activar:
+        problemas.append("el .bat no corta cuando no está en una instalación de Plania")
     if "PLANIA_PANEL=owner" not in activar:
         problemas.append("el lanzador no fija PLANIA_PANEL=owner: abriría el producto")
 
