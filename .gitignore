@@ -3,6 +3,13 @@ __pycache__/
 .venv/
 dist/
 build/
+# Los instaladores NO van al repositorio: GitHub rechaza cualquier archivo de
+# más de 100 MB y el ZIP portable pesa 138. Van a la página de Releases; acá
+# queda sólo INSTALADOR/CHECKSUMS.txt. Sin estas dos líneas, un build local
+# deja los binarios en la carpeta y el primer `git add .` reintenta el push
+# que ya se rechazó una vez.
+INSTALADOR/*.exe
+INSTALADOR/*.zip
 data/*.csv
 data/*.db
 data/uso_licencias.db
