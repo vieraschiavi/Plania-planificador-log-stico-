@@ -289,9 +289,24 @@ Eso deja tres archivos, todos tuyos:
 
 | Archivo | Qué es | Pide clave |
 |---|---|---|
-| `Plania_Owner_Setup.exe` | Instalador con ícono en el escritorio, entrada en el menú Inicio y desinstalador | **no** |
+| `Plania_Owner_Junto_Al_Exe.zip` | Se descomprime **adentro de la carpeta donde ya está instalado Plania** y se hace doble clic en `ACTIVAR_OWNER.bat`. Deja el panel al lado del producto, con su acceso directo. 37 KB. | **no** |
+| `Plania_Owner_Setup.exe` | Instalador aparte, con ícono en el escritorio, menú Inicio y desinstalador | **no** |
 | `Plania_Owner.zip` | El mismo programa sin instalar | **no** |
 | `Plania_Owner_BAT.zip` | Código + `INICIAR_PLANIA_OWNER.bat`, para una PC donde no podés abrir un `.exe` | sí |
+
+El primero es el camino corto si ya tenés Plania instalado: no instala un
+segundo programa, le agrega la pantalla al que ya está. `DESACTIVAR_OWNER.bat`
+lo saca y deja Plania como estaba.
+
+**Por qué ese ZIP tiene que traer el código y no puede ser un `.bat` solo.**
+Porque el panel no está adentro del ejecutable del cliente: no está escondido
+ni apagado, `proteger_codigo.py` lo saca del build siempre. Ningún archivo
+suelto puede "desbloquearlo" — no hay nada que desbloquear. Lo que sí funciona
+es dejar los cinco módulos al lado del motor: el lanzador ya sabe abrir
+`app/owner.py` cuando encuentra `PLANIA_PANEL=owner`, y resuelve los import
+contra la carpeta del bundle, que es la misma donde viven los compilados.
+Probado contra un árbol compilado con Cython de verdad: los `.py` del panel se
+importan al lado de los `.so`, y los compilados siguen resolviendo a `.so`.
 
 Ninguno va a `INSTALADOR/`, ninguno se adjunta a la release y el workflow
 corta si aparece cualquier `Plania_Owner*` ahí.

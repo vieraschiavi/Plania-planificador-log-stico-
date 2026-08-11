@@ -3481,6 +3481,50 @@ def test_el_panel_del_dueno_no_pide_clave_en_su_propio_ejecutable(monkeypatch):
     assert 'setdefault("STREAMLIT_SERVER_ADDRESS", "127.0.0.1")' in lanzador
 
 
+def test_el_panel_junto_al_exe_trae_el_codigo_porque_el_producto_no_lo_lleva(tmp_path):
+    """El ZIP que se descomprime adentro de la carpeta de Plania instalado.
+
+    Existe porque un `.bat` suelto NO puede activar el panel: el código del
+    panel no está adentro del ejecutable del cliente. No está escondido ni
+    apagado — `proteger_codigo.py` lo saca del build, siempre. Un archivo que
+    prometa "desbloquearlo" no puede funcionar: no hay nada que desbloquear.
+
+    Así que lo que este ZIP tiene que traer es el CÓDIGO. Si algún día se
+    arma sin él, el .bat copiaría nada y el panel no abriría, en silencio.
+    """
+    import importlib.util
+    ruta = os.path.join(RAIZ, "packaging", "armar_owner_junto_al_exe.py")
+    spec = importlib.util.spec_from_file_location("_plania_junto", ruta)
+    junto = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(junto)
+
+    destino = str(tmp_path / "Plania_Owner_Junto_Al_Exe.zip")
+    junto.armar(destino)
+    assert junto.verificar(destino) == []
+
+    with zipfile.ZipFile(destino) as z:
+        nombres = z.namelist()
+        activar = z.read("ACTIVAR_OWNER.bat").decode("utf-8")
+
+    # Los cinco módulos que el producto NO lleva tienen que viajar acá.
+    proteger = _proteger()
+    for carpeta, archivos in proteger.MODULOS_SOLO_OWNER.items():
+        for archivo in archivos:
+            assert f"owner/{carpeta}/{archivo}" in nombres, \
+                f"falta {carpeta}/{archivo}: sin eso el panel no abre"
+
+    # El .bat no puede copiar a ciegas: corrido en la carpeta equivocada
+    # dejaría archivos sueltos en cualquier lado sin decir nada.
+    assert 'if not exist "Plania.exe"' in activar
+    assert 'if not exist "_internal\\"' in activar
+    # Y tiene que existir la vuelta atrás: un instalador que no trae cómo
+    # deshacerse obliga a borrar a mano archivos adentro de _internal\.
+    assert "DESACTIVAR_OWNER.bat" in nombres
+
+    # El nombre cae bajo la guarda que corta la publicación.
+    assert os.path.basename(junto.DESTINO).startswith("Plania_Owner")
+
+
 def test_el_instalador_del_panel_del_dueno_no_se_puede_publicar():
     """El panel ahora tiene su propio instalador, con ícono y desinstalador.
     Ese archivo lleva adentro la facturación y los clientes, así que el nombre
