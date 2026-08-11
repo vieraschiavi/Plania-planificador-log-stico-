@@ -376,6 +376,31 @@ def controles() -> list[tuple[bool, str, str]]:
        "El instalador Electron crea el ícono del escritorio", "")
     ok(nsis.get("createStartMenuShortcut") is not False,
        "El instalador Electron crea la entrada del menú Inicio", "")
+    # Tipos de las opciones de NSIS. electron-builder valida su configuración
+    # contra un esquema y corta antes de construir nada si un valor no es del
+    # tipo que espera — pero eso se descubre recién en Windows, después de los
+    # veinte minutos de PyInstaller. Acá había `"license": false`, y el esquema
+    # sólo acepta texto o null: el paso de Electron habría muerto igual que
+    # murió el de Inno Setup, y por la misma clase de motivo.
+    TIPOS_NSIS = {
+        "oneClick": bool, "allowToChangeInstallationDirectory": bool,
+        "createStartMenuShortcut": bool, "perMachine": bool,
+        "license": str, "shortcutName": str, "uninstallDisplayName": str,
+        "menuCategory": (str, bool), "artifactName": str,
+        "installerLanguages": list, "include": str, "script": str,
+        # createDesktopShortcut acepta true/false o la cadena "always".
+        "createDesktopShortcut": (bool, str),
+    }
+    malos = [f"{k}={v!r}" for k, v in nsis.items()
+             if k in TIPOS_NSIS and not isinstance(v, TIPOS_NSIS[k])]
+    desconocidos = [k for k in nsis if k not in TIPOS_NSIS]
+    ok(not malos, "Las opciones del instalador Electron tienen el tipo correcto",
+       f"electron-builder rechaza su propia configuración y no construye: {malos}")
+    ok(not desconocidos,
+       "No hay opciones inventadas en la configuración de NSIS",
+       f"{desconocidos}: el esquema de electron-builder no admite claves de más "
+       "(additionalProperties: false), así que corta el build")
+
     icono = pkg.get("build", {}).get("win", {}).get("icon", "")
     if icono:
         ruta = os.path.normpath(os.path.join(RAIZ, "desktop", icono))
