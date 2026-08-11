@@ -3687,13 +3687,33 @@ def test_el_release_automatico_no_publica_en_la_pagina_de_releases():
     """El push automático a main refresca INSTALADOR/, pero NO tiene que crear
     una entrada nueva en Releases por cada commit — eso es una decisión de
     versión, reservada a un tag o a "Run workflow" manual."""
-    wf = _release_yml()
-    i = wf.index("Publicar release con las descargas")
-    bloque = wf[i:i + 400]
-    assert "if:" in bloque, "el paso que publica en Releases tiene que estar condicionado"
-    linea_if = [l for l in bloque.splitlines() if "if:" in l][0]
-    assert "github.ref_type == 'tag'" in linea_if and "workflow_dispatch" in linea_if, \
+    # La condición se lee del YAML ya parseado y no como líneas de texto: pasó
+    # a ser multilínea (`if: >-`) al agregar el modo "solo verificar", y el
+    # control anterior —que miraba la primera línea que contuviera "if:"— se
+    # rompió sin que hubiera nada mal.
+    import yaml
+    wf = yaml.safe_load(_release_yml())
+    pasos = wf["jobs"]["ejecutables-windows"]["steps"]
+    publicar = next(p for p in pasos
+                    if p.get("name") == "Publicar release con las descargas")
+    condicion = publicar.get("if", "")
+    assert condicion, "el paso que publica en Releases tiene que estar condicionado"
+    assert "github.ref_type == 'tag'" in condicion and "workflow_dispatch" in condicion, \
         "el paso de Releases tiene que saltearse en un push automático a main"
+
+    # Y una corrida manual con "solo verificar" no puede publicar: existe para
+    # poder construir sobre una rama y ver si compila —por ejemplo después de
+    # arreglar el instalador— sin dejar binarios en la rama por defecto ni
+    # crear una entrada de Release.
+    commitear = next(p for p in pasos if p.get("name") == "Commitear INSTALADOR/")
+    for paso, cond in (("Publicar release", condicion),
+                       ("Commitear INSTALADOR/", commitear.get("if", ""))):
+        assert "solo_verificar" in cond, \
+            f"'{paso}' corre igual con solo_verificar activado"
+    # YAML 1.1 lee `on:` como el booleano True, no como la cadena "on".
+    disparadores = wf.get("on", wf.get(True))
+    assert "solo_verificar" in disparadores["workflow_dispatch"]["inputs"], \
+        "el modo solo verificar tiene que ser una opción del Run workflow"
 
 
 def test_el_job_caro_de_windows_esta_gateado_por_el_de_linux():
