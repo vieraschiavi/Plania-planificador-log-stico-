@@ -3514,15 +3514,65 @@ def test_el_panel_junto_al_exe_trae_el_codigo_porque_el_producto_no_lo_lleva(tmp
                 f"falta {carpeta}/{archivo}: sin eso el panel no abre"
 
     # El .bat no puede copiar a ciegas: corrido en la carpeta equivocada
-    # dejaría archivos sueltos en cualquier lado sin decir nada.
-    assert 'if not exist "Plania.exe"' in activar
-    assert 'if not exist "_internal\\"' in activar
+    # dejaría archivos sueltos en cualquier lado sin decir nada. (Qué
+    # instalaciones reconoce lo cubre el test de más abajo.)
+    assert "if not defined MOTOR (" in activar
     # Y tiene que existir la vuelta atrás: un instalador que no trae cómo
     # deshacerse obliga a borrar a mano archivos adentro de _internal\.
     assert "DESACTIVAR_OWNER.bat" in nombres
 
     # El nombre cae bajo la guarda que corta la publicación.
     assert os.path.basename(junto.DESTINO).startswith("Plania_Owner")
+
+
+def test_el_bat_del_owner_sirve_para_las_dos_instalaciones(tmp_path):
+    """Hay DOS instalaciones de Plania y no tienen la misma estructura:
+
+        liviano/portable   <c>\\Plania.exe  +  <c>\\_internal\\
+        Electron           <c>\\Plania.exe                    <- la ventana
+                           <c>\\resources\\backend\\Plania.exe  <- el motor
+                           <c>\\resources\\backend\\_internal\\
+
+    El panel es una pantalla del MOTOR, así que el código va al lado del
+    motor. La primera versión de este .bat buscaba `_internal\\` al lado del
+    .exe y nada más: en la instalación de Electron —justamente la del
+    instalador con ícono, la que más se va a usar— no encontraba nada y
+    abortaba con "esta no parece una instalación completa".
+
+    Y el lanzador tiene que llamar al motor, nunca a la ventana de Electron:
+    esa dibuja la interfaz React, que no tiene las pantallas del panel.
+    """
+    import importlib.util
+    ruta = os.path.join(RAIZ, "packaging", "armar_owner_junto_al_exe.py")
+    spec = importlib.util.spec_from_file_location("_plania_junto2", ruta)
+    junto = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(junto)
+
+    destino = str(tmp_path / "z.zip")
+    junto.armar(destino)
+    with zipfile.ZipFile(destino) as z:
+        activar = z.read("ACTIVAR_OWNER.bat").decode("utf-8")
+        desactivar = z.read("DESACTIVAR_OWNER.bat").decode("utf-8")
+
+    # Las dos rutas de detección, cada una con su condición.
+    assert 'if exist "_internal\\" if exist "Plania.exe" set "MOTOR=."' in activar, \
+        "falta detectar la instalación liviana/portable"
+    assert 'if exist "resources\\backend\\_internal\\" set "MOTOR=resources\\backend"' \
+        in activar, "falta detectar la instalación de Electron"
+
+    # Se copia y se borra usando el motor detectado, no una ruta fija.
+    for guion, que in ((activar, "copia"), (desactivar, "borrado")):
+        assert "%MOTOR%\\_internal\\" in guion, \
+            f"el {que} usa una ruta fija: falla en una de las dos instalaciones"
+
+    # El lanzador arranca el motor, con la pantalla del panel y sin el modo
+    # API (que levantaría la interfaz de Electron y no se vería nada).
+    lanzador = activar[activar.index('> "Plania Owner.bat"'):]
+    assert "PLANIA_PANEL=owner" in lanzador
+    assert "PLANIA_MOTOR=" in lanzador, \
+        "sin limpiar PLANIA_MOTOR, una corrida anterior en modo API deja el panel en blanco"
+    assert "%MOTOR%\\Plania.exe" in lanzador, \
+        "el lanzador apunta a la ventana de Electron en vez de al motor"
 
 
 def test_el_instalador_del_panel_del_dueno_no_se_puede_publicar():
