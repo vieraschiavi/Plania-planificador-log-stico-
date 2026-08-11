@@ -3429,6 +3429,90 @@ def test_el_producto_es_uno_solo_para_el_dueno_y_para_quien_lo_compra(tmp_path):
         os.environ.pop("PLANIA_EDICION", None)
 
 
+def test_el_panel_del_dueno_no_pide_clave_en_su_propio_ejecutable(monkeypatch):
+    """El dueño no tiene que ponerle contraseña a su propia máquina.
+
+    Y no es un atajo: el token no protegía nada en ese escenario. Este panel
+    se distribuye en un ejecutable que no se publica, no va a INSTALADOR/, no
+    se adjunta a ninguna release, y el panel ni siquiera viaja dentro del
+    producto. Quien tiene ese archivo es porque lo compiló. Lo que protege el
+    panel es eso, no una clave que termina anotada al lado del teclado.
+
+    Pero SOLO en ese escenario: se comprueban las dos condiciones por
+    separado, porque cada una sola alcanzaría para dejar el panel abierto
+    donde sí importa.
+    """
+    import importlib.util
+    ruta = os.path.join(RAIZ, "app", "owner.py")
+    fuente = open(ruta, encoding="utf-8").read()
+
+    # Se extrae la función sola: importar app/owner.py entero levanta Streamlit
+    # y dibuja el panel.
+    inicio = fuente.index("def _es_el_programa_instalado")
+    fin = fuente.index("esperado = _token_esperado()")
+    ambito: dict = {"os": os, "sys": sys}
+    exec(compile(fuente[inicio:fin], ruta, "exec"), ambito)
+    es_instalado = ambito["_es_el_programa_instalado"]
+
+    # 1. Corriendo desde el repo (sin congelar), pide token aunque escuche en
+    #    loopback: así se lo prueba en desarrollo, y así puede quedar levantado
+    #    sin querer en una máquina compartida.
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setenv("STREAMLIT_SERVER_ADDRESS", "127.0.0.1")
+    assert es_instalado() is False, "sin congelar tiene que seguir pidiendo token"
+
+    # 2. Congelado pero escuchando en toda la red —un despliegue en un
+    #    servidor, un contenedor— también pide token: ahí hay red del otro
+    #    lado, y el ejecutable ya no es prueba de nada.
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv("STREAMLIT_SERVER_ADDRESS", "0.0.0.0")
+    assert es_instalado() is False, "servido por red tiene que pedir token"
+
+    # 3. Las dos juntas: es el programa instalado en la máquina del dueño.
+    monkeypatch.setenv("STREAMLIT_SERVER_ADDRESS", "127.0.0.1")
+    assert es_instalado() is True
+
+    # El lanzador es el que fija esa dirección, y tiene que seguir siendo
+    # loopback: si algún día pasa a 0.0.0.0, este panel dejaría de abrirse solo
+    # (molesto) — pero lo que importa es lo otro, que no quede escuchando en la
+    # red con la facturación adentro.
+    lanzador = open(os.path.join(RAIZ, "packaging", "plania_launcher.py"),
+                    encoding="utf-8").read()
+    assert 'setdefault("STREAMLIT_SERVER_ADDRESS", "127.0.0.1")' in lanzador
+
+
+def test_el_instalador_del_panel_del_dueno_no_se_puede_publicar():
+    """El panel ahora tiene su propio instalador, con ícono y desinstalador.
+    Ese archivo lleva adentro la facturación y los clientes, así que el nombre
+    tiene que caer bajo la misma guarda que ya corta la publicación."""
+    iss = open(os.path.join(RAIZ, "packaging", "instalador_owner.iss"),
+               encoding="utf-8").read()
+
+    m = re.search(r"OutputBaseFilename=(\S+)", iss)
+    assert m, "el instalador del panel no declara nombre de salida"
+    assert m.group(1).startswith("Plania_Owner"), \
+        f"'{m.group(1)}' no matchea la guarda Plania_Owner* del workflow"
+
+    # AppId propio: con el del producto, instalar uno desinstalaría el otro.
+    id_owner = re.search(r"AppId=\{\{([0-9A-F-]+)", iss, re.I)
+    id_producto = re.search(r"AppId=\{\{([0-9A-F-]+)",
+                            open(os.path.join(RAIZ, "packaging", "instalador.iss"),
+                                 encoding="utf-8").read(), re.I)
+    assert id_owner and id_producto and id_owner.group(1) != id_producto.group(1), \
+        ("el panel y el producto no pueden compartir AppId: Windows los toma "
+         "como el mismo programa y uno pisa al otro")
+
+    # Ícono en el escritorio, menú Inicio y desinstalador — lo mismo que se le
+    # exige al instalador del producto.
+    assert "{autodesktop}" in iss, "falta el acceso directo del escritorio"
+    assert "{group}" in iss, "falta la entrada del menú Inicio"
+    assert "{uninstallexe}" in iss, "falta el acceso a desinstalar"
+
+    # Y que .gitignore lo mantenga fuera del repositorio.
+    ignore = open(os.path.join(RAIZ, ".gitignore"), encoding="utf-8").read()
+    assert "INSTALADOR/*.exe" in ignore
+
+
 def test_el_panel_del_dueno_se_arma_como_programa_aparte():
     """El panel del dueño existe, pero como ejecutable propio.
 
@@ -3719,6 +3803,16 @@ def test_el_workflow_no_intenta_commitear_binarios_al_repositorio():
     assert publica, "sin este paso los instaladores no llegan a ningún lado"
     assert any("Plania_portable.zip" in p.get("with", {}).get("files", "")
                for p in publica), "el portable tiene que publicarse como asset"
+
+    # El .txt es lo ÚNICO que quedó en el repositorio en lugar de los
+    # binarios, así que tiene que poder casarse con la descarga. GitHub
+    # reemplaza los espacios del nombre al publicar el asset ("Plania Setup
+    # 1.0.0.exe" se baja como "Plania.Setup.1.0.0.exe"): anotado con espacios,
+    # quien verifica su descarga no encuentra la línea.
+    checksums = next(p for p in pasos
+                     if p.get("name") == "Calcular checksums e índice de descargas")
+    assert "-replace ' ', '.'" in checksums["run"], \
+        "los checksums tienen que usar el nombre con el que GitHub publica el asset"
 
 
 def test_el_release_automatico_no_corta_una_version_nueva():

@@ -71,9 +71,39 @@ def _token_esperado() -> str | None:
     return os.environ.get("PLANIA_OWNER_TOKEN") or pconfig.leer_extra("OWNER_TOKEN")
 
 
+def _es_el_programa_instalado() -> bool:
+    """¿Esto es "Plania Owner" corriendo en la máquina del dueño?
+
+    Si lo es, no se pide token, y no es un atajo: es que el token no protege
+    nada acá. Este panel se distribuye en UN solo ejecutable
+    (`packaging/plania_owner.spec`), que no se publica, no va a INSTALADOR/,
+    no se adjunta a ninguna release y el workflow corta si aparece. Quien
+    tiene ese archivo es porque lo compiló. Pedirle además una contraseña es
+    pedirle una llave para su propia casa: lo único que consigue es que la
+    anote en un papel al lado de la puerta.
+
+    Lo que sí protege está en otro lado y no cambia: que el panel no viaje
+    adentro del producto (`proteger_codigo.py` lo saca del .exe y del ZIP) y
+    que sólo el dueño pueda compilarlo.
+
+    Las DOS condiciones tienen que darse:
+
+      · ejecutable congelado (PyInstaller). Corriendo desde el repo con
+        `streamlit run` sigue pidiendo token, que es como se lo prueba en
+        desarrollo y como podría quedar levantado sin querer.
+      · escuchando SOLO en loopback. Si alguien despliega esto en un servidor
+        —`--server.address 0.0.0.0`, un Procfile, un contenedor—, el token
+        vuelve a ser obligatorio: ahí sí hay red del otro lado.
+    """
+    if not getattr(sys, "frozen", False):
+        return False
+    direccion = os.environ.get("STREAMLIT_SERVER_ADDRESS", "")
+    return direccion in ("127.0.0.1", "localhost", "::1")
+
+
 esperado = _token_esperado()
 if "owner_ok" not in st.session_state:
-    st.session_state.owner_ok = False
+    st.session_state.owner_ok = _es_el_programa_instalado()
 
 if not st.session_state.owner_ok:
     st.markdown("<div class='owner-logo'>PLAN<span>IA</span> · panel del dueño</div>",
