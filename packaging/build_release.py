@@ -88,10 +88,18 @@ def paso_pyinstaller(fuente: str | None) -> str:
     return salida
 
 
+def _iscc() -> str | None:
+    """El compilador de Inno Setup, o None si no está instalado."""
+    ruta = shutil.which("ISCC") or shutil.which("iscc")
+    if ruta:
+        return ruta
+    porDefecto = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    return porDefecto if os.path.exists(porDefecto) else None
+
+
 def paso_instalador() -> str | None:
-    iscc = shutil.which("ISCC") or shutil.which("iscc") or \
-        r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-    if not (shutil.which("ISCC") or shutil.which("iscc") or os.path.exists(iscc)):
+    iscc = _iscc()
+    if not iscc:
         print("[build] Inno Setup no encontrado — salteo el Setup.exe "
               "(el ZIP portable igual se genera).")
         return None
@@ -134,6 +142,18 @@ def paso_owner() -> str | None:
     carpeta = os.path.join(DIST, "Plania Owner")
     if not os.path.isdir(carpeta):
         raise SystemExit("PyInstaller no dejó 'dist/Plania Owner'.")
+
+    # Instalador del panel, con ícono en el escritorio, entrada en el menú
+    # Inicio y desinstalador — igual que el del producto. Sin esto el panel
+    # era la única pieza que había que abrir buscando un .exe adentro de una
+    # carpeta descomprimida.
+    iscc = _iscc()
+    if iscc:
+        _run([iscc, os.path.join("packaging", "instalador_owner.iss")])
+    else:
+        print("[build] Inno Setup no encontrado — salteo Plania_Owner_Setup.exe "
+              "(el ZIP del panel igual se genera).")
+
     zpath = os.path.join(DIST, "Plania_Owner.zip")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for base, _dirs, files in os.walk(carpeta):
@@ -176,8 +196,13 @@ def main() -> None:
     for p in filter(None, [setup, zpath, bat_zip, owner_zip]):
         print(f"  {p}\n    sha256: {_sha256(p)}")
     if owner_zip:
-        print("  ! Plania_Owner.zip y Plania_Owner_BAT.zip son tuyos: no se "
-              "publican ni se suben a la página de descargas.")
+        setup_owner = os.path.join(DIST, "Plania_Owner_Setup.exe")
+        if os.path.exists(setup_owner):
+            print(f"  {setup_owner}\n    sha256: {_sha256(setup_owner)}")
+        print("  ! Todo lo que empieza con Plania_Owner es tuyo: no se publica "
+              "ni se sube a la página de descargas.\n"
+              "    El panel abre sin pedir clave — es tu máquina y ese archivo "
+              "no sale de acá.")
     if setup:
         print(f"  {os.path.join(DIST, 'Plania_Setup.exe')}  (copia sin versión "
               f"en el nombre — es la que sirve PLANIA_INSTALADOR_PATH por defecto)")

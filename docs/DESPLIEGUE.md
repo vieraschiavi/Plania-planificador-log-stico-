@@ -285,10 +285,30 @@ contenido— se arma por separado y no se publica:
 python packaging\build_release.py --con-owner
 ```
 
-Eso agrega `dist\Plania_Owner.zip` (ejecutable) y `dist\Plania_Owner_BAT.zip`
-(código + `INICIAR_PLANIA_OWNER.bat`, que pide el token al arrancar en vez de
-llevarlo escrito). Son tuyos: no van a `INSTALADOR/`, no se adjuntan a la
-release y el propio workflow corta si aparece cualquier `Plania_Owner*` ahí.
+Eso deja tres archivos, todos tuyos:
+
+| Archivo | Qué es | Pide clave |
+|---|---|---|
+| `Plania_Owner_Setup.exe` | Instalador con ícono en el escritorio, entrada en el menú Inicio y desinstalador | **no** |
+| `Plania_Owner.zip` | El mismo programa sin instalar | **no** |
+| `Plania_Owner_BAT.zip` | Código + `INICIAR_PLANIA_OWNER.bat`, para una PC donde no podés abrir un `.exe` | sí |
+
+Ninguno va a `INSTALADOR/`, ninguno se adjunta a la release y el workflow
+corta si aparece cualquier `Plania_Owner*` ahí.
+
+**Por qué el ejecutable no pide clave.** Porque el token no protegía nada en
+ese escenario. Este panel no se distribuye: no está en `INSTALADOR/`, no está
+en ninguna release, y ni siquiera viaja adentro del producto
+(`packaging/proteger_codigo.py` lo saca del `.exe` del cliente y del ZIP del
+`.bat`). Quien tiene ese archivo es porque lo compiló. Pedirle además una
+contraseña es pedirle una llave para su propia casa: lo único que consigue es
+que la anote en un papel al lado del teclado.
+
+`app/owner.py` la saltea **sólo** si se dan las dos cosas: es el ejecutable
+congelado Y está escuchando en loopback. Corriendo desde el repo con
+`streamlit run` sigue pidiéndola, y un despliegue en `0.0.0.0` también — ahí
+sí hay red del otro lado. La versión `.bat` la pide siempre, porque es código
+suelto y no prueba nada sobre quién lo corre.
 
 ### Dónde quedan los instaladores
 

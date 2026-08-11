@@ -283,7 +283,15 @@ jobs:
           foreach ($a in $archivos) {
             $h = (Get-FileHash $a.FullName -Algorithm SHA256).Hash.ToLower()
             $mb = [math]::Round($a.Length / 1MB, 1)
-            $lineas += "$h  $($a.Name)  ($mb MB)"
+            # El nombre se anota como lo va a publicar GitHub, que reemplaza
+            # los espacios por puntos: "Plania Setup 1.0.0.exe" se descarga
+            # como "Plania.Setup.1.0.0.exe". Anotándolo con espacios, quien
+            # baja el archivo y busca su línea acá no la encuentra — y un
+            # archivo de checksums que no se puede casar con la descarga no
+            # sirve para nada, que es justamente lo único que quedó en el
+            # repositorio en lugar de los binarios.
+            $publicado = $a.Name -replace ' ', '.'
+            $lineas += "$h  $publicado  ($mb MB)"
           }
           Set-Content INSTALADOR/CHECKSUMS.txt ($lineas -join "`n")
           Get-Content INSTALADOR/CHECKSUMS.txt
