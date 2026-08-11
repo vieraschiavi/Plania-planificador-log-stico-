@@ -25,6 +25,9 @@ web/assets/video/_voz_*/
 # Capturas de sitio/verificar_layout.py: se regeneran en cada corrida y pesan
 # 8 MB, no tiene sentido versionarlas.
 sitio/capturas/
+# Lo mismo para las de packaging/verificar_pantallas_react.py: son la
+# evidencia de una corrida, se regeneran con --capturas.
+packaging/capturas_react/
 # Doblajes con segmentos que se pisan: se escriben aparte para poder
 # escucharlos, nunca reemplazan al video publicado.
 web/assets/video/*.REVISAR.mp4

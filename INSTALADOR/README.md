@@ -10,6 +10,29 @@ deja la corrida del workflow **Release** — nadie lo sube a mano.
 | `Plania_BAT.zip` | Código + `INICIAR_PLANIA.bat`. Requiere Python instalado. |
 | `CHECKSUMS.txt` | `sha256` de cada archivo, para verificar la descarga. |
 
+## Las dos vías, y por qué hacen falta las dos
+
+Es el mismo producto entregado de dos maneras, y ninguna reemplaza a la otra:
+
+| | **EXE** | **BAT** |
+|---|---|---|
+| Qué abre | ventana propia (Electron + React) | el navegador (Streamlit) |
+| Instala | ícono en escritorio, menú Inicio, desinstalador | nada: descomprimir y doble clic |
+| Requisitos | ninguno | Python 3.11+ |
+| Código de negocio | compilado con Cython | a la vista |
+| Para quién | el caso normal | la empresa donde IT no deja ejecutar un `.exe` bajado de internet |
+
+La segunda no es un plan B pobre: es la que salva la venta cuando el cliente
+quiere el producto y su política de seguridad no lo deja abrir un ejecutable.
+Un `.bat` que llama al Python que la empresa ya aprobó, casi siempre sí pasa.
+
+Las dos salen del mismo build (`packaging/build_release.py`) y las dos
+excluyen exactamente lo mismo — el panel del dueño, el servidor de venta, la
+documentación interna. Esa lista vive en un solo lugar
+(`packaging/proteger_codigo.py`, `fuera_del_producto`) porque cuando estaba
+duplicada divergió: el `.exe` sacaba los módulos del dueño y el ZIP del `.bat`
+los mandaba en texto plano.
+
 ## Esta carpeta NO es el canal de descarga del cliente
 
 Ningún cliente entra acá. Este repositorio es privado y es tu código fuente,
@@ -41,12 +64,19 @@ que compró, y que cada arreglo hay que hacerlo dos veces.
 se arma aparte y **nunca entra a este repositorio**:
 
 ```powershell
-python packaging\build_release.py --con-owner   # deja dist\Plania_Owner.zip
+python packaging\build_release.py --con-owner
 ```
 
-Se queda en tu máquina. El paso del workflow que llena esta carpeta corta con
-error si detecta `Plania_Owner.zip` acá — porque un archivo en el repo lo
-tiene cualquiera que tenga acceso al repo, hoy o el día que sumes a alguien.
+Eso deja `dist\Plania_Owner.zip` (ejecutable) y `dist\Plania_Owner_BAT.zip`
+(código + `INICIAR_PLANIA_OWNER.bat`) — las mismas dos vías que el producto,
+por la misma razón: si estás en una PC donde no podés abrir un `.exe`, el
+panel también tiene que abrir. El `.bat` **pide el token al arrancar**, no lo
+lleva escrito: un archivo con el token adentro es un token publicado en cuanto
+se copia a otro lado.
+
+Se quedan en tu máquina. El paso del workflow que llena esta carpeta corta con
+error si detecta cualquier `Plania_Owner*` acá — porque un archivo en el repo
+lo tiene cualquiera que tenga acceso al repo, hoy o el día que sumes a alguien.
 
 Que sólo vos lo tengas no depende de una contraseña ni de que esté escondido:
 depende de que sólo vos puedas compilarlo.
@@ -82,10 +112,19 @@ archivos desde *Releases*.
 
 ## Si la carpeta está vacía
 
-Significa que el workflow todavía no consiguió construir. Pasó ya una vez: la
-corrida se disparó pero GitHub no asignó runner (`runner_id 0`, sin logs). Se
-revisa en **Settings → Actions** y en **Billing → Spending limits** — es un
-repositorio privado, así que los minutos de Actions se cobran.
+Ya pasó por dos motivos distintos, y conviene distinguirlos antes de tocar
+nada:
+
+1. **La corrida murió en segundos, sin logs** (`runner_id 0`): GitHub no
+   asignó runner. Se revisa en **Settings → Actions** y en **Billing →
+   Spending limits** — es un repositorio privado y los minutos se cobran.
+2. **La corrida duró minutos y falló en un paso**: es un problema del build,
+   no de la cuenta. Abrí el job y leé el paso rojo. La primera vez que pasó
+   fue una línea de `packaging/instalador.iss` que empezaba con `#13#10`: el
+   preprocesador de Inno Setup lee el `#` inicial como directiva suya, abortó
+   la compilación, y como ese paso corta el job entero tampoco se construyó el
+   instalador de Electron. Ahora lo agarra
+   `python packaging/verificar_instalador.py`, que corre antes y en Linux.
 
 Mientras tanto se construye en cualquier Windows con Python 3.11:
 

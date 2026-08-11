@@ -176,8 +176,8 @@ begin
   Result := True;
   while EstaPlaniaAbierto() do
   begin
-    if MsgBox('Plania está abierto. Cerralo para continuar.' + #13#10 +
-              #13#10 + 'Presioná Reintentar cuando lo hayas cerrado, o ' +
+    if MsgBox('Plania está abierto. Cerralo para continuar.' + #13#10 + #13#10 +
+              'Presioná Reintentar cuando lo hayas cerrado, o ' +
               'Cancelar para salir del instalador.',
               mbError, MB_RETRYCANCEL) = IDCANCEL then
     begin
@@ -263,8 +263,8 @@ begin
   // 1 = no existe, 3 = disco fijo, 2 = extraíble, 4 = red, 5 = CD, 6 = RAM
   if Tipo <= 1 then
   begin
-    MsgBox('La unidad ' + Unidad + ' no existe o no está lista.' + #13#10 +
-           #13#10 + 'Elegí otro disco.', mbError, MB_OK);
+    MsgBox('La unidad ' + Unidad + ' no existe o no está lista.' + #13#10 + #13#10 +
+           'Elegí otro disco.', mbError, MB_OK);
     Exit;
   end;
   if Tipo = 5 then
@@ -284,16 +284,16 @@ begin
   Libre := EspacioLibreMB(Ruta);
   if (Libre >= 0) and (Libre < {#EspacioNecesarioMB}) then
   begin
-    MsgBox('En la unidad ' + Unidad + ' quedan ' + IntToStr(Libre) +
-           ' MB libres, y Plania necesita al menos {#EspacioNecesarioMB} MB.' +
-           #13#10 + #13#10 + 'Liberá espacio o elegí otro disco.', mbError, MB_OK);
+    MsgBox('En la unidad ' + Unidad + ' quedan ' + IntToStr(Libre) + ' MB libres, ' +
+           'y Plania necesita al menos {#EspacioNecesarioMB} MB.' + #13#10 + #13#10 +
+           'Liberá espacio o elegí otro disco.', mbError, MB_OK);
     Exit;
   end;
 
   if not CarpetaEsEscribible(Ruta) then
   begin
-    MsgBox('No tenés permiso para escribir en:' + #13#10 + Ruta + #13#10 +
-           #13#10 + 'Elegí otra carpeta, o volvé atrás y ejecutá el instalador ' +
+    MsgBox('No tenés permiso para escribir en:' + #13#10 + Ruta + #13#10 + #13#10 +
+           'Elegí otra carpeta, o volvé atrás y ejecutá el instalador ' +
            'como administrador.', mbError, MB_OK);
     Exit;
   end;
@@ -343,8 +343,8 @@ begin
 
   if MsgBox('¿Querés conservar tus datos y tu licencia?' + #13#10 + #13#10 +
             'Sí: se conservan en' + #13#10 + Datos + #13#10 +
-            'y si volvés a instalar Plania en esta carpeta, todo sigue como estaba.' +
-            #13#10 + #13#10 +
+            'y si volvés a instalar Plania en esta carpeta, todo sigue como ' +
+            'estaba.' + #13#10 + #13#10 +
             'No: se borran. Vas a tener que activar la licencia de nuevo y volver ' +
             'a conectar tu base.',
             mbConfirmation, MB_YESNO) = IDNO then
@@ -353,8 +353,8 @@ begin
       MsgBox('Listo, se borraron los datos de Plania de esta computadora.',
              mbInformation, MB_OK)
     else
-      MsgBox('No se pudieron borrar todos los archivos de:' + #13#10 + Datos +
-             #13#10 + #13#10 + 'Borrá esa carpeta a mano si querés quitarlos.',
-             mbError, MB_OK);
+      MsgBox('No se pudieron borrar todos los archivos de:' + #13#10 +
+             Datos + #13#10 + #13#10 +
+             'Borrá esa carpeta a mano si querés quitarlos.', mbError, MB_OK);
   end;
 end;

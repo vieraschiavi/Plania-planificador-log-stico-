@@ -143,6 +143,25 @@ def paso_owner() -> str | None:
     return zpath
 
 
+def paso_paquete_bat() -> str:
+    """La segunda vía de entrega: mismo producto, arrancado con un .bat.
+
+    Existe para las empresas donde IT no deja ejecutar un .exe bajado de
+    internet. Se arma acá y no sólo en el workflow para que un build local
+    deje las DOS formas de entregar el producto, no una.
+    """
+    import armar_paquete_bat  # packaging/ ya está en sys.path por __file__
+    if CON_OWNER:
+        armar_paquete_bat.armar_owner()
+    zpath = armar_paquete_bat.armar()
+    problemas = armar_paquete_bat.verificar(zpath)
+    if problemas:
+        for p in problemas:
+            print(f"  [!!] {p}")
+        raise SystemExit("El paquete BAT no se puede publicar.")
+    return zpath
+
+
 def main() -> None:
     print("[build] producto: un solo build, idéntico para el dueño y para "
           "quien lo compre (sin el panel del negocio adentro)")
@@ -151,13 +170,14 @@ def main() -> None:
     carpeta = paso_pyinstaller(fuente_protegida)
     setup = paso_instalador()
     zpath = paso_zip(carpeta)
+    bat_zip = paso_paquete_bat()
     owner_zip = paso_owner() if CON_OWNER else None
     print("\n[build] Listo:")
-    for p in filter(None, [setup, zpath, owner_zip]):
+    for p in filter(None, [setup, zpath, bat_zip, owner_zip]):
         print(f"  {p}\n    sha256: {_sha256(p)}")
     if owner_zip:
-        print("  ! Plania_Owner.zip es tuyo: no se publica ni se sube a la "
-              "página de descargas.")
+        print("  ! Plania_Owner.zip y Plania_Owner_BAT.zip son tuyos: no se "
+              "publican ni se suben a la página de descargas.")
     if setup:
         print(f"  {os.path.join(DIST, 'Plania_Setup.exe')}  (copia sin versión "
               f"en el nombre — es la que sirve PLANIA_INSTALADOR_PATH por defecto)")

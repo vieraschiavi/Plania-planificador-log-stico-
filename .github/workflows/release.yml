@@ -184,23 +184,29 @@ jobs:
           npm run dist
 
       - name: Paquete BAT (codigo + lanzador, sin build)
-        # backend_venta NO va acá: es el servidor de venta del Licenciante
-        # (licencias, checkout de MercadoPago), nunca corre del lado del
-        # cliente — ver la nota en packaging/plania.spec. Este paquete es a
-        # propósito "código a la vista" (INICIAR_PLANIA.bat corre plania/ tal
-        # cual con el Python del usuario, sin compilar nada): quien lo baja
-        # ve el código de la app, nunca el del backend de venta.
+        # La segunda vía de entrega, para las empresas donde IT no deja
+        # ejecutar un .exe bajado de internet: mismo producto, arrancado con
+        # un .bat y el Python del usuario. Es a propósito "código a la vista"
+        # (INICIAR_PLANIA.bat corre plania/ tal cual, sin compilar nada).
+        #
+        # Justamente por eso el armado NO puede ser "copiar app/ y plania/
+        # enteros": lo que entre acá se lee en la máquina del cliente. Quedan
+        # afuera, y el paso siguiente lo verifica archivo por archivo:
+        #
+        #   - backend_venta/  el servidor de venta del Licenciante (licencias,
+        #     checkout de MercadoPago). Nunca corre del lado del cliente.
+        #   - el panel del dueño y lo que lo alimenta (app/owner.py,
+        #     plania/owner.py, negocio.py, contenido.py): facturación,
+        #     clientes, costos y márgenes del producto. Es la MISMA lista que
+        #     packaging/proteger_codigo.py saca del .exe — hasta ahora el .exe
+        #     los sacaba y este ZIP los mandaba igual, en texto plano.
+        #   - docs/ interna (modelo comercial, análisis de negocio,
+        #     comparativa, auditoría) y tests/, que no le sirven a un cliente.
+        # Ya lo armó build_release.py más arriba (las dos vías salen del mismo
+        # build). Acá se vuelve a abrir el ZIP terminado y se revisa archivo
+        # por archivo, que es lo que de verdad importa.
+        run: python packaging/armar_paquete_bat.py --verificar dist/Plania_BAT.zip
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path stage/Plania -Force | Out-Null
-          $items = @("app","plania","data","packaging","web",
-                     "docs","assets",".streamlit","tests","requirements.txt",
-                     "run.sh","Procfile","README.md","LICENSE-EULA.md",
-                     "INICIAR_PLANIA.bat")
-          foreach ($i in $items) {
-            if (Test-Path $i) { Copy-Item $i -Destination stage/Plania -Recurse -Force }
-          }
-          Compress-Archive -Path stage/Plania -DestinationPath dist/Plania_BAT.zip -Force
 
       - name: Verificar que el instalador se genero
         shell: pwsh
@@ -236,8 +242,11 @@ jobs:
           # El panel del dueño NO se publica: lleva adentro la facturación, los
           # clientes y el modelo financiero. Si alguna vez aparece acá, es un
           # error y el paso corta.
-          if (Test-Path INSTALADOR/Plania_Owner.zip) {
-            Write-Error "Plania_Owner.zip no puede publicarse: es el panel del dueño."
+          # Plania_Owner* cubre las dos formas del panel: el .zip de
+          # PyInstaller y el Plania_Owner_BAT.zip con el código y su .bat.
+          $delDueno = Get-ChildItem INSTALADOR/Plania_Owner* -ErrorAction SilentlyContinue
+          if ($delDueno) {
+            Write-Error "$($delDueno.Name) no puede publicarse: es el panel del dueño."
             exit 1
           }
           $lineas = @("# sha256 de los archivos de esta carpeta",
@@ -297,13 +306,29 @@ jobs:
           body: |
             ## Descargas de Plania
 
-            | Archivo | Qué es | Requisitos | Código de negocio |
-            |---|---|---|---|
-            | `Plania Setup *.exe` | Instalador Windows (Electron + React, todo incluido, ventana propia) | ninguno | compilado (Cython) |
-            | `Plania *.exe` (portable) | Igual al instalador de Electron pero sin instalar | ninguno | compilado (Cython) |
-            | `Plania_Setup_v*.exe` | Instalador Windows liviano (sin Electron, se abre en el navegador). Elegís dónde instalar. | ninguno | compilado (Cython) |
-            | `Plania_portable.zip` | Igual que el anterior pero sin instalar (doble clic en `Plania.exe`) | ninguno | compilado (Cython) |
-            | `Plania_BAT.zip` | Código + `INICIAR_PLANIA.bat` autoinstalable | Python 3.11+ | fuente a la vista |
+            Dos formas de usar el mismo producto. Si tu empresa te deja
+            ejecutar programas, bajá la primera. Si IT no deja abrir un `.exe`
+            descargado —que pasa seguido—, bajá la última: es el mismo Plania
+            arrancado con un `.bat` y el Python que ya tengas aprobado.
+
+            **1 · Instalar (recomendado)**
+
+            | Archivo | Qué hace |
+            |---|---|
+            | `Plania Setup *.exe` | Instala Plania con **ícono en el escritorio, entrada en el menú Inicio y desinstalador** en Agregar o quitar programas. Ventana propia (Electron + React), todo adentro: no necesitás instalar nada más. Elegís la carpeta. |
+
+            **2 · Sin instalar**
+
+            | Archivo | Qué hace | Requisitos |
+            |---|---|---|
+            | `Plania *.exe` (portable) | El mismo programa de arriba, sin instalación ni accesos directos. | ninguno |
+            | `Plania_Setup_v*.exe` | Instalador liviano, sin Electron: se abre en tu navegador en vez de en ventana propia. También deja accesos directos y desinstalador. | ninguno |
+            | `Plania_portable.zip` | Igual que el anterior pero sin instalar (doble clic en `Plania.exe`). | ninguno |
+            | `Plania_BAT.zip` | Descomprimís y doble clic en `INICIAR_PLANIA.bat`. Prepara todo solo la primera vez. **Para las PC donde no se puede ejecutar un `.exe`.** | Python 3.11+ |
+
+            En las cuatro primeras el código de negocio va compilado (Cython);
+            en `Plania_BAT.zip` va a la vista, porque corre con tu Python.
+            Ninguna de las cinco lleva el panel del dueño ni el servidor de venta.
 
             Demo de 7 días con todas las funciones al primer arranque, sin tarjeta.
             Uso sujeto a [LICENSE-EULA.md](https://github.com/${{ github.repository }}/blob/main/LICENSE-EULA.md).

@@ -28,6 +28,21 @@ SPEC = os.path.join(RAIZ, "packaging", "plania.spec")
 PKG_ELECTRON = os.path.join(RAIZ, "desktop", "package.json")
 
 
+def _regla_del_producto():
+    """`fuera_del_producto` de packaging/proteger_codigo.py, cargada por ruta.
+
+    Por ruta y no con `import proteger_codigo` para que este control funcione
+    igual corriéndolo desde cualquier carpeta, que es como lo llama el
+    workflow y como lo llaman los tests.
+    """
+    import importlib.util
+    ruta = os.path.join(RAIZ, "packaging", "proteger_codigo.py")
+    spec = importlib.util.spec_from_file_location("_plania_proteger", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo.fuera_del_producto
+
+
 def _leer(ruta: str) -> str:
     with open(ruta, encoding="utf-8", errors="replace") as f:
         return f.read()
@@ -132,6 +147,38 @@ def controles_pascal(iss: str) -> list[tuple[bool, str, str]]:
               "Los paréntesis del script están balanceados",
               f"{sin_texto.count('(')} '(' contra {sin_texto.count(')')} ')'"))
 
+    # 5. Ninguna línea puede EMPEZAR con '#' salvo que sea una directiva real
+    #    del preprocesador. Para ISPP, el primer carácter no blanco de la línea
+    #    manda: si es '#', lo que sigue tiene que ser una directiva suya. Una
+    #    continuación de expresión Pascal partida así:
+    #
+    #        MsgBox('Está abierto.' + #13#10 +
+    #               #13#10 + 'Cerralo.', mbError, MB_OK);
+    #
+    #    compila mentalmente perfecto y es exactamente lo que rompió el build:
+    #    "Error on line 180: Unknown preprocessor directive" — porque leyó
+    #    `#13` como directiva. El arreglo es no cortar la línea ahí; el
+    #    `#13#10` va al final de la línea anterior.
+    #
+    #    Cuesta 6 minutos de runner de Windows descubrirlo allá y cero acá,
+    #    y no lo agarra ningún otro control: el Pascal está bien escrito.
+    directivas_ispp = ("define", "undef", "include", "if", "ifdef", "ifndef",
+                       "ifexist", "ifnexist", "elif", "else", "endif", "error",
+                       "pragma", "expr", "insert", "append", "emit", "file",
+                       "for", "sub", "endsub", "dim", "redim")
+    mal = []
+    for n, linea in enumerate(iss.splitlines(), start=1):
+        limpia = linea.strip()
+        if not limpia.startswith("#"):
+            continue
+        palabra = re.match(r"#\s*(\w+)", limpia)
+        if not palabra or palabra.group(1).lower() not in directivas_ispp:
+            mal.append(n)
+    r.append((not mal, "Ninguna línea arranca con '#' que no sea directiva ISPP",
+              f"líneas {mal}: el preprocesador de Inno lee el '#' inicial como "
+              "directiva suya (típico: cortar la línea justo antes de un "
+              "#13#10). Mové ese #13#10 al final de la línea de arriba"))
+
     return r
 
 
@@ -166,14 +213,37 @@ def controles() -> list[tuple[bool, str, str]]:
     # los dos lugares que arman el paquete, porque cualquiera de los dos
     # alcanza para que se cuelen.
     spec = _leer(SPEC)
-    proteger = _leer(os.path.join(RAIZ, "packaging", "proteger_codigo.py"))
-    for archivo, donde in (("owner.py", "el panel del dueño"),
-                           ("negocio.py", "el modelo financiero"),
-                           ("contenido.py", "el kit de contenido")):
-        ok(archivo in proteger and archivo in spec,
-           f"El producto no lleva {donde}",
-           f"{archivo} tiene que estar excluido tanto en proteger_codigo.py "
-           "como en plania.spec: el .spec también se corre solo")
+    bat = _leer(os.path.join(RAIZ, "packaging", "armar_paquete_bat.py"))
+
+    # Se llama a la regla de verdad en vez de buscar el nombre del archivo como
+    # texto en el .spec. El control textual daba verde mientras el nombre
+    # apareciera en algún lado —da igual en qué contexto— y daba rojo apenas la
+    # regla se movió a una función compartida, que es justo la mejora que hacía
+    # falta. Preguntándole a `fuera_del_producto` se comprueba lo que de verdad
+    # importa: que ESA ruta no viaje.
+    fuera = _regla_del_producto()
+    for ruta, donde in (("app/owner.py", "el panel del dueño"),
+                        ("plania/owner.py", "los números del panel del dueño"),
+                        ("plania/negocio.py", "el modelo financiero"),
+                        ("plania/contenido.py", "el kit de contenido"),
+                        ("docs/MODELO_COMERCIAL.md", "la documentación interna"),
+                        ("assets/capturas/owner_negocio.png",
+                         "las capturas del panel del dueño"),
+                        ("data/uso_licencias.db",
+                         "la base de licencias del backend de venta"),
+                        ("data/auditoria.log", "el log de la máquina de build")):
+        ok(fuera(ruta), f"El producto no lleva {donde}",
+           f"packaging/proteger_codigo.py deja pasar {ruta}, así que viaja en "
+           "el .exe y en el ZIP del .bat")
+
+    # Y que las dos vías de entrega usen ESA regla y no una copia propia: la
+    # copia es lo que dejó al ZIP del .bat mandando el panel del dueño en texto
+    # plano mientras el .exe sí lo sacaba.
+    for archivo, contenido in (("plania.spec", spec), ("armar_paquete_bat.py", bat)):
+        ok("fuera_del_producto" in contenido,
+           f"{archivo} usa la regla compartida de qué no viaja",
+           "si vuelve a tener su propia lista, las dos vías de entrega van a "
+           "divergir de nuevo")
 
     # El producto es un solo build. Si el .spec vuelve a mirar una variable de
     # edición, vuelve a existir un Plania del dueño distinto del que se vende:
