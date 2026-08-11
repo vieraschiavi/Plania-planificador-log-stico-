@@ -154,6 +154,17 @@ def paso_owner() -> str | None:
         print("[build] Inno Setup no encontrado — salteo Plania_Owner_Setup.exe "
               "(el ZIP del panel igual se genera).")
 
+    # Y la vía que no necesita instalar un segundo programa: el ZIP que se
+    # descomprime adentro de la carpeta donde ya está Plania y le activa el
+    # panel ahí mismo.
+    import armar_owner_junto_al_exe
+    junto = armar_owner_junto_al_exe.armar()
+    problemas = armar_owner_junto_al_exe.verificar(junto)
+    if problemas:
+        for p in problemas:
+            print(f"  [!!] {p}")
+        raise SystemExit("El paquete del panel junto al exe no quedó bien.")
+
     zpath = os.path.join(DIST, "Plania_Owner.zip")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for base, _dirs, files in os.walk(carpeta):
