@@ -3,6 +3,7 @@ exportes, rutas, licencias y backend de venta."""
 import os
 import re
 import sys
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -377,6 +378,129 @@ def test_checkout_exito_crea_preferencia_con_el_token_correcto():
             assert kwargs["headers"]["Authorization"] == "Bearer TEST-token-de-prueba"
     finally:
         os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def _armador_bat():
+    import importlib.util
+    ruta = os.path.join(RAIZ, "packaging", "armar_paquete_bat.py")
+    spec = importlib.util.spec_from_file_location("_plania_bat", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+def test_el_paquete_bat_no_le_manda_al_cliente_nada_del_dueno(tmp_path):
+    """La vía .bat entrega el código a la vista, así que lo que entre al ZIP se
+    lee en la máquina del cliente.
+
+    Armaba el paquete copiando `app/` y `plania/` enteros, o sea que mandaba
+    `plania/negocio.py` (costos y márgenes del producto), `plania/owner.py` y
+    `app/owner.py` — los mismos archivos que el .exe sí sacaba. Las dos vías de
+    entrega del mismo producto no coincidían, y la que no coincidía era la que
+    va en texto plano.
+
+    Se arma el ZIP de verdad y se lo revisa por dentro, no se leen listas.
+    """
+    bat = _armador_bat()
+    destino = str(tmp_path / "Plania_BAT.zip")
+    bat.armar(destino)
+
+    with zipfile.ZipFile(destino) as z:
+        dentro = [n[len("Plania/"):] for n in z.namelist() if n.startswith("Plania/")]
+
+    for prohibido in ("app/owner.py", "plania/owner.py", "plania/negocio.py",
+                      "plania/contenido.py"):
+        assert prohibido not in dentro, f"el ZIP del .bat lleva {prohibido}"
+    assert not [n for n in dentro if n.startswith("backend_venta")], \
+        "el servidor de venta no corre nunca del lado del cliente"
+    assert not [n for n in dentro if n.startswith("docs/")], \
+        "docs/ es interna: modelo comercial, costos y márgenes"
+    assert not [n for n in dentro if "owner" in n], \
+        "tampoco las capturas del panel del dueño"
+
+    # Y que siga siendo un producto que arranca: un ZIP vacío pasaría todo lo
+    # de arriba con honores.
+    for necesario in ("INICIAR_PLANIA.bat", "app/app.py", "plania/sugerencias.py",
+                      "packaging/plania_launcher.py"):
+        assert necesario in dentro, f"sin {necesario} el producto no abre"
+
+
+def test_el_paquete_bat_no_se_lleva_artefactos_de_la_maquina(tmp_path, monkeypatch):
+    """`data/` se copiaba entera. En el runner de GitHub eso es inofensivo —se
+    arma en limpio— pero armando la release desde la máquina del dueño, que es
+    donde también se prueba el backend, `data/` tiene la base de licencias
+    emitidas y el log de auditoría de esa máquina. Se iban adentro del paquete.
+    """
+    bat = _armador_bat()
+    inventados = [os.path.join(RAIZ, "data", "uso_licencias.db"),
+                  os.path.join(RAIZ, "data", "auditoria.log")]
+    creados = [p for p in inventados if not os.path.exists(p)]
+    for p in creados:
+        open(p, "w").close()
+    try:
+        destino = str(tmp_path / "Plania_BAT.zip")
+        bat.armar(destino)
+        with zipfile.ZipFile(destino) as z:
+            dentro = z.namelist()
+        for feo in ("uso_licencias", "auditoria.log", ".lock"):
+            assert not [n for n in dentro if feo in n], \
+                f"el paquete lleva {feo}, que es de la máquina donde se armó"
+    finally:
+        for p in creados:
+            os.remove(p)
+
+
+def test_el_paquete_del_dueno_si_lleva_su_panel_y_su_lanzador(tmp_path):
+    """El espejo del control anterior: el ZIP del dueño tiene que llevar lo que
+    al del cliente se le saca, y su propio .bat. Sin esto, "no lleva nada del
+    dueño" se podría cumplir sacándoselo también a él."""
+    bat = _armador_bat()
+    destino = str(tmp_path / "Plania_Owner_BAT.zip")
+    bat.armar_owner(destino)
+    with zipfile.ZipFile(destino) as z:
+        dentro = [n[len("Plania Owner/"):] for n in z.namelist()
+                  if n.startswith("Plania Owner/")]
+    for necesario in ("app/owner.py", "plania/owner.py", "plania/negocio.py",
+                      "INICIAR_PLANIA_OWNER.bat", "app/app.py"):
+        assert necesario in dentro, f"al paquete del dueño le falta {necesario}"
+
+
+def test_el_lanzador_del_dueno_no_trae_el_token_escrito():
+    """Un .bat con el token adentro es un token publicado en cuanto el archivo
+    se copia a otro lado. Se pide al arrancar."""
+    bat = open(os.path.join(RAIZ, "INICIAR_PLANIA_OWNER.bat"), encoding="utf-8").read()
+    assert "set /p PLANIA_OWNER_TOKEN=" in bat, "el token tiene que pedirse"
+    assert not re.search(r"set\s+PLANIA_OWNER_TOKEN=\S", bat), \
+        "hay un token escrito en el .bat"
+    assert "PLANIA_PANEL=owner" in bat, "sin esto levanta el producto, no el panel"
+
+
+def test_ninguna_linea_del_instalador_arranca_con_almohadilla():
+    """Para el preprocesador de Inno Setup, el primer carácter no blanco de la
+    línea manda: si es '#', lo que sigue tiene que ser una directiva SUYA.
+
+    Cortar una expresión Pascal justo antes de un `#13#10` —cosa que se lee
+    perfecta— aborta la compilación con "Unknown preprocessor directive", y el
+    build de Windows muere ahí: sin instalador liviano y, porque el paso corta
+    el job entero, tampoco el de Electron. Pasó de verdad, en la línea 180.
+    """
+    iss = open(os.path.join(RAIZ, "packaging", "instalador.iss"),
+               encoding="utf-8").read()
+    directivas = ("define", "undef", "include", "if", "ifdef", "ifndef",
+                  "ifexist", "ifnexist", "elif", "else", "endif", "error",
+                  "pragma", "expr", "insert", "append", "emit", "file",
+                  "for", "sub", "endsub", "dim", "redim")
+    malas = []
+    for n, linea in enumerate(iss.splitlines(), start=1):
+        limpia = linea.strip()
+        if not limpia.startswith("#"):
+            continue
+        m = re.match(r"#\s*(\w+)", limpia)
+        if not m or m.group(1).lower() not in directivas:
+            malas.append((n, limpia[:60]))
+    assert not malas, (
+        f"líneas que ISPP va a leer como directiva suya: {malas}. "
+        "Mové el #13#10 al final de la línea de arriba.")
 
 
 def test_el_blueprint_de_despliegue_no_pierde_las_licencias_en_cada_deploy():
@@ -3563,13 +3687,33 @@ def test_el_release_automatico_no_publica_en_la_pagina_de_releases():
     """El push automático a main refresca INSTALADOR/, pero NO tiene que crear
     una entrada nueva en Releases por cada commit — eso es una decisión de
     versión, reservada a un tag o a "Run workflow" manual."""
-    wf = _release_yml()
-    i = wf.index("Publicar release con las descargas")
-    bloque = wf[i:i + 400]
-    assert "if:" in bloque, "el paso que publica en Releases tiene que estar condicionado"
-    linea_if = [l for l in bloque.splitlines() if "if:" in l][0]
-    assert "github.ref_type == 'tag'" in linea_if and "workflow_dispatch" in linea_if, \
+    # La condición se lee del YAML ya parseado y no como líneas de texto: pasó
+    # a ser multilínea (`if: >-`) al agregar el modo "solo verificar", y el
+    # control anterior —que miraba la primera línea que contuviera "if:"— se
+    # rompió sin que hubiera nada mal.
+    import yaml
+    wf = yaml.safe_load(_release_yml())
+    pasos = wf["jobs"]["ejecutables-windows"]["steps"]
+    publicar = next(p for p in pasos
+                    if p.get("name") == "Publicar release con las descargas")
+    condicion = publicar.get("if", "")
+    assert condicion, "el paso que publica en Releases tiene que estar condicionado"
+    assert "github.ref_type == 'tag'" in condicion and "workflow_dispatch" in condicion, \
         "el paso de Releases tiene que saltearse en un push automático a main"
+
+    # Y una corrida manual con "solo verificar" no puede publicar: existe para
+    # poder construir sobre una rama y ver si compila —por ejemplo después de
+    # arreglar el instalador— sin dejar binarios en la rama por defecto ni
+    # crear una entrada de Release.
+    commitear = next(p for p in pasos if p.get("name") == "Commitear INSTALADOR/")
+    for paso, cond in (("Publicar release", condicion),
+                       ("Commitear INSTALADOR/", commitear.get("if", ""))):
+        assert "solo_verificar" in cond, \
+            f"'{paso}' corre igual con solo_verificar activado"
+    # YAML 1.1 lee `on:` como el booleano True, no como la cadena "on".
+    disparadores = wf.get("on", wf.get(True))
+    assert "solo_verificar" in disparadores["workflow_dispatch"]["inputs"], \
+        "el modo solo verificar tiene que ser una opción del Run workflow"
 
 
 def test_el_job_caro_de_windows_esta_gateado_por_el_de_linux():
@@ -3657,8 +3801,14 @@ def test_el_panel_del_dueno_nunca_se_publica_en_el_repo():
     # La primera versión de este control buscaba "Plania_Owner.zip" suelto, y
     # el texto del mensaje de error ya la satisfacía: al sacar el `Test-Path`
     # el control seguía en verde con la guarda borrada.
+    #
+    # El patrón tiene que ser `Plania_Owner*`, con comodín, y no el nombre
+    # exacto de un archivo: el panel del dueño hoy se arma de dos formas
+    # (Plania_Owner.zip de PyInstaller y Plania_Owner_BAT.zip con el código y
+    # su .bat), y una guarda escrita contra el nombre exacto de la primera
+    # dejaba pasar la segunda.
     wf = _release_yml()
-    guarda = "Test-Path INSTALADOR/Plania_Owner.zip"
+    guarda = "Get-ChildItem INSTALADOR/Plania_Owner*"
     assert guarda in wf, \
         f"falta la guarda real ({guarda}) que impide publicar el build del dueño"
     i = wf.index(guarda)

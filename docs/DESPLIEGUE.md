@@ -248,6 +248,30 @@ Deja, si Inno Setup 6 está instalado:
 
 Y siempre, tenga o no Inno Setup: `dist\Plania_portable.zip`.
 
+### Dos formas de entregarlo, un solo build
+
+`build_release.py` deja las dos vías, y las dos son necesarias:
+
+- **EXE** — `Plania Setup *.exe` (Electron + React, ventana propia) y
+  `Plania_Setup_v*.exe` (liviano, abre en el navegador). Los dos dejan ícono
+  en el escritorio, entrada en el menú Inicio y desinstalador.
+- **BAT** — `Plania_BAT.zip`: se descomprime y se hace doble clic en
+  `INICIAR_PLANIA.bat`. Para las empresas donde IT no deja ejecutar un `.exe`
+  bajado de internet, que no es un caso raro. Necesita Python 3.11+ y prepara
+  el entorno solo la primera vez.
+
+Lo que el cliente NO recibe por ninguna de las dos vías está en una sola
+lista, `fuera_del_producto()` de `packaging/proteger_codigo.py`: el panel del
+dueño y lo que lo alimenta, `docs/` interna, el servidor de venta, y los
+archivos que aparecen en `data/` al usar el programa en la máquina donde se
+arma (el log de auditoría y la base de licencias del backend). Estaba
+duplicada entre el `.spec` y el armado del ZIP, y divergió: el `.exe` sacaba
+los módulos del dueño y el ZIP los mandaba en texto plano.
+
+`python packaging/armar_paquete_bat.py --verificar dist/Plania_BAT.zip` abre
+el ZIP terminado y falla si adentro hay algo que no tenía que estar, o si
+falta algo sin lo cual el producto no arrancaría. Corre en el workflow.
+
 ### Un solo producto, y el panel del dueño aparte
 
 `build_release.py` arma **un** Plania, sin ediciones. Ese archivo es el que
@@ -261,8 +285,10 @@ contenido— se arma por separado y no se publica:
 python packaging\build_release.py --con-owner
 ```
 
-Eso agrega `dist\Plania_Owner.zip`. Es tuyo: no va a `INSTALADOR/`, no se
-adjunta a la release y el propio workflow corta si aparece ahí.
+Eso agrega `dist\Plania_Owner.zip` (ejecutable) y `dist\Plania_Owner_BAT.zip`
+(código + `INICIAR_PLANIA_OWNER.bat`, que pide el token al arrancar en vez de
+llevarlo escrito). Son tuyos: no van a `INSTALADOR/`, no se adjuntan a la
+release y el propio workflow corta si aparece cualquier `Plania_Owner*` ahí.
 
 ### Dónde quedan los instaladores
 
@@ -340,6 +366,11 @@ a pedir la aceptación.
 4b. [ ] `python3 packaging/verificar_pantallas.py` en verde: las 12 pantallas
        se dibujan sin un traceback a la vista. Tarda unos minutos porque abre
        el producto de verdad — es el control que los tests no pueden hacer.
+4c. [ ] `python3 packaging/verificar_pantallas_react.py` en verde: lo mismo
+       para la ventana propia (Electron + React contra `plania/api.py`).
+       Necesita `cd desktop && npm ci` una vez. No prueba el instalador de
+       Electron —eso necesita Windows— pero sí todo lo que corre adentro de
+       la ventana, que es donde se rompen las cosas.
 5. [ ] Video grabado, con las tres pistas de subtítulos, y doblado con
        VoiceBox (`--doblar` sin avisos de solapamiento).
 6. [ ] `Plania_Setup.exe` construido y subido — sin `--sin-proteger`, con

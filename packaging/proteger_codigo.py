@@ -100,6 +100,61 @@ MODULOS_SOLO_OWNER = {
     "plania": ["owner.py", "negocio.py", "contenido.py", "verificacion.py"],
 }
 
+# Lo mismo, pero para archivos que no son módulos y que igual no tienen por
+# qué viajar a la máquina de un cliente. Se comparan como prefijo de la ruta
+# relativa al repo, con "/" de separador.
+#
+#   assets/capturas/owner_*  capturas del panel del dueño: se ve la
+#                            facturación, la rentabilidad y los clientes.
+#   docs/                    documentación interna — modelo comercial con
+#                            costos y márgenes, análisis de negocio,
+#                            comparativa de competencia, auditoría de
+#                            seguridad. El producto no lee nada de acá: la
+#                            pantalla de Ayuda usa README.md y la EULA, que
+#                            van sueltos.
+#
+# Iban las dos cosas en el .exe y en el ZIP: el filtro existía solo para los
+# .py del dueño, así que las capturas de sus pantallas y el modelo financiero
+# entero se distribuían igual, en `_internal/docs/`.
+PREFIJOS_SOLO_OWNER = ("assets/capturas/owner_", "docs/")
+
+# Archivos que NO están en el repo (los ignora .gitignore) pero aparecen en
+# `data/` en cuanto alguien usa el programa o el backend en la misma máquina
+# donde después arma el paquete. `data/` se copiaba entera, así que estos se
+# iban con ella:
+#
+#   data/uso_licencias.db   la base del BACKEND DE VENTA: qué email consumió
+#                           su prueba, qué pagos se procesaron, qué tokens de
+#                           descarga siguen vivos. De todos los clientes.
+#   data/auditoria.log      el registro de actividad de esa máquina.
+#   *.lock                  el candado de ese log.
+#
+# En el runner de GitHub no existen —se arma en limpio— así que nunca se
+# notó; armando la release desde la máquina del dueño, que es donde también
+# se prueba el backend, se iban adentro del instalador.
+ARTEFACTOS_DE_LA_MAQUINA = ("uso_licencias.db", "auditoria.log")
+
+
+def fuera_del_producto(rel: str) -> bool:
+    """¿Esta ruta (relativa al repo) queda afuera de lo que recibe un cliente?
+
+    Único lugar donde vive la regla. La usan las dos vías de entrega —
+    packaging/plania.spec (el .exe) y packaging/armar_paquete_bat.py (el ZIP
+    con el .bat)— justamente para que no puedan discrepar: cuando discreparon,
+    el .exe sacaba los módulos del dueño y el ZIP los mandaba en texto plano.
+    """
+    rel = rel.replace("\\", "/").lstrip("./")
+    if rel.startswith(PREFIJOS_SOLO_OWNER):
+        return True
+    partes = rel.split("/")
+    if len(partes) == 2 and partes[1] in MODULOS_SOLO_OWNER.get(partes[0], []):
+        return True
+    nombre = partes[-1]
+    if nombre.startswith(ARTEFACTOS_DE_LA_MAQUINA) or nombre.endswith(".lock"):
+        return True
+    return "__pycache__" in partes or rel.endswith(".pyc")
+
+
 _SETUP_PY = """\
 from setuptools import setup
 from Cython.Build import cythonize

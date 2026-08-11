@@ -69,34 +69,40 @@ def _dir(nombre):
 # filtro está igual acá porque el .spec también se corre solo, con
 # --sin-proteger o a mano, y en ese caso el árbol es el repo entero.
 # Tiene que estar en los dos lados o hay un camino por el que se cuela.
-_SOLO_OWNER = {
-    "app": {"owner.py"},
-    "plania": {"owner.py", "negocio.py", "contenido.py", "verificacion.py"},
-}
+# La regla de qué queda afuera vive en packaging/proteger_codigo.py y la
+# comparten las DOS vías de entrega (este .exe y el ZIP con el .bat). Estaba
+# duplicada acá, y duplicada terminó divergiendo: este lado filtraba los .py
+# del dueño y el otro no filtraba nada.
+import importlib.util as _ilu
+
+_spec_pc = _ilu.spec_from_file_location(
+    "_plania_proteger", os.path.join(REPO, "packaging", "proteger_codigo.py"))
+_pc = _ilu.module_from_spec(_spec_pc)
+_spec_pc.loader.exec_module(_pc)
 
 
 def _sin_lo_del_dueno(carpeta, ruta):
     """(origen, destino) de cada archivo de la carpeta, salteando lo del dueño."""
-    prohibidos = _SOLO_OWNER.get(carpeta, set())
     pares = []
     for base, _dirs, archivos in os.walk(ruta):
         rel = os.path.relpath(base, ruta)
         for archivo in archivos:
-            if rel == "." and archivo in prohibidos:
+            relativo = (os.path.join(carpeta, archivo) if rel == "."
+                        else os.path.join(carpeta, rel, archivo))
+            if _pc.fuera_del_producto(relativo):
                 continue
             destino = carpeta if rel == "." else os.path.join(carpeta, rel)
             pares.append((os.path.join(base, archivo), destino))
     return pares
 
 
-for _n in ["app", "plania", "data", "assets", "docs"]:
+# "docs" ya no está en la lista: es documentación interna (ver
+# PREFIJOS_SOLO_OWNER). La pantalla de Ayuda usa README.md y la EULA, que se
+# agregan sueltos más abajo.
+for _n in ["app", "plania", "data", "assets"]:
     par = _dir(_n)
-    if not par:
-        continue
-    if _n in _SOLO_OWNER:
+    if par:
         datas += _sin_lo_del_dueno(_n, par[0])
-    else:
-        datas.append(par)
 
 # README.md y la EULA sueltos: documentación embebida en la pantalla de Ayuda
 # y en la pantalla de aceptación de términos.
