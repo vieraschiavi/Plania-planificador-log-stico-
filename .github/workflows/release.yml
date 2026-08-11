@@ -236,44 +236,93 @@ jobs:
             }
           }
 
-      - name: Dejar los instaladores en INSTALADOR/ con sus checksums
+      # Los binarios NO se commitean al repositorio, y no es una preferencia:
+      # es un límite duro de GitHub. La primera corrida que llegó hasta acá
+      # terminó así:
+      #
+      #   remote: error: File INSTALADOR/Plania_portable.zip is 138.79 MB;
+      #          this exceeds GitHub's file size limit of 100.00 MB
+      #   ! [remote rejected] HEAD -> main (pre-receive hook declined)
+      #
+      # El portable pesa 138 MB y el Setup 99.7 MB — el segundo pasaba raspando
+      # y se rompería solo en cuanto creciera un poco. Aunque entraran, cada
+      # release sumaría ~240 MB al historial de git para siempre, y clonar el
+      # repositorio se iría poniendo más lento con cada versión.
+      #
+      # Los archivos van a la página de Releases, que es el mecanismo de GitHub
+      # para esto (hasta 2 GB por archivo) y no toca el historial. En
+      # INSTALADOR/ queda lo que sí es chico y sí conviene versionar: los
+      # sha256 y el índice con los links.
+      - name: Calcular checksums e índice de descargas
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force INSTALADOR | Out-Null
-          # Nombre estable, sin la versión: la carpeta guarda UNA copia de cada
-          # cosa y cada release pisa a la anterior. El historial de versiones
-          # vive en la página de Releases, no acá.
           $setup = Get-ChildItem dist/Plania_Setup_v*.exe | Select-Object -First 1
-          if ($setup) { Copy-Item $setup.FullName INSTALADOR/Plania_Setup.exe -Force }
+          $electron = Get-ChildItem desktop/dist_electron/*.exe -ErrorAction SilentlyContinue
+          $archivos = @()
+          if ($setup) { $archivos += $setup }
+          $archivos += $electron
           foreach ($n in @("Plania_portable.zip", "Plania_BAT.zip")) {
-            if (Test-Path "dist/$n") { Copy-Item "dist/$n" "INSTALADOR/$n" -Force }
+            if (Test-Path "dist/$n") { $archivos += Get-Item "dist/$n" }
           }
+
           # El panel del dueño NO se publica: lleva adentro la facturación, los
-          # clientes y el modelo financiero. Si alguna vez aparece acá, es un
-          # error y el paso corta.
-          # Plania_Owner* cubre las dos formas del panel: el .zip de
-          # PyInstaller y el Plania_Owner_BAT.zip con el código y su .bat.
-          $delDueno = Get-ChildItem INSTALADOR/Plania_Owner* -ErrorAction SilentlyContinue
+          # clientes y el modelo financiero. Si aparece entre lo que se va a
+          # subir, es un error y el paso corta. Plania_Owner* cubre las dos
+          # formas del panel: el .zip de PyInstaller y el Plania_Owner_BAT.zip
+          # con el código y su .bat.
+          $delDueno = $archivos | Where-Object { $_.Name -like "Plania_Owner*" }
           if ($delDueno) {
             Write-Error "$($delDueno.Name) no puede publicarse: es el panel del dueño."
             exit 1
           }
-          $lineas = @("# sha256 de los archivos de esta carpeta",
-                      "# generado por .github/workflows/release.yml")
-          Get-ChildItem INSTALADOR -File | Where-Object { $_.Name -ne "CHECKSUMS.txt" -and $_.Name -ne "README.md" } | ForEach-Object {
-            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            $mb = [math]::Round($_.Length / 1MB, 1)
-            $lineas += "$h  $($_.Name)  ($mb MB)"
+
+          $lineas = @("# sha256 de los archivos publicados en la página de Releases",
+                      "# generado por .github/workflows/release.yml",
+                      "# commit: $env:GITHUB_SHA")
+          foreach ($a in $archivos) {
+            $h = (Get-FileHash $a.FullName -Algorithm SHA256).Hash.ToLower()
+            $mb = [math]::Round($a.Length / 1MB, 1)
+            $lineas += "$h  $($a.Name)  ($mb MB)"
           }
           Set-Content INSTALADOR/CHECKSUMS.txt ($lineas -join "`n")
           Get-Content INSTALADOR/CHECKSUMS.txt
 
-      # Solo en las corridas manuales. Una corrida disparada por un tag está
-      # parada en el commit de ese tag, que puede ser viejo: empujar eso a la
-      # rama por defecto la haría retroceder. En esas corridas los archivos
-      # igual quedan publicados en la página de Releases, que es el paso
-      # siguiente.
-      - name: Commitear INSTALADOR/
+      # Se publica ANTES de commitear el índice, para que los links que ese
+      # índice menciona ya existan cuando alguien los abra.
+      - name: Publicar la última compilación (push automático a main)
+        if: >-
+          github.event_name == 'push' && github.ref_type != 'tag' &&
+          inputs.solo_verificar != true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ultima-compilacion
+          name: Última compilación
+          prerelease: true
+          fail_on_unmatched_files: false
+          files: |
+            desktop/dist_electron/*.exe
+            dist/Plania_Setup_v*.exe
+            dist/Plania_portable.zip
+            dist/Plania_BAT.zip
+          body: |
+            Compilación automática del último commit de `main`
+            (${{ github.sha }}). Se reemplaza sola con cada cambio del producto.
+
+            Para entregarle algo a un cliente, usá una versión cortada con tag
+            (`git tag v1.0.1 && git push --tags`): esa queda fija y con
+            changelog. Ésta cambia sin aviso.
+
+            Los `sha256` están en
+            [`INSTALADOR/CHECKSUMS.txt`](https://github.com/${{ github.repository }}/blob/main/INSTALADOR/CHECKSUMS.txt).
+
+      # Solo el índice de texto (CHECKSUMS.txt), nunca los binarios: ver el
+      # comentario del paso que los calcula.
+      #
+      # Y solo en las corridas que NO vienen de un tag: una corrida disparada
+      # por un tag está parada en el commit de ese tag, que puede ser viejo, y
+      # empujar eso a la rama por defecto la haría retroceder.
+      - name: Commitear los checksums
         # `inputs` está vacío en los push, así que `inputs.solo_verificar` es
         # null y la condición se cumple: el disparo automático sigue igual.
         if: github.ref_type != 'tag' && inputs.solo_verificar != true
@@ -284,12 +333,14 @@ jobs:
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f INSTALADOR/
+          # Explícito y solo el .txt: `git add INSTALADOR/` con un -f volvería a
+          # meter los binarios si algún día quedan en la carpeta.
+          git add INSTALADOR/CHECKSUMS.txt
           if git diff --cached --quiet; then
-            echo "INSTALADOR/ sin cambios."
+            echo "Checksums sin cambios."
             exit 0
           fi
-          git commit -m "Instaladores de la release en INSTALADOR/"
+          git commit -m "sha256 de la última compilación"
           # Alguien pudo haber pusheado mientras el build corría (tarda varios
           # minutos): se rebasa antes de empujar en vez de fallar la corrida
           # entera después de haber compilado todo.
@@ -297,11 +348,10 @@ jobs:
           git rebase "origin/$RAMA"
           git push origin "HEAD:$RAMA"
 
-      # Solo para tags y corridas manuales: cortar una versión y publicarla en
-      # Releases es una decisión, no algo que tenga que pasar en cada push
-      # automático a main. Esos push automáticos igual dejan INSTALADOR/ al
-      # día (paso de arriba) — lo que cambia es que no generan una entrada
-      # nueva en la página de Releases por cada commit.
+      # Cortar una VERSIÓN es una decisión humana: un tag o un "Run workflow".
+      # Los push automáticos también publican, pero sobre la entrada rodante
+      # "ultima-compilacion" (paso de más arriba), que se pisa sola. Ésta queda
+      # fija, con su número y su changelog: es la que se le pasa a un cliente.
       - name: Publicar release con las descargas
         if: >-
           github.ref_type == 'tag' ||

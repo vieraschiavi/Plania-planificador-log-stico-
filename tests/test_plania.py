@@ -3683,10 +3683,65 @@ def test_el_gate_solo_construye_cuando_hace_falta():
             f"[{descripcion}] build={salida.get('build')!r}, esperaba {esperado!r}"
 
 
-def test_el_release_automatico_no_publica_en_la_pagina_de_releases():
-    """El push automático a main refresca INSTALADOR/, pero NO tiene que crear
-    una entrada nueva en Releases por cada commit — eso es una decisión de
-    versión, reservada a un tag o a "Run workflow" manual."""
+def test_el_workflow_no_intenta_commitear_binarios_al_repositorio():
+    """GitHub rechaza cualquier archivo de más de 100 MB, y el ZIP portable
+    pesa 138.
+
+    El workflow copiaba los instaladores a INSTALADOR/ y los commiteaba. La
+    primera corrida que llegó hasta ese paso —después de arreglar el
+    instalador— construyó todo bien y murió empujando:
+
+        remote: error: File INSTALADOR/Plania_portable.zip is 138.79 MB;
+               this exceeds GitHub's file size limit of 100.00 MB
+        ! [remote rejected] HEAD -> main (pre-receive hook declined)
+
+    El Setup pesaba 99.7 MB: pasaba raspando y se iba a romper solo en cuanto
+    creciera. Los binarios van a la página de Releases (hasta 2 GB por
+    archivo, y sin tocar el historial de git); al repo va sólo el .txt con los
+    sha256.
+    """
+    import yaml
+    wf = yaml.safe_load(_release_yml())
+    pasos = wf["jobs"]["ejecutables-windows"]["steps"]
+    commit = next(p for p in pasos if p.get("name") == "Commitear los checksums")
+    guion = commit["run"]
+
+    assert "git add INSTALADOR/CHECKSUMS.txt" in guion, \
+        "hay que agregar el archivo puntual, no la carpeta"
+    assert "git add -f INSTALADOR/" not in guion, \
+        "agregar la carpeta entera vuelve a meter los binarios y el push se rechaza"
+    for binario in (".exe", ".zip"):
+        assert binario not in guion, \
+            f"el paso que commitea menciona {binario}: los binarios no van al repo"
+
+    # Y que exista el paso que sí los publica, donde no hay límite de 100 MB.
+    publica = [p for p in pasos if p.get("uses", "").startswith("softprops/action-gh-release")]
+    assert publica, "sin este paso los instaladores no llegan a ningún lado"
+    assert any("Plania_portable.zip" in p.get("with", {}).get("files", "")
+               for p in publica), "el portable tiene que publicarse como asset"
+
+
+def test_el_release_automatico_no_corta_una_version_nueva():
+    """El push automático a main publica, pero sobre una entrada rodante que se
+    pisa sola (`ultima-compilacion`, marcada como prerelease). Cortar una
+    VERSIÓN —con su número y su changelog— sigue siendo una decisión humana:
+    un tag o un "Run workflow" manual."""
+    import yaml
+    wf = yaml.safe_load(_release_yml())
+    pasos = wf["jobs"]["ejecutables-windows"]["steps"]
+
+    rodante = next(p for p in pasos
+                   if p.get("name", "").startswith("Publicar la última compilación"))
+    assert rodante["with"]["tag_name"] == "ultima-compilacion", \
+        "un tag distinto por commit llenaría Releases de entradas"
+    assert rodante["with"]["prerelease"] is True, \
+        "no puede figurar como la versión estable: cambia sin aviso"
+    assert "github.event_name == 'push'" in rodante["if"]
+
+
+def test_el_release_versionado_no_sale_en_un_push_automatico():
+    """La entrada versionada de Releases (la que se le pasa a un cliente) no
+    puede crearse sola en cada commit."""
     # La condición se lee del YAML ya parseado y no como líneas de texto: pasó
     # a ser multilínea (`if: >-`) al agregar el modo "solo verificar", y el
     # control anterior —que miraba la primera línea que contuviera "if:"— se
@@ -3705,11 +3760,16 @@ def test_el_release_automatico_no_publica_en_la_pagina_de_releases():
     # poder construir sobre una rama y ver si compila —por ejemplo después de
     # arreglar el instalador— sin dejar binarios en la rama por defecto ni
     # crear una entrada de Release.
-    commitear = next(p for p in pasos if p.get("name") == "Commitear INSTALADOR/")
-    for paso, cond in (("Publicar release", condicion),
-                       ("Commitear INSTALADOR/", commitear.get("if", ""))):
-        assert "solo_verificar" in cond, \
-            f"'{paso}' corre igual con solo_verificar activado"
+    # Todo paso que deje algo afuera —los dos que publican y el que commitea—
+    # tiene que respetarlo.
+    dejan_algo_afuera = [p for p in pasos
+                         if p.get("name", "").startswith("Publicar")
+                         or p.get("name") == "Commitear los checksums"]
+    assert len(dejan_algo_afuera) == 3, \
+        f"cambiaron los pasos que publican: {[p.get('name') for p in dejan_algo_afuera]}"
+    for paso in dejan_algo_afuera:
+        assert "solo_verificar" in paso.get("if", ""), \
+            f"'{paso['name']}' corre igual con solo_verificar activado"
     # YAML 1.1 lee `on:` como el booleano True, no como la cadena "on".
     disparadores = wf.get("on", wf.get(True))
     assert "solo_verificar" in disparadores["workflow_dispatch"]["inputs"], \
@@ -3808,7 +3868,7 @@ def test_el_panel_del_dueno_nunca_se_publica_en_el_repo():
     # su .bat), y una guarda escrita contra el nombre exacto de la primera
     # dejaba pasar la segunda.
     wf = _release_yml()
-    guarda = "Get-ChildItem INSTALADOR/Plania_Owner*"
+    guarda = '$archivos | Where-Object { $_.Name -like "Plania_Owner*" }'
     assert guarda in wf, \
         f"falta la guarda real ({guarda}) que impide publicar el build del dueño"
     i = wf.index(guarda)

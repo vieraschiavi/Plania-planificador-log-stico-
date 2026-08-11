@@ -1,14 +1,43 @@
 # INSTALADOR
 
-Acá queda el instalador de Plania listo para publicar, con su `sha256`. Lo
-deja la corrida del workflow **Release** — nadie lo sube a mano.
+Acá quedan los `sha256` de cada compilación (`CHECKSUMS.txt`). **Los archivos
+en sí están en la [página de Releases](../../releases)**, que es de donde se
+bajan. Todo lo deja la corrida del workflow **Release** — nadie sube nada a
+mano.
 
-| Archivo | Qué es |
+| Archivo (en Releases) | Qué es |
 |---|---|
-| `Plania_Setup.exe` | Instalador de Windows. Trae Python adentro: el cliente no instala nada más. |
-| `Plania_portable.zip` | El mismo programa sin instalar. Para máquinas sin permisos de administrador. |
+| `Plania Setup *.exe` | Instalador de Windows con ventana propia (Electron + React). Deja ícono en el escritorio, entrada en el menú Inicio y desinstalador. |
+| `Plania *.exe` | El mismo programa sin instalar. |
+| `Plania_Setup_v*.exe` | Instalador liviano, sin Electron: abre en el navegador. También deja accesos directos y desinstalador. |
+| `Plania_portable.zip` | Igual que el anterior pero sin instalar. |
 | `Plania_BAT.zip` | Código + `INICIAR_PLANIA.bat`. Requiere Python instalado. |
-| `CHECKSUMS.txt` | `sha256` de cada archivo, para verificar la descarga. |
+
+Hay dos clases de entrada en Releases:
+
+- **`ultima-compilacion`** — se rehace sola con cada cambio del producto y se
+  pisa a sí misma. Sirve para probar; cambia sin aviso.
+- **`v1.0.1`, `v1.0.2`…** — versiones cortadas a mano, con changelog. Son las
+  que se le pasan a un cliente.
+
+## Por qué los binarios no están en esta carpeta
+
+Porque GitHub no los deja. Se intentó, y el push terminó así:
+
+```
+remote: error: File INSTALADOR/Plania_portable.zip is 138.79 MB;
+       this exceeds GitHub's file size limit of 100.00 MB
+! [remote rejected] HEAD -> main (pre-receive hook declined)
+```
+
+El portable pesa 138 MB y el Setup 99.7 — el segundo pasaba raspando y se iba
+a romper solo en cuanto creciera un poco. Y aun si entraran, cada versión
+sumaría ~240 MB al historial de git **para siempre**: clonar el repositorio se
+iría poniendo más lento con cada release, sin forma de deshacerlo.
+
+En Releases el límite es 2 GB por archivo y no toca el historial. El
+`CHECKSUMS.txt` de acá sirve para lo mismo que servía tener el archivo: poder
+verificar que lo que bajaste es lo que se compiló.
 
 ## Las dos vías, y por qué hacen falta las dos
 
@@ -104,11 +133,8 @@ Publicar una versión con changelog en *Releases* es aparte: pusheá un tag
 (`git tag v1.0.1 && git push --tags`) o usá **Actions → Release → Run
 workflow**.
 
-Los binarios se **reemplazan**, no se acumulan. Aun así, cada versión que
-pasó por acá queda en el historial de git para siempre y un instalador pesa
-cientos de megabytes: clonar el repositorio se va poniendo más lento con cada
-release. Si molesta, la salida es dejar acá sólo los checksums y bajar los
-archivos desde *Releases*.
+Cada push automático rehace la entrada `ultima-compilacion` y actualiza
+`CHECKSUMS.txt` acá. Nada se acumula ni engorda el repositorio.
 
 ## Si la carpeta está vacía
 
