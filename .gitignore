@@ -55,5 +55,7 @@ web/assets/video/*.REVISAR.mp4
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 # Anclado a la raíz con el "/" inicial a propósito: sin él, "graft/" matchea
 # CUALQUIER carpeta llamada graft en el árbol, incluida .claude/skills/graft/
-# (el skill que graft init instala, que sí se versiona).
+# (el skill que graft init instala, que sí se versiona). Ya pasó una vez: algo
+# —probablemente `graft build` corriendo de nuevo— reagregó la variante sin
+# anclar debajo de esta. Si reaparece, se borra la sin anclar, no ésta.
 /graft/

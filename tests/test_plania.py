@@ -389,6 +389,37 @@ def _armador_bat():
     return modulo
 
 
+def test_el_gitignore_de_graft_no_desversiona_el_skill():
+    """`graft/` sin anclar en .gitignore matchea CUALQUIER carpeta llamada así
+    en el árbol — incluida `.claude/skills/graft/`, el skill que sí se
+    versiona. Ya pasó una vez: `graft build` reagrega esa línea sin anclar
+    cada vez que corre, duplicada debajo de la `/graft/` correcta.
+
+    El síntoma es silencioso: `git status` no marca nada raro hasta que a esa
+    carpeta le entra un archivo nuevo, o alguien reordena el .gitignore y la
+    versión sin anclar queda primero — ahí el skill desaparece del próximo
+    commit sin que nadie lo pida.
+    """
+    # Línea por línea y comparando el texto exacto, no `in`/`.count()` sobre
+    # todo el archivo: el propio comentario que explica esto menciona
+    # ".claude/skills/graft/", que CONTIENE la subcadena "/graft/" — buscarla
+    # como substring da un falso positivo de "duplicada" contra el comentario.
+    lineas = [l.strip() for l in
+             open(os.path.join(RAIZ, ".gitignore"), encoding="utf-8").read().splitlines()]
+    assert "graft/" not in lineas, (
+        "hay una entrada 'graft/' sin anclar en .gitignore — matchea también "
+        ".claude/skills/graft/. Tiene que ser '/graft/', y una sola vez.")
+    assert lineas.count("/graft/") == 1, \
+        "la entrada correcta '/graft/' está duplicada; dejar solo una"
+
+    import subprocess
+    ignorado = subprocess.run(
+        ["git", "check-ignore", ".claude/skills/graft/SKILL.md"],
+        cwd=RAIZ, capture_output=True, text=True)
+    assert ignorado.returncode != 0, \
+        ".claude/skills/graft/SKILL.md quedó ignorado — el skill no se versiona"
+
+
 def test_no_hay_configuracion_ni_claves_versionadas():
     """La configuración de Plania nunca va al repositorio, y menos su clave.
 
