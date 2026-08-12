@@ -388,7 +388,18 @@ function PantallaOfertas() {
       e(Tarjeta, { titulo: "Capital liberable", valor: plata(r.capital_liberable), acento: "#20BF6B" }),
       e(Tarjeta, { titulo: "Venta en riesgo", valor: plata(r.venta_en_riesgo), acento: "#E74C3C" }),
       e(Tarjeta, { titulo: "Margen extra/mes", valor: plata(r.margen_extra_mensual) }),
-      e(Tarjeta, { titulo: "Potencial por zonas", valor: plata(r.venta_potencial_zonas) })),
+      // Un cero grande y sin explicación se lee como "algo se rompió", no como
+      // "hoy no hay nada". Los otros tres nunca dan cero con datos reales;
+      // éste sí, cuando ninguna zona vende bastante por debajo de las
+      // comparables como para que valga la pena avisar. Con el detalle, el
+      // cero pasa a ser una respuesta.
+      e(Tarjeta, {
+        titulo: "Potencial por zonas",
+        valor: r.venta_potencial_zonas ? plata(r.venta_potencial_zonas) : "Sin brechas",
+        detalle: r.venta_potencial_zonas
+          ? null
+          : "Ninguna zona vende por debajo de sus comparables",
+      })),
 
     e("div", { className: "exportar-completo" },
       e(Exportar, { clave: "completo", etiqueta: "Exportar informe completo:" })),

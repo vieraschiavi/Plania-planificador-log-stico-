@@ -7,14 +7,12 @@
   },
   "title": "Plania · Planejamento logístico e comercial inteligente",
   "description": "Conecte o ERP que você já tem e descubra o que colocar em oferta, o que repor, o que reprecificar e por onde entregar. Copiloto de IA sobre os seus dados reais. Teste completo de 7 dias, sem cartão.",
-
   "nav_producto": "Produto",
   "nav_video": "Vídeo",
   "nav_precios": "Preços",
   "nav_descargas": "Downloads",
   "nav_contacto": "Contato",
   "nav_cta": "Testar 7 dias",
-
   "hero_badge": "Para distribuidoras, atacadistas e comércios do Uruguai e da América Latina",
   "hero_h1_a": "Seus dados já sabem",
   "hero_h1_b": "onde está o dinheiro",
@@ -22,7 +20,6 @@
   "hero_cta1": "Testar 7 dias grátis",
   "hero_cta2": "Ver o vídeo",
   "hero_nota": "Sem cartão. Todos os recursos liberados. Seus dados não saem da sua máquina.",
-
   "kpi1_n": "7 dias",
   "kpi1_t": "de teste completo",
   "kpi2_n": "6+",
@@ -31,16 +28,13 @@
   "kpi3_t": "formatos de exportação",
   "kpi4_n": "0",
   "kpi4_t": "migrações necessárias",
-
   "video_h": "Veja a Plania funcionando",
   "video_sub": "Percurso real do produto: conexão ao ERP, achados em dinheiro, copiloto e exportações. Escolha o idioma do vídeo acima.",
   "video_nota": "Legendas disponíveis em espanhol, inglês e português. Se o áudio dublado ainda não estiver publicado, o vídeo usa a faixa original com legendas no seu idioma.",
   "video_no_soporta": "Seu navegador não suporta a reprodução de vídeo HTML5.",
   "video_subtitulos": "Legendas",
-
   "plat_h": "O que ela faz pelo seu negócio, todos os dias",
   "plat_sub": "Não é mais um painel. Cada tela termina em uma decisão concreta, com o porquê em dinheiro.",
-
   "f1_t": "Adapta-se a qualquer ERP",
   "f1_d": "Zureo, Memory, Tango, Bejerman, Odoo, SAP Business One ou o PostgreSQL/MySQL/SQL Server/Oracle/SQLite/CSV que você já usa. Detecta suas colunas mesmo com nomes diferentes. Sem migrar nada, sem consultores.",
   "f2_t": "Copiloto sobre dados reais",
@@ -57,7 +51,6 @@
   "f7_d": "Revela a venda cruzada que está se perdendo: quais categorias os negócios do mesmo ramo compram em outras zonas e na sua ainda não.",
   "f8_t": "Tudo exportável",
   "f8_d": "Cada análise e cada resposta do copiloto sai em PDF, Word e Excel, pronta para mandar ao dono, ao comprador ou ao vendedor da rota.",
-
   "erps_h": "Seu ERP, sem mapear nada à mão",
   "erps_sub": "Não existe uma Plania por sistema. Existe um mapeamento automático que reconhece como cada um nomeia suas colunas, para que a conexão se monte sozinha.",
   "erp1_t": "Zureo",
@@ -69,7 +62,6 @@
   "erp4_t": "Bejerman",
   "erp4_d": "O mesmo vale para o Bejerman: se a sua instalação roda local, você se conecta direto à base. A Plania detecta as colunas mesmo que a sua instalação tenha personalizado os nomes.",
   "erps_metodo": "O resto fica por conta do mapeamento automático: 177 nomes de coluna típicos desses sistemas e também do Odoo, SAP Business One e bases genéricas — código, artigo, estoque, rubro, cardcode, itemcode, docdate e suas variantes. Se o seu sistema usa um nome que ainda não está na lista, ele é adicionado e continua funcionando.",
-
   "sug_h": "Cinco decisões, com o número real por trás",
   "sug_sub": "Não são gráficos: são as cinco perguntas que o dono de uma distribuidora se faz toda semana, cada uma com um exemplo real da base de demonstração.",
   "s1_t": "Excesso de estoque → oferta com desconto real",
@@ -77,13 +69,12 @@
   "s2_t": "Reposição antes da ruptura",
   "s2_d": "Cruza o giro real com o prazo de cada fornecedor. Exemplo real: “Bebidas Eco 558” tem 6 dias de estoque e o fornecedor demora 8 — <b>UYU 80.607/mês</b> de venda em risco se não repuser hoje. Em toda a base, são UYU 1.132.051 em risco.",
   "s3_t": "Reprecificação do que perde margem",
-  "s3_d": "Encontra os produtos que vendem abaixo da margem da categoria. Exemplo real: “Lácteos Clásico 736” vende com 14% de margem contra 25% da categoria — subir o preço 14,7% soma <b>UYU 5.757/mês</b>. Em toda a base, são <b>UYU 96.146/mês</b>.",
+  "s3_d": "Encontra os produtos que vendem abaixo da margem da categoria. Exemplo real: “Lácteos Clásico 736” vende com 14% de margem contra 25% da categoria — subir o preço 14,7% soma <b>UYU 5.765/mês</b>. Em toda a base, são <b>UYU 96.373/mês</b>.",
   "s4_t": "Venda cruzada por zona",
   "s4_d": "Compara quais categorias os negócios do mesmo ramo compram em cada zona. Exemplo real: em Punta del Este, só 67% dos negócios tipo Almacén compra produtos de Limpieza contra 99% no resto da base — uma categoria inteira sem oferecer nessa zona.",
   "s5_t": "Recuperação de clientes que pararam de comprar",
-  "s5_d": "Cruza a frequência habitual de cada cliente com há quanto tempo ele não pede. Exemplo real: “Almacén García” comprava <b>UYU 201.362</b> e está há 52 dias sem pedir. Em toda a base, há <b>UYU 893.688</b> em clientes para recuperar.",
+  "s5_d": "Cruza a frequência habitual de cada cliente com há quanto tempo ele não pede. Exemplo real: “Almacén García” comprava <b>UYU 207.288</b> e está há 52 dias sem pedir. Em toda a base, há <b>UYU 885.661</b> em clientes para recuperar.",
   "sug_nota": "Os cinco exemplos vêm de rodar os motores reais da Plania sobre a base de demonstração (dados sintéticos, não um cliente real) — para você ver o nível de detalhe antes de conectar a sua.",
-
   "vs_h": "Por que o que você já tem não basta",
   "vs_col1": "Plania",
   "vs_col2": "ERP tradicional",
@@ -104,7 +95,6 @@
   "vs_segun": "conforme a versão",
   "vs_limitada": "limitado",
   "vs_7dias": "7 dias",
-
   "precios_h": "Preços claros, na sua moeda",
   "precios_sub": "Cobrança pelo MercadoPago. Sem fidelidade: se um mês não valer a pena, você cancela.",
   "p_pop": "Mais escolhido",
@@ -129,13 +119,11 @@
   "p3_4": "Acordo de nível de serviço",
   "p_cta": "Pagar com MercadoPago",
   "p_cta_ent": "Falar com vendas",
-
   "demo_h": "Teste 7 dias com tudo liberado",
   "demo_sub": "Sem cartão e sem compromisso. Você conecta a sua base e a primeira tela já mostra quanto dinheiro está parado. Se não encontrar nada que valha a pena, você não paga nada.",
   "demo_email": "voce@empresa.com",
   "demo_cta": "Quero o teste completo",
   "demo_nota": "Um teste por e-mail. A licença chega na hora.",
-
   "desc_h": "Escolha como usar",
   "desc_sub": "O mesmo produto, três formas de começar. Os dados ficam sempre do seu lado.",
   "d1_t": "Instalador para Windows",
@@ -147,7 +135,6 @@
   "d3_t": "Direto do navegador",
   "d3_d": "Sem instalar nada nas máquinas. Ideal se a equipe trabalha de vários lugares.",
   "d3_b": "Abrir a versão web",
-
   "cont_h": "Vamos conversar",
   "cont_sub": "Escreva para nós e marcamos uma demonstração de 20 minutos com os seus próprios dados.",
   "cont_nombre": "Nome",
@@ -155,13 +142,11 @@
   "cont_empresa": "Empresa",
   "cont_msg": "Conte o que você vende e com qual sistema trabalha",
   "cont_cta": "Enviar",
-
   "foot_tag": "Planejamento logístico e comercial inteligente",
   "foot_legal": "Os valores estão em dólares e são cobrados pelo MercadoPago. A Plania não substitui o seu ERP: ela o lê.",
   "foot_prod": "Produto",
   "foot_emp": "Empresa",
   "foot_impl": "Programa de implementadores",
-
   "impl_title": "Implementadores de ERP · Comissão recorrente | Plania",
   "impl_description": "Programa de implementadores para consultores e técnicos que conectam ERPs. Você recebe a implementação inteira e uma comissão recorrente de 20% enquanto o cliente continuar ativo.",
   "impl_badge": "Para consultores e técnicos que já trabalham com ERPs",
@@ -170,7 +155,6 @@
   "impl_sub": "É você quem entra na base do cliente, mapeia as colunas e deixa a Plania funcionando. A implementação o cliente paga inteira para você. E enquanto ele continuar usando a Plania, você continua recebendo uma comissão — sem limite de tempo.",
   "impl_cta1": "Quero me candidatar",
   "impl_back": "Voltar à Plania",
-
   "impl_como_h": "Como funciona",
   "impl_paso1_t": "1. Você implementa",
   "impl_paso1_d": "Conecta o ERP do cliente (base direta ou Excel/CSV exportado), confere o mapeamento automático e monta o primeiro lote de sugestões com ele do lado. É o mesmo trabalho que você já faz com outras ferramentas.",
@@ -178,7 +162,6 @@
   "impl_paso2_d": "Você fatura direto para o cliente, na faixa de USD 450–950 conforme o tamanho da base. Essa receita é 100% sua — a Plania não toca um centavo.",
   "impl_paso3_t": "3. Você recebe a comissão, todo mês",
   "impl_paso3_d": "Enquanto o cliente pagar a assinatura, você recebe um percentual. Não precisa continuar trabalhando lá: é pago enquanto o cliente estiver ativo.",
-
   "impl_comision_h": "A comissão",
   "impl_comision_sub": "Simples, sem letra miúda: dois números, e eles sobem com o volume.",
   "impl_c1_t": "Implementação",
@@ -190,20 +173,16 @@
   "impl_c3_t": "A partir de 10 clientes ativos",
   "impl_c3_p": "25%",
   "impl_c3_d": "A comissão recorrente sobe automaticamente ao cruzar esse volume. Sem precisar pedir.",
-
   "impl_ejemplo_h": "Quanto é isso, em números",
   "impl_ejemplo_d": "Dez clientes no plano Pro (USD 129/mês) deixam <b>USD 258 por mês</b> de comissão recorrente — além do que você já cobrou em cada implementação. É receita que continua entrando mesmo em um mês em que você não implementou ninguém novo.",
-
   "impl_quien_h": "Para quem é isso",
   "impl_r1": "Consultores ou técnicos que já implementam ERPs, BI ou sistemas de gestão",
   "impl_r2": "Contadores ou escritórios que atendem distribuidoras e comércios",
   "impl_r3": "Não precisa de exclusividade nem de um mínimo de clientes para começar",
   "impl_r4": "Você escolhe os seus clientes: a Plania não interfere nessa relação comercial",
-
   "impl_form_h": "Candidatar-se",
   "impl_form_sub": "Conte com quais ERPs você trabalha e para quantos clientes dá suporte hoje.",
   "impl_form_msg": "Com quais ERPs você trabalha e para quantos clientes dá suporte hoje",
   "impl_form_cta": "Enviar candidatura",
-
   "impl_legal": "Os percentuais desta página são as condições vigentes do programa e podem ser atualizados; são confirmados por escrito antes de começar. Os valores estão em dólares."
 }

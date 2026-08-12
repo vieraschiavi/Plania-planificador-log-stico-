@@ -108,9 +108,14 @@ h2 { font-size: 1.1rem; margin: 28px 0 10px; color: var(--tinta); }
 .tabla th, .tabla td { padding: 8px 12px; text-align: left; white-space: nowrap; }
 .tabla th {
   background: #F2F6FB; color: var(--gris); font-weight: 600;
-  text-transform: capitalize; border-bottom: 1px solid var(--linea);
+  border-bottom: 1px solid var(--linea);
   position: sticky; top: 0;
 }
+/* Sin `text-transform: capitalize`: estaba para maquillar los nombres crudos
+   de las columnas del DataFrame ("sku", "dias_stock"). Ahora los encabezados
+   se escriben bien en base.js (ETIQUETAS), y capitalizar encima los rompía:
+   "Días de stock" salía "Días De Stock" y "Margen objetivo %", con la O y la
+   M en mayúscula donde no van. */
 .tabla tbody tr:nth-child(even) { background: #FBFCFE; }
 .tabla td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .nota-tabla { color: var(--gris); font-size: .82rem; margin-top: 6px; }
