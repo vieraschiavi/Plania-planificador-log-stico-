@@ -3294,9 +3294,28 @@ def test_leer_sql_rechaza_nombres_de_tabla_que_no_son_identificadores(tmp_path):
 
     # Lo que NO es un nombre de tabla ni una consulta que empiece con SELECT:
     # rechazado antes de tocar la base.
-    for malicioso in ("productos; DROP TABLE productos; --",
-                      "productos WHERE 1=1 UNION SELECT sql FROM sqlite_master",
-                      "productos -- comentario"):
+    for malicioso in (
+        "productos; DROP TABLE productos; --",
+        "productos WHERE 1=1 UNION SELECT sql FROM sqlite_master",
+        "productos -- comentario",
+        # La primera versión de este arreglo permitía espacios sueltos en el
+        # identificador ("varios ERP usan nombres con espacios"), y con eso
+        # ESTA línea pasaba la validación entera y leía sqlite_master de
+        # verdad — se comprobó ejecutándola contra una base real antes de
+        # corregir. Ninguna letra ni espacio es "especial", así que una
+        # inyección armada sólo con palabras clave (sin `;`, sin `=`, sin
+        # `--`) esquivaba limpio cualquier filtro que sólo mire símbolos.
+        # El caso de arriba con "WHERE 1=1" NO prueba esto: lo rechaza el
+        # `=`, no el UNION. Este caso rechaza por el espacio sin delimitar.
+        "productos union select sql from sqlite_master",
+        "productos join sqlite_master",
+        "productos order by 1",
+        # Delimitador que cierra temprano y deja una cola: el cierre de
+        # comillas/corchete no puede ser el fin de la validación si sobra
+        # texto después.
+        '"productos" union select 1',
+        "[productos] union select 1",
+    ):
         with pytest.raises(ValueError):
             conectores.leer_sql(eng, malicioso)
 
