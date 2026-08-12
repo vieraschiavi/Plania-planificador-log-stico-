@@ -123,7 +123,33 @@ En Vercel: **New Project → Import** el repo → **Deploy**. No hay nada que
 configurar: el `vercel.json` de la raíz ya declara que el sitio está en
 `web/` y que no hay build. Cada push a `main` vuelve a publicar solo.
 
-Dos decisiones del `vercel.json` que conviene no cambiar sin pensarlo:
+**`vercel.json` no admite comentarios, ni siquiera con el truco de la clave
+`"//"`.** Valida contra un esquema estricto y una propiedad de más corta el
+deploy entero:
+
+```
+The `vercel.json` schema validation failed with the following message:
+should NOT have additional property `//ignoreCommand`
+```
+
+Por eso lo que hay que explicar de ese archivo se explica acá.
+
+**`ignoreCommand`** existe porque Vercel despliega en cada push de cualquier
+rama, y este repositorio recibe muchos que no tocan la web —`packaging/`,
+`tests/`, workflows—. Cada uno gastaba un deploy hasta llegar al techo del
+plan gratuito:
+
+```
+Resource is limited - try again in 24 hours
+(more than 100, code: api-deployments-free-per-day)
+```
+
+Y ahí deja de desplegarse también lo que sí cambió la web. El comando sale 0
+—saltear— cuando el commit no tocó `web/` ni `vercel.json`, y 1 —construir—
+cuando sí. Si `HEAD^` no existe (primer deploy, clon sin historia) falla con
+otro código y Vercel construye igual: el default seguro.
+
+Otras dos decisiones del `vercel.json` que conviene no cambiar sin pensarlo:
 
 - El video y el póster se cachean un año (`immutable`) porque cambian de
   nombre cuando cambian.

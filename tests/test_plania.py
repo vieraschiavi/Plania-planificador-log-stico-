@@ -1338,6 +1338,26 @@ def test_vercel_publica_la_carpeta_correcta():
     assert not os.path.exists(os.path.join(RAIZ, "web", "vercel.json")), \
         "dos vercel.json se desincronizan; va uno solo, en la raíz"
 
+    # Vercel valida este archivo contra un esquema estricto: una propiedad que
+    # no conozca corta el deploy entero, no la ignora. El truco de documentar
+    # en JSON con una clave "//" —que en otros archivos es inofensivo— acá
+    # rompe la publicación:
+    #
+    #   The `vercel.json` schema validation failed with the following message:
+    #   should NOT have additional property `//ignoreCommand`
+    #
+    # Lo que haya que explicar de este archivo va en docs/DESPLIEGUE.md.
+    CONOCIDAS = {
+        "$schema", "buildCommand", "installCommand", "outputDirectory",
+        "framework", "cleanUrls", "trailingSlash", "redirects", "rewrites",
+        "headers", "ignoreCommand", "devCommand", "public", "regions",
+        "functions", "crons", "git", "images", "redirects",
+    }
+    de_mas = sorted(set(cfg) - CONOCIDAS)
+    assert not de_mas, (
+        f"vercel.json tiene propiedades que su esquema no admite: {de_mas}. "
+        "Vercel corta el deploy en vez de ignorarlas.")
+
 
 def test_la_web_no_finge_vender_sin_backend():
     """Sin backend configurado, la web no puede declarar PLANIA_BACKEND: el
