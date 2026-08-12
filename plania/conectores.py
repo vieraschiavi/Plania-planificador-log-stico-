@@ -21,6 +21,7 @@ SAP Business One) y el autodetector cubre el resto por sinónimos.
 from __future__ import annotations
 
 import os
+import re
 import unicodedata
 
 import pandas as pd
@@ -180,10 +181,49 @@ def listar_tablas(engine) -> list[str]:
     return inspect(engine).get_table_names()
 
 
+# Nombre de tabla válido: identificador simple, opcionalmente con esquema
+# ("dbo.productos"), o entre comillas dobles o corchetes para el caso de
+# nombres con espacios ("[Mi Tabla]") — varios ERP de Uruguay usan SQL Server
+# y el usuario copia el nombre tal cual del administrador de su ERP.
+#
+# A propósito NO se permite un espacio suelto en el identificador simple: en
+# SQL válido, un identificador sin delimitar nunca lleva espacios — si los
+# lleva, va entre corchetes o comillas. La primera versión de este patrón sí
+# los permitía (`[\w ]*` sin exigir delimitador), y con eso "productos union
+# select sql from sqlite_master" pasaba la validación entera: ninguna letra
+# ni espacio es un carácter "especial", así que una inyección por palabras
+# clave —sin punto y coma, sin comillas, sin "="— la esquivaba limpio. Se
+# probó de verdad contra una base real: leyó sqlite_master. El delimitador
+# entre comillas/corchetes cierra el identificador donde corresponde — lo que
+# venga después del cierre y no sea `$` o un `.esquema` rompe el match.
+_IDENT_SIMPLE = r"[A-Za-z_][A-Za-z0-9_]*"
+_IDENT_ENTRECOMILLADO = r'"[^"]+"|\[[^\]]+\]'
+_IDENT = rf"(?:{_IDENT_SIMPLE}|{_IDENT_ENTRECOMILLADO})"
+_TABLA_VALIDA = re.compile(rf"^{_IDENT}(\.{_IDENT})?$")
+
+
 def leer_sql(engine, tabla_o_query: str, limite: int | None = None) -> pd.DataFrame:
+    """Lee una tabla por nombre, o corre una consulta completa si `tabla_o_query`
+    ya empieza con SELECT — es la pantalla "Conectar ERP" > "Elegir tablas
+    manualmente", pensada para que el dueño de la base pegue su propia
+    consulta cuando el autodescubrimiento no encuentra la tabla.
+
+    Cuando NO es una consulta completa, se trata como nombre de tabla y se
+    valida como identificador antes de interpolarlo en el SQL: un nombre de
+    tabla no puede llevar punto y coma, comentarios (`--`) ni subconsultas.
+    Sin este control, cualquier cosa que llegue a este campo sin pasar por el
+    autodescubrimiento —una integración futura, una config compartida entre
+    varias instalaciones— podía inyectar SQL arbitrario. El modo "pegá tu
+    propia consulta" sigue exactamente igual: eso es a propósito, lo tipea el
+    dueño de la base sobre su propia conexión.
+    """
     from sqlalchemy import text
     q = tabla_o_query.strip()
     if not q.lower().startswith("select"):
+        if not _TABLA_VALIDA.match(q):
+            raise ValueError(
+                f"'{tabla_o_query}' no es un nombre de tabla válido. Si querés "
+                "usar una consulta, tiene que empezar con SELECT.")
         q = f"SELECT * FROM {q}"
     if limite:
         q = f"{q} LIMIT {int(limite)}"

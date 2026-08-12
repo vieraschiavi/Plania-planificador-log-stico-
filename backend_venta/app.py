@@ -16,6 +16,7 @@ Para producción falta solo configuración real (no código):
 """
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 
@@ -33,6 +34,18 @@ from plania import config as pconfig
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MP_API = "https://api.mercadopago.com"
+
+# Solo para los 5xx — un fallo de ESTE servidor, no un pedido mal formado del
+# cliente. `pauditoria.registrar` ya deja constancia de cada licencia emitida
+# con éxito; lo que faltaba era el camino inverso: cuando MercadoPago o
+# Anthropic no contestan bien, o falta un secreto, la respuesta al llamante
+# ya lo dice (HTTPException viaja igual), pero nada quedaba de este lado. Con
+# reintentos automáticos de MercadoPago hasta recibir 200, una falla
+# sistémica (token rotado, por ejemplo) fallaría cada webhook en silencio: el
+# primer síntoma visible sería un cliente que pagó y no recibió licencia,
+# días después, sin ningún registro que explique por qué. Nunca se loguea el
+# secreto en sí, solo que la llamada que lo usa falló.
+logger = logging.getLogger("backend_venta")
 
 app = FastAPI(title="Plania · Backend de venta", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -154,6 +167,8 @@ async def estado(request: Request, claims: dict = Depends(requerir_licencia)):
 def _mp_token() -> str:
     t = os.environ.get("MP_ACCESS_TOKEN") or pconfig.leer_extra("MP_ACCESS_TOKEN")
     if not t:
+        logger.error("MP_ACCESS_TOKEN no configurado: ningún checkout ni "
+                     "webhook puede procesarse hasta que se cargue.")
         raise HTTPException(503, "MP_ACCESS_TOKEN no configurado en el servidor")
     return t
 
@@ -210,6 +225,8 @@ async def checkout(request: Request, payload: dict):
     r = requests.post(f"{MP_API}/checkout/preferences", json=pref,
                       headers={"Authorization": f"Bearer {_mp_token()}"}, timeout=15)
     if not r.ok:
+        logger.error("MercadoPago rechazó la preferencia (plan=%s, status=%s): %s",
+                     plan, r.status_code, r.text[:300])
         raise HTTPException(502, f"MercadoPago rechazó la preferencia: {r.text[:300]}")
     data = r.json()
     pauditoria.registrar("checkout_creado", {"plan": plan, "email": email,
@@ -254,6 +271,12 @@ async def webhook_mercadopago(request: Request, payload: dict):
     r = requests.get(f"{MP_API}/v1/payments/{payment_id}",
                      headers={"Authorization": f"Bearer {_mp_token()}"}, timeout=15)
     if not r.ok:
+        # MercadoPago reintenta este webhook hasta recibir un 200 — si esto
+        # falla siempre (token rotado, por ejemplo), el síntoma que ve el
+        # dueño del negocio es "un cliente pagó y no le llegó la licencia",
+        # sin ninguna pista de por qué. Esto es la pista.
+        logger.error("Webhook: no se pudo verificar payment_id=%s contra "
+                     "MercadoPago (status=%s): %s", payment_id, r.status_code, r.text[:300])
         raise HTTPException(502, "no se pudo verificar el pago contra MercadoPago")
     pago = r.json()
     if pago.get("status") != "approved":
@@ -316,6 +339,8 @@ async def licencia_por_pago(request: Request, payment_id: str):
     r = requests.get(f"{MP_API}/v1/payments/{payment_id}",
                      headers={"Authorization": f"Bearer {_mp_token()}"}, timeout=15)
     if not r.ok:
+        logger.error("Rescate: no se pudo verificar payment_id=%s contra "
+                     "MercadoPago (status=%s): %s", payment_id, r.status_code, r.text[:300])
         raise HTTPException(502, "no se pudo verificar el pago contra MercadoPago")
     pago = r.json()
     if pago.get("status") != "approved":
@@ -347,6 +372,8 @@ async def gateway_copiloto(request: Request, payload: dict,
         raise HTTPException(400, "falta 'texto'")
     key = os.environ.get("ANTHROPIC_API_KEY") or pconfig.leer_extra("ANTHROPIC_API_KEY")
     if not key:
+        logger.error("ANTHROPIC_API_KEY no configurada: el Copiloto no responde "
+                     "a ningún cliente hasta que se cargue.")
         raise HTTPException(503, "ANTHROPIC_API_KEY no configurada en el gateway")
 
     with uso.lock_cliente(claims["sub"]):
@@ -361,6 +388,10 @@ async def gateway_copiloto(request: Request, payload: dict,
                 timeout=30)
             data = r.json()
             if not r.ok:
+                # Nunca la key ni el texto de la consulta (puede llevar datos
+                # del negocio del cliente): sólo lo que Anthropic contestó.
+                logger.error("Copiloto: Anthropic devolvió %s para cliente=%s: %s",
+                             r.status_code, claims.get("sub"), data.get("error"))
                 raise HTTPException(502, (data.get("error") or {}).get("message",
                                                                        "error de Anthropic"))
             usage = data.get("usage", {})
@@ -372,6 +403,8 @@ async def gateway_copiloto(request: Request, payload: dict,
         except HTTPException:
             raise
         except Exception as e:
+            logger.exception("Copiloto: fallo inesperado llamando a Claude "
+                             "para cliente=%s", claims.get("sub"))
             raise HTTPException(500, f"error llamando a Claude: {e}") from e
 
 
@@ -390,6 +423,11 @@ async def descargar(request: Request, token: str):
     ruta = os.environ.get("PLANIA_INSTALADOR_PATH",
                           os.path.join(ROOT, "dist", "Plania_Setup.exe"))
     if not os.path.exists(ruta):
+        # Quien llega hasta acá ya pagó y tiene un token válido de un solo uso
+        # — este 503 es "pagaste bien y no hay nada que darte", el peor
+        # momento posible para que quede sin rastro.
+        logger.error("Token de descarga válido pero no existe el instalador "
+                     "en PLANIA_INSTALADOR_PATH=%s", ruta)
         raise HTTPException(503, "El instalador todavía no está publicado en este servidor "
                                  "(configurá PLANIA_INSTALADOR_PATH).")
     return FileResponse(ruta, filename=os.path.basename(ruta))
