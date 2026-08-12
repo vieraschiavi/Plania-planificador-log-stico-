@@ -53,9 +53,16 @@ web/assets/video/*.REVISAR.mp4
 .coverage
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
-# Anclado a la raíz con el "/" inicial a propósito: sin él, "graft/" matchea
-# CUALQUIER carpeta llamada graft en el árbol, incluida .claude/skills/graft/
-# (el skill que graft init instala, que sí se versiona). Ya pasó una vez: algo
-# —probablemente `graft build` corriendo de nuevo— reagregó la variante sin
-# anclar debajo de esta. Si reaparece, se borra la sin anclar, no ésta.
-/graft/
+#
+# La línea de abajo NO se puede anclar con "/" inicial aunque matchee también
+# .claude/skills/graft/ (el skill que sí se versiona) — y no es una elección,
+# es un bug real de la herramienta: `ensureGitignored()` en
+# @nanonets/graft/dist/context/node-file.js sólo reconoce como "ya ignorado"
+# las formas literales "graft/" o "graft", nunca "/graft/". Con la versión
+# anclada sola, cada `graft build` (lo dispara el hook Stop, solo, al final de
+# cada turno) volvía a agregar esta línea sin anclar — pasó tres veces. Dejar
+# la forma que espera hace que su propio chequeo de "ya está" la encuentre y
+# no reescriba más. La negación de abajo, agregada UNA vez con esta línea ya
+# estable, es lo que evita que se lleve puesto el skill.
+graft/
+!/.claude/skills/graft/

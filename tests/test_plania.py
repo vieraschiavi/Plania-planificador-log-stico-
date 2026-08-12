@@ -392,25 +392,34 @@ def _armador_bat():
 def test_el_gitignore_de_graft_no_desversiona_el_skill():
     """`graft/` sin anclar en .gitignore matchea CUALQUIER carpeta llamada así
     en el árbol — incluida `.claude/skills/graft/`, el skill que sí se
-    versiona. Ya pasó una vez: `graft build` reagrega esa línea sin anclar
-    cada vez que corre, duplicada debajo de la `/graft/` correcta.
+    versiona.
 
-    El síntoma es silencioso: `git status` no marca nada raro hasta que a esa
-    carpeta le entra un archivo nuevo, o alguien reordena el .gitignore y la
-    versión sin anclar queda primero — ahí el skill desaparece del próximo
-    commit sin que nadie lo pida.
+    Se probó anclarla ("/graft/") para evitar la colisión, y no aguantó: es un
+    bug real de la herramienta, no un descuido propio. `ensureGitignored()` en
+    @nanonets/graft/dist/context/node-file.js sólo reconoce como "ya ignorado"
+    las formas literales "graft/" o "graft" — nunca "/graft/". Con la versión
+    anclada sola, cada `graft build` (lo dispara el hook Stop, solo, al final
+    de cada turno) volvía a agregar su propia línea sin anclar, duplicada.
+    Pasó tres veces seguidas antes de entender la causa.
+
+    La forma que aguanta: dejar la línea EXACTA que el chequeo de graft espera
+    (para que dé por hecho que ya está y no reescriba más) y agregar una
+    negación aparte que re-incluya el skill. El síntoma si esto se rompe es
+    silencioso: `git status` no marca nada raro hasta que a esa carpeta le
+    entra un archivo nuevo.
     """
-    # Línea por línea y comparando el texto exacto, no `in`/`.count()` sobre
-    # todo el archivo: el propio comentario que explica esto menciona
-    # ".claude/skills/graft/", que CONTIENE la subcadena "/graft/" — buscarla
-    # como substring da un falso positivo de "duplicada" contra el comentario.
     lineas = [l.strip() for l in
              open(os.path.join(RAIZ, ".gitignore"), encoding="utf-8").read().splitlines()]
-    assert "graft/" not in lineas, (
-        "hay una entrada 'graft/' sin anclar en .gitignore — matchea también "
-        ".claude/skills/graft/. Tiene que ser '/graft/', y una sola vez.")
-    assert lineas.count("/graft/") == 1, \
-        "la entrada correcta '/graft/' está duplicada; dejar solo una"
+    assert lineas.count("graft/") == 1, (
+        "tiene que haber EXACTAMENTE una línea 'graft/' literal — es la forma "
+        "que el chequeo interno de graft reconoce como 'ya ignorado'. Sin "
+        "ella (o anclada con '/'), graft build vuelve a agregar la suya.")
+    assert lineas.count("!/.claude/skills/graft/") == 1, (
+        "falta (o está duplicada) la negación que re-incluye el skill después "
+        "de la línea 'graft/' — sin ella, 'graft/' se lleva puesto el skill.")
+    assert lineas.index("graft/") < lineas.index("!/.claude/skills/graft/"), (
+        "la negación tiene que ir DESPUÉS de 'graft/': en .gitignore gana el "
+        "último patrón que matchea una ruta.")
 
     import subprocess
     ignorado = subprocess.run(
