@@ -21,6 +21,7 @@ SAP Business One) y el autodetector cubre el resto por sinónimos.
 from __future__ import annotations
 
 import os
+import re
 import unicodedata
 
 import pandas as pd
@@ -180,10 +181,35 @@ def listar_tablas(engine) -> list[str]:
     return inspect(engine).get_table_names()
 
 
+# Nombre de tabla válido: identificador simple, opcionalmente con esquema
+# ("dbo.productos"). Entre comillas dobles o corchetes también, porque varios
+# ERP de Uruguay usan SQL Server con nombres de tabla que llevan mayúsculas o
+# espacios y el usuario los copia tal cual del administrador de su ERP.
+_TABLA_VALIDA = re.compile(r'^[\["]?[A-Za-z_][\w ]*[\]"]?(\.[\["]?[A-Za-z_][\w ]*[\]"]?)?$')
+
+
 def leer_sql(engine, tabla_o_query: str, limite: int | None = None) -> pd.DataFrame:
+    """Lee una tabla por nombre, o corre una consulta completa si `tabla_o_query`
+    ya empieza con SELECT — es la pantalla "Conectar ERP" > "Elegir tablas
+    manualmente", pensada para que el dueño de la base pegue su propia
+    consulta cuando el autodescubrimiento no encuentra la tabla.
+
+    Cuando NO es una consulta completa, se trata como nombre de tabla y se
+    valida como identificador antes de interpolarlo en el SQL: un nombre de
+    tabla no puede llevar punto y coma, comentarios (`--`) ni subconsultas.
+    Sin este control, cualquier cosa que llegue a este campo sin pasar por el
+    autodescubrimiento —una integración futura, una config compartida entre
+    varias instalaciones— podía inyectar SQL arbitrario. El modo "pegá tu
+    propia consulta" sigue exactamente igual: eso es a propósito, lo tipea el
+    dueño de la base sobre su propia conexión.
+    """
     from sqlalchemy import text
     q = tabla_o_query.strip()
     if not q.lower().startswith("select"):
+        if not _TABLA_VALIDA.match(q):
+            raise ValueError(
+                f"'{tabla_o_query}' no es un nombre de tabla válido. Si querés "
+                "usar una consulta, tiene que empezar con SELECT.")
         q = f"SELECT * FROM {q}"
     if limite:
         q = f"{q} LIMIT {int(limite)}"

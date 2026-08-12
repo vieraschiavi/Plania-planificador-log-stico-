@@ -694,7 +694,8 @@ def test_los_requisitos_del_backend_cubren_lo_que_el_backend_importa():
                "portalocker": "portalocker", "cryptography": "cryptography"}
     estandar_o_propio = {"os", "sys", "json", "re", "time", "secrets", "sqlite3",
                          "hashlib", "getpass", "shutil", "contextlib", "datetime",
-                         "typing", "__future__", "backend_venta", "plania", "keyring"}
+                         "typing", "__future__", "backend_venta", "plania", "keyring",
+                         "logging"}
 
     faltan = set()
     for ruta in fuentes:
@@ -794,6 +795,44 @@ def test_checkout_mercadopago_rechaza_la_preferencia():
             c = TestClient(app, client=("203.0.113.63", 51000))
             r = c.post("/checkout", json={"plan": "pro", "email": "x@y.uy"})
             assert r.status_code == 502
+    finally:
+        os.environ.pop("MP_ACCESS_TOKEN", None)
+
+
+def test_los_fallos_5xx_del_backend_de_venta_quedan_en_el_log(caplog):
+    """MercadoPago reintenta un webhook hasta recibir 200. Si el que falla es
+    ESTE servidor —token rotado, servicio caído del otro lado— cada reintento
+    fallaba con 502 sin dejar ningún rastro server-side: el primer síntoma
+    visible era un cliente que pagó y no recibió la licencia, descubierto
+    días después por un reclamo, sin log que explicara por qué. Se agregó
+    logging en los 8 puntos que responden 5xx (fallo propio del servidor);
+    los 4xx (pedido mal formado del cliente) se dejan afuera a propósito —
+    son esperados y de alto volumen, loguearlos como error sería ruido.
+
+    Este test no vuelve a probar cada código de estado (ya lo hacen los tests
+    de arriba) — prueba específicamente que la respuesta al llamante venga
+    acompañada de algo en el log, para el caso más crítico: el webhook.
+    """
+    import logging
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    os.environ["MP_ACCESS_TOKEN"] = "TEST-token"
+    try:
+        with patch("backend_venta.app.requests.get") as mock_get:
+            mock_get.return_value = _RespuestaFalsa(ok=False, text="MercadoPago caído")
+            c = TestClient(app, client=("203.0.113.90", 51000))
+            with caplog.at_level(logging.ERROR, logger="backend_venta"):
+                r = c.post("/webhooks/mercadopago",
+                          json={"type": "payment", "data": {"id": "PAGO-LOG-1"}})
+            assert r.status_code == 502
+            assert any("PAGO-LOG-1" in reg.message for reg in caplog.records), (
+                "el 502 del webhook no dejó nada en el log — sin esto, un fallo "
+                "sistémico de MercadoPago se descubre por un reclamo del cliente, "
+                "días después, sin pista de qué pasó")
     finally:
         os.environ.pop("MP_ACCESS_TOKEN", None)
 
@@ -3218,6 +3257,51 @@ def _base_con_nombres_inventados(tmp_path):
     c.commit()
     c.close()
     return ruta
+
+
+def test_leer_sql_rechaza_nombres_de_tabla_que_no_son_identificadores(tmp_path):
+    """'Conectar ERP' > 'Elegir tablas manualmente' es un `st.text_input` libre
+    (app/app.py): el dueño de la base tipea un nombre de tabla, o pega una
+    consulta completa si el autodescubrimiento no la encuentra. Lo segundo es
+    a propósito — pero lo primero se interpolaba tal cual en
+    `f"SELECT * FROM {q}"` sin comprobar que fuera un nombre de tabla y no
+    cualquier otra cosa.
+
+    Hoy el único que llena ese campo es el dueño de su propia conexión, así
+    que el riesgo inmediato es bajo. Pero es la clase de atajo que se vuelve
+    peligroso en cuanto ese valor deje de venir de un tipeo manual —una
+    integración, una config compartida entre instalaciones— y nadie se
+    acuerde de revisarlo. El modo "pegá tu consulta" sigue igual: eso ya
+    ejecuta lo que el usuario escriba, por diseño.
+    """
+    from plania import conectores
+
+    ruta = str(tmp_path / "t.db")
+    import sqlite3
+    c = sqlite3.connect(ruta)
+    c.execute("CREATE TABLE productos (id INTEGER, nombre TEXT)")
+    c.execute("INSERT INTO productos VALUES (1, 'x')")
+    c.commit()
+    c.close()
+    eng = conectores.conectar_sql(f"sqlite:///{ruta}")
+
+    # Nombres de tabla legítimos: pasan.
+    assert len(conectores.leer_sql(eng, "productos")) == 1
+    assert len(conectores.leer_sql(eng, '"productos"')) == 1
+
+    # Consulta completa: sigue funcionando igual que siempre.
+    assert len(conectores.leer_sql(eng, "SELECT * FROM productos")) == 1
+
+    # Lo que NO es un nombre de tabla ni una consulta que empiece con SELECT:
+    # rechazado antes de tocar la base.
+    for malicioso in ("productos; DROP TABLE productos; --",
+                      "productos WHERE 1=1 UNION SELECT sql FROM sqlite_master",
+                      "productos -- comentario"):
+        with pytest.raises(ValueError):
+            conectores.leer_sql(eng, malicioso)
+
+    # La tabla sigue intacta: el intento de DROP nunca llegó a ejecutarse.
+    assert len(conectores.leer_sql(eng, "productos")) == 1
 
 
 def test_encuentra_las_tablas_aunque_se_llamen_cualquier_cosa(tmp_path):

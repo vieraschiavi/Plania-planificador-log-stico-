@@ -43,9 +43,16 @@ automática vía MercadoPago y licencias JWT (demo de 7 días full).
 | Instalar deps de test | `pip install -r requirements.txt pytest httpx` (ver `.github/workflows/ci.yml`) |
 
 > No hay linter/formatter configurado en el repo. No introduzcas uno sin pedirlo.
-> El CI (`.github/workflows/ci.yml`) hoy solo corre manual (`workflow_dispatch`): los
-> triggers automáticos están apagados a propósito porque esta cuenta no asigna runners
-> a este repo privado (ver el comentario en ese archivo antes de "arreglarlo").
+> El CI (`.github/workflows/ci.yml`) hoy solo corre manual (`workflow_dispatch`). Se apagaron
+> los triggers automáticos porque en su momento la cuenta no asignaba runners; **ya no es el
+> caso** — el workflow **Release** corrió en Windows con éxito varias veces (ver
+> `INSTALADOR/CHECKSUMS.txt` y la página de Releases), así que la causa original ya no
+> aplica. Sigue apagado porque es una decisión que hay que tomar, no porque esté roto — **no
+> lo reactivés sin que te lo pidan** (ver el comentario en ese archivo antes de "arreglarlo").
+> **El repositorio es público** (no privado, como decía esta nota antes): todo lo que
+> `packaging/proteger_codigo.py` saca de los instaladores para que un cliente no lo lea
+> —`plania/negocio.py`, `plania/owner.py`, `docs/` interna, `backend_venta/`— está igual acá
+> en texto plano, para cualquiera. Ver la nota completa en `INSTALADOR/README.md`.
 > `packaging/` (PyInstaller + Inno Setup) y `desktop/` (Electron) son para Windows/build
 > de escritorio; no corras esos builds en este entorno Linux salvo que se pida explícitamente.
 
