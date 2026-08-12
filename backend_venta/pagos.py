@@ -19,47 +19,47 @@ lo lee MercadoPago, no el comprador, y lo descarta. El cliente pagaba y no
 recibía nada. Guardándola acá, la página de gracias puede pedirla con el
 `payment_id` que MercadoPago ya le puso en la URL.
 
-Vive en la misma base SQLite que `uso.py` y `descargas.py`, en tabla aparte,
-para sobrevivir a un reinicio del proceso.
+Vive en la misma base que `uso.py` y `descargas.py` (por defecto SQLite;
+si `PLANIA_USO_DB` es una URL de Postgres, esa), en tabla aparte, para
+sobrevivir a un reinicio del proceso.
 """
 from __future__ import annotations
 
-import json
-import os
-import sqlite3
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
+
+from backend_venta.db import insertar_ignorando_duplicados, obtener_engine
 from backend_venta.uso import DB_PATH
 
-_ESQUEMA = """
-CREATE TABLE IF NOT EXISTS pagos_procesados (
-    payment_id TEXT PRIMARY KEY,
-    cliente_id TEXT NOT NULL,
-    plan TEXT NOT NULL,
-    licencia TEXT NOT NULL,
-    token_descarga TEXT NOT NULL,
-    creado TEXT NOT NULL
+metadata = sa.MetaData()
+
+pagos_tabla = sa.Table(
+    "pagos_procesados", metadata,
+    sa.Column("payment_id", sa.String, primary_key=True),
+    sa.Column("cliente_id", sa.String, nullable=False),
+    sa.Column("plan", sa.String, nullable=False),
+    sa.Column("licencia", sa.String, nullable=False),
+    sa.Column("token_descarga", sa.String, nullable=False),
+    sa.Column("creado", sa.String, nullable=False),
 )
-"""
 
 
-def _conn(db_path: str = DB_PATH) -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.execute(_ESQUEMA)
-    return conn
+def _engine(db_path: str = DB_PATH) -> sa.engine.Engine:
+    engine = obtener_engine(db_path)
+    metadata.create_all(engine, checkfirst=True)
+    return engine
 
 
 def buscar(payment_id: str, db_path: str = DB_PATH) -> dict | None:
     """Lo emitido para ese pago, o None si todavía no se procesó."""
-    conn = _conn(db_path)
-    try:
+    engine = _engine(db_path)
+    with engine.connect() as conn:
         fila = conn.execute(
-            "SELECT cliente_id, plan, licencia, token_descarga, creado "
-            "FROM pagos_procesados WHERE payment_id = ?", (str(payment_id),)
-        ).fetchone()
-    finally:
-        conn.close()
+            sa.select(pagos_tabla.c.cliente_id, pagos_tabla.c.plan, pagos_tabla.c.licencia,
+                      pagos_tabla.c.token_descarga, pagos_tabla.c.creado)
+            .where(pagos_tabla.c.payment_id == str(payment_id))
+        ).first()
     if not fila:
         return None
     return {"cliente_id": fila[0], "plan": fila[1], "licencia": fila[2],
@@ -73,28 +73,21 @@ def registrar(payment_id: str, cliente_id: str, plan: str, licencia: str,
     Si el pago ya estaba registrado no se pisa nada y se devuelve lo que había:
     dos notificaciones simultáneas del mismo pago tienen que terminar con el
     comprador teniendo UNA licencia, no dos. La condición de carrera la
-    resuelve la clave primaria, no un chequeo previo — entre un `SELECT` y un
-    `INSERT` entra la otra notificación.
+    resuelve la clave primaria (vía `ON CONFLICT DO NOTHING`), no un chequeo
+    previo — entre un `SELECT` y un `INSERT` entra la otra notificación.
     """
-    conn = _conn(db_path)
-    try:
-        conn.execute(
-            "INSERT OR IGNORE INTO pagos_procesados "
-            "(payment_id, cliente_id, plan, licencia, token_descarga, creado) "
-            "VALUES (?,?,?,?,?,?)",
-            (str(payment_id), cliente_id, plan, licencia, token_descarga,
-             datetime.now(timezone.utc).isoformat()))
-        conn.commit()
-    finally:
-        conn.close()
+    engine = _engine(db_path)
+    insertar_ignorando_duplicados(
+        engine, pagos_tabla,
+        payment_id=str(payment_id), cliente_id=cliente_id, plan=plan,
+        licencia=licencia, token_descarga=token_descarga,
+        creado=datetime.now(timezone.utc).isoformat())
     # Se relee en vez de devolver lo recién armado: si otra notificación ganó
     # la carrera, lo válido es lo suyo, no lo nuestro.
     return buscar(payment_id, db_path)
 
 
 def total(db_path: str = DB_PATH) -> int:
-    conn = _conn(db_path)
-    try:
-        return conn.execute("SELECT COUNT(*) FROM pagos_procesados").fetchone()[0]
-    finally:
-        conn.close()
+    engine = _engine(db_path)
+    with engine.connect() as conn:
+        return conn.execute(sa.select(sa.func.count()).select_from(pagos_tabla)).scalar_one()

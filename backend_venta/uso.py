@@ -5,78 +5,81 @@ Cada llamada al gateway del Copiloto queda registrada acá — es la base para
 saber si un cliente superó su cupo mensual y para facturar el excedente.
 También registra qué emails ya consumieron la demo de 7 días (una por email).
 
-SQLite por simplicidad: alcanza para este servicio corriendo en un solo
-servidor; migrar a Postgres es cambiar la URL de conexión si hace falta
-escalar.
+Por defecto vive en un archivo SQLite (alcanza para un solo servidor). Si
+`PLANIA_USO_DB` es una URL de conexión (por ejemplo una Postgres gratuita de
+Neon o Supabase) usa esa base en su lugar — ver `backend_venta/db.py`.
 """
 from __future__ import annotations
 
 import contextlib
 import hashlib
 import os
-import sqlite3
+import tempfile
 from datetime import datetime, timezone
 
 import portalocker
+import sqlalchemy as sa
+
+from backend_venta.db import insertar_ignorando_duplicados, obtener_engine
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("PLANIA_USO_DB", os.path.join(ROOT, "data", "uso_licencias.db"))
 
-_ESQUEMA = """
-CREATE TABLE IF NOT EXISTS uso (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_id TEXT NOT NULL,
-    fecha TEXT NOT NULL,
-    canal TEXT NOT NULL,
-    ref_id TEXT,
-    tok_in INTEGER DEFAULT 0,
-    tok_out INTEGER DEFAULT 0,
-    unidades REAL DEFAULT 0,
-    costo_est REAL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS trials (
-    email TEXT PRIMARY KEY,
-    fecha TEXT NOT NULL
-);
-"""
+_LOCK_DIR = os.environ.get("PLANIA_LOCK_DIR", tempfile.gettempdir())
+
+metadata = sa.MetaData()
+
+uso_tabla = sa.Table(
+    "uso", metadata,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("cliente_id", sa.String, nullable=False),
+    sa.Column("fecha", sa.String, nullable=False),
+    sa.Column("canal", sa.String, nullable=False),
+    sa.Column("ref_id", sa.String),
+    sa.Column("tok_in", sa.Integer, default=0),
+    sa.Column("tok_out", sa.Integer, default=0),
+    sa.Column("unidades", sa.Float, default=0),
+    sa.Column("costo_est", sa.Float, default=0),
+)
+
+trials_tabla = sa.Table(
+    "trials", metadata,
+    sa.Column("email", sa.String, primary_key=True),
+    sa.Column("fecha", sa.String, nullable=False),
+)
 
 
-def _conn(db_path: str = DB_PATH) -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.executescript(_ESQUEMA)
-    return conn
+def _engine(db_path: str = DB_PATH) -> sa.engine.Engine:
+    engine = obtener_engine(db_path)
+    metadata.create_all(engine, checkfirst=True)
+    return engine
 
 
 def registrar_uso(cliente_id: str, canal: str, ref_id: str | None = None,
                   tok_in: int = 0, tok_out: int = 0, unidades: float = 0,
                   costo_est: float = 0.0, db_path: str = DB_PATH) -> None:
-    conn = _conn(db_path)
-    try:
-        conn.execute(
-            "INSERT INTO uso (cliente_id, fecha, canal, ref_id, tok_in, tok_out, unidades, costo_est) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (cliente_id, datetime.now(timezone.utc).isoformat(), canal, ref_id,
-             tok_in, tok_out, unidades, costo_est),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    engine = _engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(uso_tabla.insert().values(
+            cliente_id=cliente_id, fecha=datetime.now(timezone.utc).isoformat(),
+            canal=canal, ref_id=ref_id, tok_in=tok_in, tok_out=tok_out,
+            unidades=unidades, costo_est=costo_est))
 
 
 def uso_mes(cliente_id: str, mes: str | None = None, db_path: str = DB_PATH) -> dict:
     """Resumen de uso del cliente en el mes (`YYYY-MM`, default el actual)."""
     mes = mes or datetime.now(timezone.utc).strftime("%Y-%m")
-    conn = _conn(db_path)
-    try:
+    engine = _engine(db_path)
+    with engine.connect() as conn:
         row = conn.execute(
-            "SELECT COUNT(*), COALESCE(SUM(tok_in),0), COALESCE(SUM(tok_out),0), "
-            "COALESCE(SUM(unidades),0), COALESCE(SUM(costo_est),0) "
-            "FROM uso WHERE cliente_id=? AND fecha LIKE ?",
-            (cliente_id, mes + "%"),
-        ).fetchone()
-    finally:
-        conn.close()
+            sa.select(
+                sa.func.count(),
+                sa.func.coalesce(sa.func.sum(uso_tabla.c.tok_in), 0),
+                sa.func.coalesce(sa.func.sum(uso_tabla.c.tok_out), 0),
+                sa.func.coalesce(sa.func.sum(uso_tabla.c.unidades), 0),
+                sa.func.coalesce(sa.func.sum(uso_tabla.c.costo_est), 0),
+            ).where(uso_tabla.c.cliente_id == cliente_id, uso_tabla.c.fecha.like(mes + "%"))
+        ).one()
     return {"mes": mes, "consultas": row[0], "tok_in": row[1], "tok_out": row[2],
             "unidades": row[3], "costo_est": row[4]}
 
@@ -87,22 +90,19 @@ def consultas_mes(cliente_id: str, mes: str | None = None, db_path: str = DB_PAT
 
 
 def ya_uso_trial(email: str, db_path: str = DB_PATH) -> bool:
-    conn = _conn(db_path)
-    try:
-        return conn.execute("SELECT 1 FROM trials WHERE email=?",
-                            (email.lower(),)).fetchone() is not None
-    finally:
-        conn.close()
+    engine = _engine(db_path)
+    with engine.connect() as conn:
+        fila = conn.execute(
+            sa.select(trials_tabla.c.email).where(trials_tabla.c.email == email.lower())
+        ).first()
+    return fila is not None
 
 
 def marcar_trial(email: str, db_path: str = DB_PATH) -> None:
-    conn = _conn(db_path)
-    try:
-        conn.execute("INSERT OR IGNORE INTO trials (email, fecha) VALUES (?,?)",
-                     (email.lower(), datetime.now(timezone.utc).isoformat()))
-        conn.commit()
-    finally:
-        conn.close()
+    engine = _engine(db_path)
+    insertar_ignorando_duplicados(
+        engine, trials_tabla,
+        email=email.lower(), fecha=datetime.now(timezone.utc).isoformat())
 
 
 @contextlib.contextmanager
@@ -116,9 +116,14 @@ def lock_cliente(cliente_id: str, db_path: str = DB_PATH, timeout: int = 10):
     pasan aunque en conjunto superen el cupo (comprobado con un test de
     concurrencia real: sin lock, un cupo de 10 dejaba pasar 22 de 30
     pedidos simultáneos).
+
+    El lock es un archivo local (coordina pedidos dentro del mismo proceso,
+    que es lo único que hace falta con una sola instancia del backend) — no
+    depende de que `db_path` sea una ruta de archivo, así que sigue
+    funcionando igual con una base Postgres externa.
     """
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    clave = hashlib.sha256(cliente_id.encode("utf-8")).hexdigest()[:16]
-    ruta_lock = db_path + f".cliente-{clave}.lock"
+    os.makedirs(_LOCK_DIR, exist_ok=True)
+    clave = hashlib.sha256(f"{db_path}|{cliente_id}".encode("utf-8")).hexdigest()[:16]
+    ruta_lock = os.path.join(_LOCK_DIR, f"plania-cliente-{clave}.lock")
     with portalocker.Lock(ruta_lock, timeout=timeout):
         yield

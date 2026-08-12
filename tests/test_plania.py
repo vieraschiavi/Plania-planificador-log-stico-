@@ -281,6 +281,45 @@ class _RespuestaFalsa:
         return self._json
 
 
+def test_pagos_registrar_no_duplica_licencia_en_reintento_de_webhook(tmp_path):
+    """MercadoPago reintenta el webhook hasta recibir 200 — el mismo
+    payment_id puede llegar varias veces. Sin deduplicación real (la que
+    reemplazó al INSERT OR IGNORE de SQLite al migrar a SQLAlchemy Core),
+    cada reintento emitiría una licencia nueva."""
+    from backend_venta import pagos
+
+    db = str(tmp_path / "pagos.db")
+    primero = pagos.registrar("pago-1", "cliente@plania.uy", "pro",
+                              "licencia-original", "token-original", db_path=db)
+    segundo = pagos.registrar("pago-1", "cliente@plania.uy", "pro",
+                              "licencia-DISTINTA", "token-DISTINTO", db_path=db)
+
+    assert primero == segundo
+    assert segundo["licencia"] == "licencia-original"
+    assert segundo["token_descarga"] == "token-original"
+    assert pagos.total(db_path=db) == 1
+
+
+def test_pagos_buscar_pago_no_registrado_devuelve_none(tmp_path):
+    from backend_venta import pagos
+
+    db = str(tmp_path / "pagos.db")
+    assert pagos.buscar("pago-que-no-existe", db_path=db) is None
+
+
+def test_marcar_trial_dos_veces_no_falla_y_sigue_marcado(tmp_path):
+    """`marcar_trial` puede recibir el mismo email más de una vez (dos
+    pedidos concurrentes del trial) — no tiene que tirar un error de
+    restricción única, y el email tiene que seguir marcado como usado."""
+    from backend_venta import uso
+
+    db = str(tmp_path / "uso.db")
+    assert not uso.ya_uso_trial("cliente@plania.uy", db_path=db)
+    uso.marcar_trial("cliente@plania.uy", db_path=db)
+    uso.marcar_trial("cliente@plania.uy", db_path=db)
+    assert uso.ya_uso_trial("cliente@plania.uy", db_path=db)
+
+
 def test_token_de_descarga_es_de_un_solo_uso(tmp_path):
     from backend_venta import descargas
 
@@ -627,20 +666,21 @@ def test_ninguna_linea_del_instalador_arranca_con_almohadilla():
 
 
 def test_el_blueprint_de_despliegue_no_pierde_las_licencias_en_cada_deploy():
-    """`render.yaml` tiene que dejar el backend desplegable sin pisar ninguna
-    de las tres minas del despliegue a mano.
+    """`render.yaml` tiene que dejar el backend desplegable en el plan
+    gratuito sin pisar ninguna de las dos minas del despliegue a mano.
 
-    Las tres son silenciosas —el servicio arranca igual y se ve sano— y las
-    tres se pagan con licencias de clientes:
+    Las dos son silenciosas —el servicio arranca igual y se ve sano— y las
+    dos se pagan con licencias de clientes:
 
       1. Secreto de firma autogenerado: si `PLANIA_LICENSE_SECRET` no está
          fijo, cada reinicio puede generar uno nuevo y TODAS las licencias ya
          emitidas dejan de validar de golpe.
-      2. Base efímera: la SQLite de `uso.py` (quién consumió su prueba, qué
-         pagos ya se procesaron, qué tokens de descarga siguen vivos) tiene
-         que vivir en el disco persistente, no en el contenedor.
-      3. Config efímera: `plania/config.py` cae al archivo cifrado porque en
-         un servidor no hay keyring del SO, así que también necesita el disco.
+      2. Base efímera: la SQLite por defecto de `uso.py` (quién consumió su
+         prueba, qué pagos ya se procesaron, qué tokens de descarga siguen
+         vivos) vive en el disco del contenedor, que el plan free no
+         persiste — por eso `PLANIA_USO_DB` tiene que poder apuntar a una
+         base externa (ver `backend_venta/db.py`) en vez de exigir un plan
+         pago con disco montado.
     """
     import yaml
 
@@ -651,17 +691,20 @@ def test_el_blueprint_de_despliegue_no_pierde_las_licencias_en_cada_deploy():
     assert envs["PLANIA_LICENSE_SECRET"].get("generateValue") is True, \
         "el secreto de firma tiene que quedar fijo, no autogenerarse en cada arranque"
 
-    montaje = servicio["disk"]["mountPath"]
-    for clave in ("PLANIA_USO_DB", "PLANIA_CONFIG_DIR"):
-        assert envs[clave]["value"].startswith(montaje), \
-            f"{clave} no apunta al disco persistente ({montaje}): se pierde en cada deploy"
-
-    # Los planes gratuitos de Render no admiten discos: declarar uno con
-    # plan free es un blueprint que ni siquiera arranca.
-    assert servicio["plan"] != "free", "un plan free no puede montar el disco de arriba"
+    # Ningún disco montado: el plan free no los soporta, y este blueprint no
+    # depende de uno (la persistencia la resuelve PLANIA_USO_DB apuntando a
+    # una base externa, no un mountPath).
+    assert "disk" not in servicio, \
+        "un disco montado exige un plan pago; PLANIA_USO_DB reemplaza esa necesidad"
+    assert servicio["plan"] == "free", "el blueprint tiene que poder correr sin pagar"
     assert servicio["healthCheckPath"] == "/salud"
     assert "backend_venta.app:app" in servicio["startCommand"]
     assert "requirements-backend.txt" in servicio["buildCommand"]
+
+    # PLANIA_USO_DB no se hardcodea a un archivo: lo carga quien despliega
+    # (una URL de Postgres externa, o lo deja vacío y cae a SQLite local).
+    assert envs["PLANIA_USO_DB"].get("sync") is False, \
+        "PLANIA_USO_DB tiene que poder cargarse con una base externa, no venir fija a un archivo"
 
     # Los secretos que no se pueden inventar por defecto se piden, no se
     # hardcodean.
@@ -695,7 +738,7 @@ def test_los_requisitos_del_backend_cubren_lo_que_el_backend_importa():
     estandar_o_propio = {"os", "sys", "json", "re", "time", "secrets", "sqlite3",
                          "hashlib", "getpass", "shutil", "contextlib", "datetime",
                          "typing", "__future__", "backend_venta", "plania", "keyring",
-                         "logging"}
+                         "logging", "tempfile"}
 
     faltan = set()
     for ruta in fuentes:
