@@ -389,6 +389,29 @@ def _armador_bat():
     return modulo
 
 
+def test_no_hay_configuracion_ni_claves_versionadas():
+    """La configuración de Plania nunca va al repositorio, y menos su clave.
+
+    Había `cfg_ui/.config.key` y `cfg_ui/config.enc` commiteados: la caja
+    fuerte y la llave en el mismo commit, o sea cifrado que no cifra. Lo que
+    tenían adentro era inofensivo —la aceptación de la EULA y la fecha de
+    inicio de la demo— pero ESE es el archivo donde `plania/config.py` guarda
+    ANTHROPIC_API_KEY, la licencia activada y la cadena de conexión al ERP
+    cuando no hay keyring del sistema. Y el repositorio es público.
+    """
+    import subprocess
+    versionados = subprocess.run(["git", "ls-files"], cwd=RAIZ,
+                                 capture_output=True, text=True).stdout.split("\n")
+    prohibidos = [f for f in versionados
+                  if os.path.basename(f) in (".config.key", "config.enc",
+                                             "config.json")
+                  or f.endswith(".pem") or f.endswith(".key")]
+    assert not prohibidos, (
+        f"hay configuración o claves versionadas: {prohibidos}. "
+        "Sacalas con `git rm --cached` — y si tuvieron algo real adentro, "
+        "rotá esa credencial: el historial de git no se borra solo.")
+
+
 def test_las_tablas_de_la_ventana_no_muestran_jerga_de_base_de_datos():
     """Los encabezados de las tablas eran el nombre crudo de la columna del
     DataFrame con los guiones bajos cambiados por espacios: "Sku", "Dias

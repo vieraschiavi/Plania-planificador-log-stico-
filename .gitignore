@@ -1,5 +1,17 @@
 __pycache__/
 *.pyc
+# La configuración de Plania y su clave de cifrado, en cualquier carpeta.
+#
+# Estaban versionadas: cfg_ui/.config.key junto a cfg_ui/config.enc, o sea la
+# caja fuerte y la llave en el mismo commit — el cifrado ahí no protege nada.
+# Lo que había adentro era inofensivo (la aceptación de la EULA y la fecha de
+# inicio de la demo, de una corrida de prueba), pero ese mismo archivo es
+# donde plania/config.py guarda ANTHROPIC_API_KEY, la licencia y la conexión
+# al ERP cuando no hay keyring del sistema. La próxima vez no iba a ser
+# inofensivo.
+.config.key
+config.enc
+config.json
 .venv/
 dist/
 build/

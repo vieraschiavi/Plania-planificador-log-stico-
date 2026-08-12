@@ -64,18 +64,31 @@ los mandaba en texto plano.
 
 ## Esta carpeta NO es el canal de descarga del cliente
 
-Ningún cliente entra acá. Este repositorio es privado y es tu código fuente,
-no tu tienda. El instalador se toma de acá y se sube a donde el cliente sí
-llega:
+Ningún cliente entra acá. Este repositorio es tu código fuente, no tu tienda.
+El instalador se toma de acá y se sube a donde el cliente sí llega:
 
 1. **`plania.uy`** — el botón de descarga de la web pública.
 2. **El link post-pago** — `backend_venta` sirve el instalador en
    `/descargar/{token}` cuando alguien termina de pagar. La ruta se configura
    con `PLANIA_INSTALADOR_PATH`; apuntala al archivo que publicaste.
 
-Que el cliente no descargue de GitHub no es una formalidad: si el repositorio
-fuera público para que pudieran, el mismo ZIP les daría el código fuente
-completo y cualquier binario que esté acá adentro.
+> **El repositorio hoy es PÚBLICO.** Conviene saber qué implica, porque varias
+> decisiones de este proyecto se tomaron dando por hecho lo contrario.
+>
+> Todo lo que `packaging/proteger_codigo.py` saca del instalador para que un
+> cliente no lo lea —`plania/negocio.py` con los costos y márgenes,
+> `plania/owner.py` y `app/owner.py`, `plania/contenido.py`, `docs/` con el
+> modelo comercial— está igual acá, en texto plano, para cualquiera. Lo mismo
+> el motor entero (`plania/`), que se compila con Cython justamente para que
+> no viaje legible, y `backend_venta/` completo.
+>
+> Lo que la protección del build sigue logrando, aun así, es que nada de eso
+> viaje **dentro del producto instalado**: quien baja el `.exe` no lo obtiene.
+> Lo que ya no logra es que no lo obtenga quien abre github.com.
+>
+> Ser público tiene contrapartida real —minutos de Actions gratis e ilimitados
+> y el plan gratuito de Vercel—, así que puede ser lo que querés. Es una
+> decisión, no un descuido, y conviene tomarla a propósito.
 
 ## No hay dos instaladores: demo y versión paga son el mismo archivo
 
