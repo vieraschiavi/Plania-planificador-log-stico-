@@ -17,35 +17,35 @@
 #        - PLANIA_BACKEND_URL en el build del programa de escritorio.
 #
 # Render no es obligatorio: el Procfile sirve igual en Railway o Fly.io y el
-# servicio es un uvicorn común. Lo que aporta este archivo es que los tres
+# servicio es un uvicorn común. Lo que aporta este archivo es que los
 # errores caros del despliegue a mano ya vengan resueltos:
 #   - el secreto de firma se genera UNA vez y queda fijo (generateValue), en
 #     vez de regenerarse en cada reinicio e invalidar las licencias emitidas;
-#   - la base SQLite vive en un disco persistente, no en el sistema de
-#     archivos efímero del contenedor (ahí se perdería en cada deploy: quién
-#     consumió su prueba, qué pagos se procesaron, qué tokens de descarga
-#     siguen vivos);
 #   - se instala requirements-backend.txt, no el completo con pandas y
 #     streamlit, que el backend no usa.
-
+#
+# Sobre el plan y la persistencia:
+# El plan 'free' de Render NO tiene disco persistente — el sistema de
+# archivos del contenedor se borra en cada reinicio y el servicio se duerme
+# solo a los 15 minutos sin tráfico. Guardar la base de `uso.py`/`pagos.py`/
+# `descargas.py` (SQLite, por defecto) en ese disco perdería en cada
+# reinicio: quién ya consumió su demo, qué pagos ya emitieron licencia (así
+# que un reintento del webhook de MercadoPago duplicaría licencias) y los
+# tokens de descarga vivos.
+#
+# En vez de forzar un plan pago con disco montado, `PLANIA_USO_DB` puede
+# apuntar a una base Postgres externa gratuita (Neon, Supabase, etc. tienen
+# free tier permanente) — ver `backend_venta/db.py`. Con eso el plan 'free'
+# alcanza: el estado que importa no vive en el disco del contenedor.
 services:
   - type: web
     name: plania-backend
     runtime: python
     region: oregon
-    # 'starter' y no 'free': los planes gratuitos de Render no admiten discos
-    # persistentes, y sin disco esto pierde las licencias en cada deploy.
-    # También duermen tras 15 minutos sin tráfico, y un webhook de MercadoPago
-    # que llega mientras el servicio duerme puede expirar antes de que
-    # despierte — es decir, un pago cobrado sin licencia emitida.
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements-backend.txt
     startCommand: uvicorn backend_venta.app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /salud
-    disk:
-      name: datos
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       # --- Se generan solos y quedan fijos -------------------------------
       # Firma de las licencias. Si esto cambia, TODAS las licencias ya
@@ -58,14 +58,13 @@ services:
       - key: PLANIA_BACKEND_ADMIN_TOKEN
         generateValue: true
 
-      # --- Persistencia en el disco montado ------------------------------
-      # SQLite de uso, trials, pagos procesados y tokens de descarga.
+      # --- Persistencia: cargala vos con una URL de Postgres gratuita ----
+      # Connection string de una base Postgres externa (Neon, Supabase...),
+      # ej. postgresql://usuario:clave@host/basededatos. Si la dejás vacía,
+      # cae a un archivo SQLite local — que en el plan 'free' se pierde en
+      # cada reinicio. Ver docs/BACKEND_VENTA.md para cómo conseguirla.
       - key: PLANIA_USO_DB
-        value: /var/data/uso_licencias.db
-      # Config cifrada de plania/config.py (en el servidor no hay keyring del
-      # SO, así que cae al archivo cifrado: tiene que estar en el disco).
-      - key: PLANIA_CONFIG_DIR
-        value: /var/data/config
+        sync: false
 
       # --- Los tenés que cargar vos (Render los pide al desplegar) -------
       # Access Token del vendedor en MercadoPago. Sin esto /checkout devuelve

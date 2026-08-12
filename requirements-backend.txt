@@ -16,3 +16,5 @@ PyJWT>=2.7            # licencias firmadas HS256
 slowapi>=0.1.9        # rate limiting de todos los endpoints públicos
 portalocker>=2.8      # plania/auditoria.py escribe el log con lock
 cryptography>=42.0    # plania/config.py cifra config.enc; sin esto cae a texto plano
+sqlalchemy>=2.0       # backend_venta/db.py: SQLite local o Postgres externa según PLANIA_USO_DB
+psycopg2-binary>=2.9  # driver de Postgres, para cuando PLANIA_USO_DB apunta a una base externa

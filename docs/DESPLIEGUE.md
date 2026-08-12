@@ -47,17 +47,36 @@ JWT. Sin esa variable apuntando al backend real, nadie puede activar nada
    (`MP_ACCESS_TOKEN` y `ANTHROPIC_API_KEY`).
 3. Deploy. Queda una URL tipo `https://plania-backend.onrender.com`.
 
-Ese archivo ya resuelve las tres cosas que se rompen en silencio si se
+Ese archivo ya resuelve las dos cosas que se rompen en silencio si se
 despliega a mano: el secreto de firma queda fijo (`generateValue`) en vez de
-regenerarse en cada reinicio e invalidar todas las licencias emitidas; la
-SQLite y la config cifrada van a un disco persistente en vez del sistema de
-archivos efímero del contenedor; y se instala `requirements-backend.txt`
-—unos 20 MB— en lugar del `requirements.txt` completo con pandas, pyarrow y
-streamlit, que el backend no usa.
+regenerarse en cada reinicio e invalidar todas las licencias emitidas; y se
+instala `requirements-backend.txt` —unos 20 MB— en lugar del
+`requirements.txt` completo con pandas, pyarrow y streamlit, que el backend
+no usa. Usa el plan **`free`** de Render, sin costo.
 
-No hace falta usar Render: el `Procfile` sirve igual en Railway o Fly.io. Lo
-que no se puede saltear, se despliegue donde se despliegue, es el disco
-persistente y el secreto fijo.
+Lo que no se puede saltear, se despliegue donde se despliegue, es dónde
+queda la base de `uso.py`/`pagos.py`/`descargas.py` (qué pagos ya emitieron
+licencia, qué emails ya usaron la demo, los tokens de descarga vivos). Por
+defecto es un archivo SQLite local, y el plan `free` de Render (como el de
+casi cualquier PaaS) no tiene disco persistente: ese archivo se borra en
+cada reinicio o cada vez que el servicio se duerme por falta de tráfico —
+en la práctica, un reintento del webhook de MercadoPago después de un
+reinicio duplicaría la licencia de un pago ya procesado.
+
+La solución sin pagar un plan con disco: apuntar `PLANIA_USO_DB` a una base
+Postgres externa gratuita —Neon o Supabase tienen free tier permanente—:
+
+1. Crear un proyecto gratis en [neon.tech](https://neon.tech) o
+   [supabase.com](https://supabase.com) y copiar su connection string
+   (`postgresql://usuario:clave@host/basededatos`).
+2. Cargarla como `PLANIA_USO_DB` en las variables de entorno del servicio.
+3. Listo — `backend_venta/db.py` detecta que es una URL (no una ruta de
+   archivo) y usa esa base en vez de SQLite. El plan `free` de Render
+   alcanza porque el estado que importa ya no vive en su disco.
+
+Si se deja `PLANIA_USO_DB` sin setear, el backend igual arranca (cae a
+SQLite local), pero pierde ese registro en cada reinicio — aceptable solo
+para probar, no para cobrar en serio.
 
 ### A mano
 
@@ -76,6 +95,7 @@ uvicorn backend_venta.app:app --host 0.0.0.0 --port $PORT
 | `PLANIA_PUBLIC_URL` | URL pública de la landing (back_urls del checkout) |
 | `PLANIA_WEBHOOK_URL` | URL pública de `/webhooks/mercadopago` |
 | `PLANIA_INSTALADOR_PATH` | ruta del `Plania_Setup.exe` publicado para `/descargar/{token}` |
+| `PLANIA_USO_DB` | URL de Postgres externa (recomendado sin disco persistente) o ruta de archivo SQLite — default un SQLite local |
 
 Después del deploy: cargar la URL del webhook en el panel de MercadoPago
 (Tus integraciones → Webhooks → evento `payment`), y ponerla también en
