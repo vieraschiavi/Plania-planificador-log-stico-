@@ -389,6 +389,66 @@ def _armador_bat():
     return modulo
 
 
+def test_las_tablas_de_la_ventana_no_muestran_jerga_de_base_de_datos():
+    """Los encabezados de las tablas eran el nombre crudo de la columna del
+    DataFrame con los guiones bajos cambiados por espacios: "Sku", "Dias
+    Stock", "Descuento Pct", "Categoria". Sin tildes y con jerga de base de
+    datos a la vista. Para quien pagó un programa, "Pct" no es una palabra.
+    """
+    base = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "base.js"),
+                encoding="utf-8").read()
+
+    for col, esperado in (("sku", "SKU"), ("categoria", "Categoría"),
+                          ("dias_stock", "Días de stock"),
+                          ("descuento_pct", "Descuento %"),
+                          ("capital_inmovilizado", "Capital inmovilizado")):
+        assert f'"{esperado}"' in base or f"{col}: \"{esperado}\"" in base, \
+            f"la columna {col} no tiene una etiqueta legible"
+
+    # Y el CSS no puede volver a capitalizar encima: con las etiquetas ya bien
+    # escritas, `capitalize` las rompe ("Días De Stock", "Margen Objetivo %").
+    css = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "estilo.css"),
+               encoding="utf-8").read()
+    # Solo el cuerpo de la regla, hasta su llave de cierre: el comentario que
+    # explica por qué se sacó nombra la propiedad, y una ventana de N
+    # caracteres lo agarraba y daba falso positivo.
+    inicio = css.index(".tabla th {")
+    bloque_th = css[inicio:css.index("}", inicio)]
+    assert "text-transform: capitalize" not in bloque_th, \
+        "capitalize sobre etiquetas ya escritas las rompe"
+
+
+def test_una_columna_de_numeros_no_mezcla_formatos():
+    """`Number.isInteger(178.0)` da true y `112.8` da false, así que decidir
+    los decimales celda por celda mostraba "178" y "112,80" en la MISMA
+    columna de días. Leído en una tabla, parecen dos magnitudes distintas.
+
+    Se decide por columna: si algún valor tiene decimales, los llevan todos.
+    """
+    base = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "base.js"),
+                encoding="utf-8").read()
+    assert "function decimalesDe(" in base, "falta el cálculo por columna"
+    assert "miles(v, decimales[c])" in base, \
+        "el formato sigue decidiéndose por celda"
+    assert "Number.isInteger(v) ? 0 : 2" not in base, \
+        "quedó la decisión celda por celda, que es la que mezcla formatos"
+
+
+def test_un_indicador_en_cero_explica_por_que():
+    """Un cero grande y sin explicación se lee como "algo se rompió".
+
+    "Potencial por zonas" es el único de los cuatro que da cero con datos
+    buenos —cuando ninguna zona vende bastante por debajo de sus comparables—
+    así que ese caso tiene que decir eso y no un $0 pelado.
+    """
+    pantallas = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "pantallas.js"),
+                     encoding="utf-8").read()
+    i = pantallas.index("Potencial por zonas")
+    bloque = pantallas[i:i + 500]
+    assert "Sin brechas" in bloque, "el cero se muestra como $0 pelado"
+    assert "detalle:" in bloque, "el cero no explica por qué es cero"
+
+
 def test_el_paquete_bat_no_le_manda_al_cliente_nada_del_dueno(tmp_path):
     """La vía .bat entrega el código a la vista, así que lo que entre al ZIP se
     lee en la máquina del cliente.
@@ -1492,7 +1552,12 @@ def test_las_cinco_sugerencias_tienen_ejemplo_numerico_real(datos):
             texto = textos[clave].replace(",", ".")  # EN usa coma de miles
             assert numero in texto, (
                 f"{clave} de {idioma}.json no menciona el total real ${numero} "
-                f"que hoy devuelve sugerencias.generar_todas() sobre data/erp_demo.db")
+                f"que hoy devuelve sugerencias.generar_todas() sobre data/erp_demo.db.\n"
+                f"NO lo corrijas a mano: son 4 números x 3 idiomas y este control "
+                f"corta en el primero, así que se arregla uno y quedan tres.\n"
+                f"    python3 sitio/actualizar_ejemplos.py            # ver qué cambió\n"
+                f"    python3 sitio/actualizar_ejemplos.py --escribir # aplicarlo\n"
+                f"    python3 sitio/build.py                          # regenerar la web")
         # Venta cruzada: forma de hallazgo real, no un párrafo genérico.
         assert re.search(r"\d+%.*\d+%", textos["s4_d"]), \
             f"s4_d de {idioma}.json no trae dos porcentajes (el hallazgo real de zona)"

@@ -78,16 +78,60 @@ function Tarjeta({ titulo, valor, detalle, acento }) {
  * Muestra "200 de 4.312" cuando la API recortó. Sin ese aviso el usuario
  * cree que eso es todo lo que hay y toma decisiones sobre una lista
  * incompleta sin saberlo. */
+/* Cómo se llama cada columna en pantalla.
+ *
+ * Antes el encabezado era el nombre de la columna del DataFrame con los
+ * guiones bajos cambiados por espacios, y se notaba: "Sku", "Dias Stock",
+ * "Descuento Pct", "Categoria". Sin tildes y con jerga de base de datos a la
+ * vista. Para quien pagó un programa, "Pct" no es una palabra.
+ *
+ * Solo se listan las que hace falta arreglar; cualquier columna nueva cae al
+ * comportamiento de antes y se ve razonable, no rota. */
+const ETIQUETAS = {
+  sku: "SKU", categoria: "Categoría", dias_stock: "Días de stock",
+  descuento_pct: "Descuento %", precio_oferta: "Precio oferta",
+  capital_inmovilizado: "Capital inmovilizado", lead_time_dias: "Demora proveedor",
+  cantidad_sugerida: "Cantidad a pedir", venta_en_riesgo: "Venta en riesgo",
+  precio_sugerido: "Precio sugerido", suba_pct: "Suba %", margen_pct: "Margen %",
+  margen_obj: "Margen objetivo %", margen_extra_mensual: "Margen extra/mes",
+  dias_sin_comprar: "Días sin comprar", venta_historica: "Venta histórica",
+  tipo_negocio: "Tipo de negocio", cliente_id: "Cliente", departamento: "Departamento",
+  margen_unitario: "Margen unitario", rotacion_dias: "Rotación (días)",
+  ticket_promedio: "Ticket promedio", ultima_compra: "Última compra",
+};
+
+function etiqueta(col) {
+  if (ETIQUETAS[col]) return ETIQUETAS[col];
+  const txt = col.replace(/_/g, " ");
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
+/* Cuántos decimales lleva una columna entera.
+ *
+ * Se decide UNA vez por columna y no celda por celda. Celda por celda,
+ * `Number.isInteger(178.0)` da true y `112.8` da false, así que la misma
+ * columna de días mostraba "178" en una fila y "112,80" en la de al lado.
+ * Leído en una tabla, eso parece que son dos magnitudes distintas. */
+function decimalesDe(filas, col) {
+  for (const f of filas) {
+    const v = f[col];
+    if (typeof v === "number" && !Number.isInteger(v)) return 2;
+  }
+  return 0;
+}
+
 function Tabla({ datos, vacio }) {
   if (!datos || !datos.filas.length) {
     return e("p", { className: "vacio" }, vacio || "Sin datos para mostrar.");
   }
   const recortada = datos.total > datos.filas.length;
+  const decimales = {};
+  datos.columnas.forEach((c) => { decimales[c] = decimalesDe(datos.filas, c); });
   return e("div", null,
     e("div", { className: "tabla-scroll" },
       e("table", { className: "tabla" },
         e("thead", null, e("tr", null,
-          datos.columnas.map((c) => e("th", { key: c }, c.replace(/_/g, " "))))),
+          datos.columnas.map((c) => e("th", { key: c }, etiqueta(c))))),
         e("tbody", null,
           datos.filas.map((fila, i) =>
             e("tr", { key: i },
@@ -96,7 +140,7 @@ function Tabla({ datos, vacio }) {
                 const numero = typeof v === "number";
                 return e("td", { key: c, className: numero ? "num" : null },
                   v === null || v === undefined ? "—"
-                    : numero ? miles(v, Number.isInteger(v) ? 0 : 2)
+                    : numero ? miles(v, decimales[c])
                     : String(v));
               })))))),
     recortada
