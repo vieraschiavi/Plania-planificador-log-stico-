@@ -179,3 +179,139 @@ function useDatos(cargar, deps) {
   }, [...(deps || []), intento]);
   return { ...estado, reintentar: () => setIntento((n) => n + 1) };
 }
+
+/* --------------------------------------------------------------------------
+ * Piezas que usan las dos interfaces
+ * Viven acá y no en las pantallas porque hay dos programas que las dibujan:
+ * el producto (desktop/) y el panel del dueño (desktop_owner/), que se arma
+ * aparte justamente para que su código no viaje en el build del cliente.
+ * Tener una sola implementación evita que los gráficos y las descargas se
+ * comporten distinto en uno y en otro.
+ * ------------------------------------------------------------------------ */
+
+/* Paleta de series, en el orden en que se usan. Son los colores de la marca
+ * (estilo.css) escritos acá porque Plotly no lee CSS. */
+const COLORES_SERIE = ["#2E86DE", "#20BF6B", "#F39C12", "#E74C3C", "#1F3D7A"];
+
+/* Gráficos con Plotly, el mismo que usa la versión actual: así las escalas,
+ * los ejes y los colores no cambian entre una versión y la otra.
+ *
+ * `y` puede ser una columna o varias: la proyección del panel del dueño
+ * superpone resultado y caja en el mismo eje, y separarlos en dos gráficos
+ * esconde justamente lo que hay que mirar (el mes en que se cruzan). */
+function Grafico({ tipo, datos, x, y, cero }) {
+  const div = React.useRef(null);
+  React.useEffect(() => {
+    if (!div.current || !datos || !datos.filas.length) return;
+    const columnas = Array.isArray(y) ? y : [y];
+    const xs = datos.filas.map((f) => f[x]);
+
+    // El margen izquierdo se calcula, no se fija: en las barras horizontales
+    // las etiquetas son nombres de categoría y con un margen fijo de 60px se
+    // cortaban ("erfumería", "ongelados"). Se estima por el nombre más largo,
+    // con tope para que una categoría con nombre kilométrico no se coma el
+    // gráfico entero.
+    const etiquetas = tipo === "barra"
+      ? datos.filas.map((f) => String(f[columnas[0]])) : [];
+    const masLarga = etiquetas.reduce((m, s) => Math.max(m, s.length), 0);
+    const izquierda = tipo === "barra" ? Math.min(180, Math.max(70, masLarga * 7.5 + 14)) : 60;
+
+    const comun = {
+      paper_bgcolor: "transparent", plot_bgcolor: "transparent",
+      font: { color: "#5A6B85", family: "Segoe UI, system-ui, sans-serif" },
+      margin: { t: 10, b: 40, l: izquierda, r: 16 }, height: 300,
+      xaxis: { gridcolor: "#E3E8F2" },
+      yaxis: { gridcolor: "#E3E8F2", automargin: true },
+      showlegend: columnas.length > 1,
+      legend: { orientation: "h", y: -0.2 },
+      // Con valores negativos (los primeros meses de la proyección dan
+      // pérdida) el cero es la referencia que dice si se está arriba o abajo.
+      shapes: cero
+        ? [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: 0, y1: 0,
+             line: { color: "#9AA7BD", width: 1, dash: "dot" } }]
+        : [],
+    };
+    const trazos = columnas.map((col, i) => {
+      const ys = datos.filas.map((f) => f[col]);
+      const color = COLORES_SERIE[i % COLORES_SERIE.length];
+      const nombre = etiqueta(col);
+      if (tipo === "barra") {
+        return { x: xs, y: ys, name: nombre, type: "bar", orientation: "h",
+                 marker: { color } };
+      }
+      if (tipo === "columna") {
+        return { x: xs, y: ys, name: nombre, type: "bar", marker: { color } };
+      }
+      if (tipo === "linea") {
+        return { x: xs, y: ys, name: nombre, type: "scatter", mode: "lines",
+                 line: { color } };
+      }
+      return { x: xs, y: ys, name: nombre, type: "scatter", fill: "tozeroy",
+               line: { color } };
+    });
+    if (tipo === "columna" && columnas.length > 1) comun.barmode = "group";
+    Plotly.newPlot(div.current, trazos, comun, { displayModeBar: false, responsive: true });
+    return () => { if (div.current) Plotly.purge(div.current); };
+  }, [datos, tipo, x, y, cero]);
+
+  if (!datos || !datos.filas.length) return e("p", { className: "vacio" }, "Sin datos.");
+  return e("div", { ref: div, className: "grafico" });
+}
+
+function Exportar({ clave, etiqueta, base }) {
+  // `base` existe porque hay dos programas que exportan contra rutas
+  // distintas (el producto y el panel del dueño) y el resto del componente
+  // —blob, descarga, revocación, manejo de error— es idéntico.
+  const raiz = base || "/exportar";
+  const [estado, setEstado] = React.useState(null);
+
+  async function bajar(formato) {
+    setEstado("Generando…");
+    try {
+      const r = await fetch(`${API}${raiz}/${clave}.${formato}`);
+      if (!r.ok) {
+        let d = ""; try { d = (await r.json()).detail || ""; } catch (_) {}
+        throw new Error(d || `El servidor respondió ${r.status}`);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `plania_${clave}.${formato}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Sin revocar, cada descarga deja el archivo entero retenido en memoria
+      // mientras la ventana siga abierta.
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setEstado(null);
+    } catch (err) {
+      setEstado(String(err.message));
+    }
+  }
+
+  return e("div", { className: "exportes" },
+    e("span", { className: "exportes-txt" }, etiqueta || "Exportar:"),
+    ["pdf", "docx", "xlsx"].map((f) =>
+      e("button", { key: f, className: "btn btn-chico", onClick: () => bajar(f) },
+        f.toUpperCase())),
+    estado ? e("span", { className: "exportes-estado" }, estado) : null);
+}
+
+/* Pestañas simples: varias tablas en una pantalla sin obligar a hacer scroll
+   por todas para llegar a la última. */
+function Pestanas({ items }) {
+  const [activa, setActiva] = React.useState(0);
+  const disponibles = items.filter(Boolean);
+  if (!disponibles.length) return null;
+  const item = disponibles[Math.min(activa, disponibles.length - 1)];
+  return e("div", null,
+    e("div", { className: "pestanas" },
+      disponibles.map((it, i) =>
+        e("button", {
+          key: it.titulo, className: "pestana" + (i === activa ? " activa" : ""),
+          onClick: () => setActiva(i),
+        }, it.titulo, it.cantidad !== undefined
+             ? e("span", { className: "conteo" }, miles(it.cantidad)) : null))),
+    e("div", { className: "pestana-cuerpo" }, item.contenido));
+}

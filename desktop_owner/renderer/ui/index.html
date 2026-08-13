@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Plania Owner · panel del dueño</title>
+<!--
+  Igual que en el producto: favicon vacío embebido para que el navegador
+  embebido no pida /favicon.ico y deje un 404 en la consola, justo donde se
+  busca el error de verdad cuando algo falla.
+-->
+<link rel="icon" href="data:,">
+<!--
+  estilo.css lo copia el armador desde desktop/ (es el mismo del producto);
+  estilo_owner.css va después y sólo agrega lo propio del panel.
+-->
+<link rel="stylesheet" href="estilo.css">
+<link rel="stylesheet" href="estilo_owner.css">
+</head>
+<body>
+<div id="root"></div>
+
+<!--
+  React y Plotly desde node_modules, no desde una CDN: el panel tiene que
+  abrir sin internet, igual que el producto.
+
+  El orden importa y no hay empaquetador: todo comparte el mismo scope
+  global, y `MENU_OWNER` en app_owner.js referencia los componentes en tiempo
+  de carga. Si app_owner.js fuera antes que pantallas_owner.js, reventaría
+  con ReferenceError.
+-->
+<script src="../../node_modules/react/umd/react.production.min.js"></script>
+<script src="../../node_modules/react-dom/umd/react-dom.production.min.js"></script>
+<script src="../../node_modules/plotly.js-dist-min/plotly.min.js"></script>
+
+<script src="base.js"></script>
+<script src="pantallas_owner.js"></script>
+<script src="app_owner.js"></script>
+</body>
+</html>

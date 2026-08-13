@@ -1,0 +1,66 @@
+{
+  "name": "plania-owner-desktop",
+  "productName": "Plania Owner",
+  "version": "1.0.0",
+  "description": "Plania Owner · panel del dueño (Electron + React) — uso interno, no se entrega a clientes",
+  "main": "main.js",
+  "author": "Martín Viera",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "plotly.js-dist-min": "^2.35.2"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "uy.plania.owner",
+    "productName": "Plania Owner",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "assets/**",
+      "node_modules/react/**",
+      "node_modules/react-dom/**",
+      "node_modules/plotly.js-dist-min/**",
+      "node_modules/scheduler/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../../dist/Plania Owner",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/brand/plania.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Plania Owner",
+      "uninstallDisplayName": "Plania Owner",
+      "installerLanguages": [
+        "es_ES"
+      ]
+    }
+  }
+}

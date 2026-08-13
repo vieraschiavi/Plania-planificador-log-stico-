@@ -1,0 +1,48 @@
+/* © 2026 Martín Viera. Todos los derechos reservados. */
+/*
+ * Plania Owner · lo que cambia respecto del producto
+ * ==================================================
+ * Se carga DESPUÉS de estilo.css y sólo agrega lo propio del panel. Estas
+ * reglas no están en estilo.css a propósito: ese archivo viaja en el
+ * instalador de cada cliente, y un ".lateral-owner" ahí adentro anuncia que
+ * existe un panel del dueño aunque su código no esté.
+ *
+ * El cambio de color no es decorativo. Las dos ventanas son la misma marca y
+ * se parecen; el lateral granate y el sello son para que abrir la equivocada
+ * delante de un cliente —y mostrarle la facturación— sea imposible de hacer
+ * por distracción.
+ */
+
+.lateral-owner {
+  background: #6B1F3D;
+}
+
+.sello-owner {
+  margin: 4px 18px 14px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.85);
+  text-align: center;
+}
+
+/* Los controles de la proyección: tres en fila, y que bajen en una ventana
+   angosta en vez de encimarse. */
+.form-linea input[type="range"] {
+  width: 100%;
+  accent-color: #6B1F3D;
+}
+
+/* Los supuestos por mercado van en <details>: cinco párrafos largos abiertos
+   a la vez tapan las tablas que están abajo. */
+details.resultado-erp {
+  margin-bottom: 8px;
+}
+
+details.resultado-erp summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #1F3D7A;
+}
