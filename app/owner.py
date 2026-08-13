@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Panel del dueño (versión owner)
 ========================================

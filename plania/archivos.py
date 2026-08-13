@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Lectura de CSV/Excel exportados de cualquier sistema
 ==============================================================

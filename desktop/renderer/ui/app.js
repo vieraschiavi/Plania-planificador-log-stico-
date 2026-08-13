@@ -1,3 +1,4 @@
+// © 2026 Martín Viera. Todos los derechos reservados.
 /*
  * Plania · Armazón de la interfaz de escritorio
  * =============================================

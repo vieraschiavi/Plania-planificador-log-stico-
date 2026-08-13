@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Regenerar los ejemplos numéricos de la web
 ====================================================

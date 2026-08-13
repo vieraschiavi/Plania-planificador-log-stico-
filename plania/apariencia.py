@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Apariencia de programa instalado
 =========================================

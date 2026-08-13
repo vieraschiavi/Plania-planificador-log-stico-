@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Doblaje del video de demostración a tres idiomas
 =========================================================

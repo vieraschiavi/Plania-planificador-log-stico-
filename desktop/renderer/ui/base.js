@@ -1,3 +1,4 @@
+// © 2026 Martín Viera. Todos los derechos reservados.
 /*
  * Plania · Interfaz de escritorio — piezas compartidas
  * ====================================================

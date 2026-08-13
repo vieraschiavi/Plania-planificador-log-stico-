@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Conector universal a ERPs y bases de datos
 ===================================================

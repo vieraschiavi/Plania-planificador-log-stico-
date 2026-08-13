@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Imágenes del asistente de instalación (Inno Setup)
 =============================================================

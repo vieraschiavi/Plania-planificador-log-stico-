@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Armado del paquete BAT (la vía sin ejecutable)
 =======================================================

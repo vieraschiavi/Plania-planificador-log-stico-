@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Control de que las 12 pantallas se dibujan
 ====================================================

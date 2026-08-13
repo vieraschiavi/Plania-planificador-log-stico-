@@ -1,3 +1,4 @@
+// © 2026 Martín Viera. Todos los derechos reservados.
 const { contextBridge } = require("electron");
 
 contextBridge.exposeInMainWorld("plania", {

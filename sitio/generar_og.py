@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Genera la imagen social (og:image / twitter:image)
 =============================================================

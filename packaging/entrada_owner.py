@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Punto de entrada de "Plania Owner" — el panel del dueño como programa aparte.
 

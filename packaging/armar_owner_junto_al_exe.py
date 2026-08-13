@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · El panel del dueño, sobre el Plania que ya tenés instalado
 ====================================================================

@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Control de las 12 pantallas de la ventana propia (Electron + React)
 =============================================================================

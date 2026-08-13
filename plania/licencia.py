@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Licencia del lado del cliente (demo 7 días full + licencia paga)
 =========================================================================

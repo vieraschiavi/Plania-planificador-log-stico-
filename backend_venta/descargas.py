@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Tokens de descarga de un solo uso (Edición Venta)
 ============================================================

@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Motor de conexión compartido para el estado del backend de venta
 ============================================================================

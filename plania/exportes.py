@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Exportes profesionales (PDF, Word, Excel)
 ==================================================

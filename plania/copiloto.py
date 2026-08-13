@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Copiloto — chat sobre los datos reales del negocio
 ===========================================================
