@@ -3982,6 +3982,100 @@ def test_el_panel_del_dueno_se_arma_como_programa_aparte():
     assert "entrada_owner" not in producto
 
 
+def test_la_ventana_del_cliente_no_lleva_nada_del_panel_del_dueno():
+    """La interfaz del dueño tampoco puede viajar en el instalador del cliente.
+
+    Del lado de Python esto ya estaba cubierto por `fuera_del_producto()`,
+    pero esa regla no llega hasta acá por dos motivos independientes: sólo
+    mira rutas de profundidad 2 dentro de `app/` y `plania/`, y sobre todo
+    el camino de electron-builder no la consulta nunca — `desktop/package.json`
+    empaqueta `"renderer/**"` sin una sola exclusión. Un `.js` del panel bajo
+    `desktop/` se distribuiría en texto plano dentro del `.exe` de cada
+    cliente, con la facturación y el modelo financiero a la vista.
+
+    Por eso el panel se arma como programa aparte (`desktop_owner/`), igual
+    que del lado de Python. Este control es el que nota si alguien lo mueve
+    de vuelta adentro.
+    """
+    import json
+    import os
+
+    raiz_cliente = os.path.join(RAIZ, "desktop")
+    for base, dirs, files in os.walk(raiz_cliente):
+        dirs[:] = [d for d in dirs if d not in ("node_modules", "dist_electron")]
+        for f in files:
+            rel = os.path.relpath(os.path.join(base, f), RAIZ)
+            assert "owner" not in f.lower(), \
+                f"{rel} parece del panel del dueño y está en el árbol del cliente"
+
+    # Y el contenido: una pantalla del dueño renombrada seguiría pegándole a
+    # /owner/*, que es lo que de verdad la delata.
+    for base, dirs, files in os.walk(os.path.join(raiz_cliente, "renderer")):
+        dirs[:] = [d for d in dirs if d != "node_modules"]
+        for f in files:
+            if not f.endswith((".js", ".html", ".css")):
+                continue
+            ruta = os.path.join(base, f)
+            texto = open(ruta, encoding="utf-8").read()
+            assert "/owner/" not in texto, \
+                f"{os.path.relpath(ruta, RAIZ)} le pega a la API del dueño"
+
+    # El empaquetado del cliente no puede alcanzar el árbol del dueño.
+    cfg = json.load(open(os.path.join(raiz_cliente, "package.json"), encoding="utf-8"))
+    incluidos = json.dumps(cfg["build"])
+    assert "desktop_owner" not in incluidos, \
+        "el build del cliente incluye el árbol del panel del dueño"
+
+
+def test_el_panel_del_dueno_tiene_su_propia_ventana_completa():
+    """Contracara del control anterior: sacarlo del producto no puede dejar al
+    dueño sin panel. Se arma el árbol de verdad y se comprueba que quede
+    ejecutable — con las seis pantallas y las piezas que comparte con el
+    producto ya copiadas."""
+    import importlib
+    import json
+    import os
+    import sys
+    import tempfile
+
+    sys.path.insert(0, os.path.join(RAIZ, "packaging"))
+    armador = importlib.import_module("armar_desktop_owner")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        destino = os.path.join(tmp, "desktop_owner")
+        # Sin node_modules: son 100 MB y no hacen falta para este control.
+        armador.armar(destino, node_modules=False)
+
+        for imprescindible in armador.IMPRESCINDIBLES:
+            assert os.path.exists(os.path.join(destino, imprescindible.replace("/", os.sep))), \
+                f"el árbol del panel quedó sin {imprescindible}"
+
+        # Las seis secciones del menú de app/owner.py, ni una menos.
+        menu = open(os.path.join(destino, "renderer", "ui", "app_owner.js"),
+                    encoding="utf-8").read()
+        for seccion in ("Estado del negocio", "Clientes y licencias",
+                        "Proyección de rentabilidad", "Mercado y competencia",
+                        "Contenido para redes", "Verificación del producto"):
+            assert seccion in menu, f"al panel le falta la sección {seccion!r}"
+
+        # base.js se copia, no se duplica: dos copias divergen y el panel
+        # termina mostrando los números con otro formato que el producto.
+        copiado = open(os.path.join(destino, "renderer", "ui", "base.js"),
+                       encoding="utf-8").read()
+        original = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "base.js"),
+                        encoding="utf-8").read()
+        assert copiado == original, "base.js del panel no es el mismo que el del producto"
+        assert not os.path.exists(os.path.join(RAIZ, "desktop_owner", "renderer",
+                                               "ui", "base.js")), \
+            "base.js está duplicado en desktop_owner/: tiene que salir de desktop/"
+
+        cfg = json.load(open(os.path.join(destino, "package.json"), encoding="utf-8"))
+        assert cfg["build"]["appId"] != "uy.plania.desktop", \
+            "mismo appId que el producto: instalar uno desinstalaría el otro"
+        assert cfg["build"]["nsis"]["createDesktopShortcut"] is True
+        assert cfg["build"]["nsis"]["uninstallDisplayName"] == "Plania Owner"
+
+
 def test_la_app_del_cliente_no_importa_nada_del_dueno():
     """Lo que decide si se puede sacar un módulo del build es quién lo importa.
 
@@ -4814,12 +4908,24 @@ def test_la_interfaz_de_escritorio_no_calcula_numeros_por_su_cuenta():
 
     Se permite formatear (miles, plata, porcentaje) y recortar listas para
     mostrar; lo que no se permite es aritmética sobre los datos.
+
+    Mira TODOS los archivos de interfaz, no sólo `pantallas.js`: cuando eran
+    uno solo alcanzaba con nombrarlo, pero desde que hay piezas compartidas en
+    `base.js` y un segundo programa con las suyas (`desktop_owner/`, el panel
+    del dueño), un archivo fijo dejaba fuera de la red justamente al código
+    nuevo — y mover una función de un archivo a otro la habría eximido sin
+    que nadie lo notara.
     """
+    import glob
     import os
     import re
 
-    fuente = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "pantallas.js"),
-                  encoding="utf-8").read()
+    archivos = sorted(
+        glob.glob(os.path.join(RAIZ, "desktop", "renderer", "**", "*.js"), recursive=True)
+        + glob.glob(os.path.join(RAIZ, "desktop_owner", "renderer", "**", "*.js"),
+                    recursive=True))
+    assert len(archivos) >= 4, f"se esperaban más archivos de interfaz: {archivos}"
+    fuente = "\n".join(open(a, encoding="utf-8").read() for a in archivos)
 
     # Multiplicar o dividir un campo que vino de la API: `r.capital * 1.21`.
     # Se mira `*` y `/` y no `+`, porque `+` es concatenación de texto en casi

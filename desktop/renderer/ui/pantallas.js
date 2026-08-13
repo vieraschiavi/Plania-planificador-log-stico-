@@ -79,42 +79,6 @@ function PantallaPanel() {
     e(Tabla, { datos: datos.top_clientes }));
 }
 
-/* Gráficos con Plotly, el mismo que usa la versión actual: así las escalas,
- * los ejes y los colores no cambian entre una versión y la otra. */
-function Grafico({ tipo, datos, x, y }) {
-  const div = React.useRef(null);
-  React.useEffect(() => {
-    if (!div.current || !datos || !datos.filas.length) return;
-    const xs = datos.filas.map((f) => f[x]);
-    const ys = datos.filas.map((f) => f[y]);
-
-    // El margen izquierdo se calcula, no se fija: en las barras horizontales
-    // las etiquetas son nombres de categoría y con un margen fijo de 60px se
-    // cortaban ("erfumería", "ongelados"). Se estima por el nombre más largo,
-    // con tope para que una categoría con nombre kilométrico no se coma el
-    // gráfico entero.
-    const etiquetas = tipo === "barra" ? ys.map((v) => String(v)) : [];
-    const masLarga = etiquetas.reduce((m, s) => Math.max(m, s.length), 0);
-    const izquierda = tipo === "barra" ? Math.min(180, Math.max(70, masLarga * 7.5 + 14)) : 60;
-
-    const comun = {
-      paper_bgcolor: "transparent", plot_bgcolor: "transparent",
-      font: { color: "#5A6B85", family: "Segoe UI, system-ui, sans-serif" },
-      margin: { t: 10, b: 40, l: izquierda, r: 16 }, height: 300,
-      xaxis: { gridcolor: "#E3E8F2" },
-      yaxis: { gridcolor: "#E3E8F2", automargin: true },
-    };
-    const trazo = tipo === "area"
-      ? { x: xs, y: ys, type: "scatter", fill: "tozeroy", line: { color: "#2E86DE" } }
-      : { x: xs, y: ys, type: "bar", orientation: "h", marker: { color: "#2E86DE" } };
-    Plotly.newPlot(div.current, [trazo], comun, { displayModeBar: false, responsive: true });
-    return () => { if (div.current) Plotly.purge(div.current); };
-  }, [datos, tipo, x, y]);
-
-  if (!datos || !datos.filas.length) return e("p", { className: "vacio" }, "Sin datos.");
-  return e("div", { ref: div, className: "grafico" });
-}
-
 function PantallaCopiloto() {
   const [pregunta, setPregunta] = React.useState("");
   const [historial, setHistorial] = React.useState([]);
@@ -185,60 +149,6 @@ function PantallaCopiloto() {
  * generarlo en el navegador daría dos versiones del informe, y la que el
  * cliente le manda a su proveedor podría no coincidir con la que vio.
  * ------------------------------------------------------------------------ */
-function Exportar({ clave, etiqueta }) {
-  const [estado, setEstado] = React.useState(null);
-
-  async function bajar(formato) {
-    setEstado("Generando…");
-    try {
-      const r = await fetch(`${API}/exportar/${clave}.${formato}`);
-      if (!r.ok) {
-        let d = ""; try { d = (await r.json()).detail || ""; } catch (_) {}
-        throw new Error(d || `El servidor respondió ${r.status}`);
-      }
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `plania_${clave}.${formato}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Sin revocar, cada descarga deja el archivo entero retenido en memoria
-      // mientras la ventana siga abierta.
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setEstado(null);
-    } catch (err) {
-      setEstado(String(err.message));
-    }
-  }
-
-  return e("div", { className: "exportes" },
-    e("span", { className: "exportes-txt" }, etiqueta || "Exportar:"),
-    ["pdf", "docx", "xlsx"].map((f) =>
-      e("button", { key: f, className: "btn btn-chico", onClick: () => bajar(f) },
-        f.toUpperCase())),
-    estado ? e("span", { className: "exportes-estado" }, estado) : null);
-}
-
-/* Pestañas simples: varias tablas en una pantalla sin obligar a hacer scroll
-   por todas para llegar a la última. */
-function Pestanas({ items }) {
-  const [activa, setActiva] = React.useState(0);
-  const disponibles = items.filter(Boolean);
-  if (!disponibles.length) return null;
-  const item = disponibles[Math.min(activa, disponibles.length - 1)];
-  return e("div", null,
-    e("div", { className: "pestanas" },
-      disponibles.map((it, i) =>
-        e("button", {
-          key: it.titulo, className: "pestana" + (i === activa ? " activa" : ""),
-          onClick: () => setActiva(i),
-        }, it.titulo, it.cantidad !== undefined
-             ? e("span", { className: "conteo" }, miles(it.cantidad)) : null))),
-    e("div", { className: "pestana-cuerpo" }, item.contenido));
-}
-
 function PantallaStock() {
   const { cargando, datos, error, reintentar } = useDatos(() => pedir("/stock"), []);
   const [categoria, setCategoria] = React.useState("");

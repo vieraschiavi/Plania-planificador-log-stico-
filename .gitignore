@@ -31,6 +31,8 @@ data/auditoria.log*
 *.lock
 desktop/node_modules/
 desktop/dist_electron/
+desktop_owner/node_modules/
+desktop_owner/dist_electron/
 
 # Web: intermedios de la grabación y el doblaje del video.
 # El mp4 y los .vtt sí se versionan (son lo que se publica); esto no.
