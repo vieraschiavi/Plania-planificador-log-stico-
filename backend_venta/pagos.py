@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Registro de pagos ya procesados (idempotencia y rescate)
 ==================================================================

@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Medición de uso por licencia (Edición Venta)
 ======================================================

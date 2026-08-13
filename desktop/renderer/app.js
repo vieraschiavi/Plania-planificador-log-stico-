@@ -1,3 +1,4 @@
+// © 2026 Martín Viera. Todos los derechos reservados.
 /*
  * Splash de arranque de Plania — React sin build step (UMD + createElement),
  * para que el escritorio no necesite toolchain de frontend: npm install y listo.

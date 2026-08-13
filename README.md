@@ -355,12 +355,17 @@ Salen de leer los colores reales de `assets/brand/plania_icon.png`, así que
 si el logo cambia algún día, correr el script de nuevo alcanza para que el
 instalador lo siga.
 
-## Licencia de uso (EULA)
+## Licencia
 
-El uso de Plania —demo o pago— está sujeto a
-[`LICENSE-EULA.md`](LICENSE-EULA.md). La app pide aceptarla una sola vez
-por instalación, antes de cualquier pantalla con datos (`plania/licencia.py`:
-`eula_aceptada()` / `aceptar_eula()`).
+Dos documentos distintos, para dos cosas distintas:
+
+- [`LICENSE`](LICENSE) — el código fuente de este repositorio es propiedad
+  de Martín Viera, todos los derechos reservados. Que el repo sea público no
+  habilita a copiarlo, modificarlo ni redistribuirlo.
+- [`LICENSE-EULA.md`](LICENSE-EULA.md) — el uso de Plania ya instalado
+  —demo o pago— está sujeto a este acuerdo. La app pide aceptarla una sola
+  vez por instalación, antes de cualquier pantalla con datos
+  (`plania/licencia.py`: `eula_aceptada()` / `aceptar_eula()`).
 
 ## Configuración (pantalla ⚙️ o variables de entorno)
 

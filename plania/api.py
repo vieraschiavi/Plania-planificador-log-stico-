@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · API local que consume la interfaz de escritorio
 ========================================================

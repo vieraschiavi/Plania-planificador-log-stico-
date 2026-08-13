@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Licencia sin restricciones para el dueño del producto
 ================================================================

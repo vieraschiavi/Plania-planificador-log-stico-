@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """
 Plania · Log de auditoría (append-only, con cadena de hashes)
 =============================================================

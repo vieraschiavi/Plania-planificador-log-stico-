@@ -1,3 +1,4 @@
+# © 2026 Martín Viera. Todos los derechos reservados.
 """Tests de Plania: dataset, conectores, analítica, sugerencias, copiloto,
 exportes, rutas, licencias y backend de venta."""
 import os
