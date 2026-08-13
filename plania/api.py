@@ -28,6 +28,7 @@ Levantar a mano, para desarrollo:
 """
 from __future__ import annotations
 
+import importlib.util
 import math
 import os
 from typing import Any
@@ -531,3 +532,24 @@ def guardar_config(c: CambioConfig) -> dict:
     pconfig.aplicar()
     invalidar_cache()
     return {"ok": True, "guardadas": sorted(cambios)}
+
+
+# ---------------------------------------------------------------------------
+# Panel del dueño (sólo existe en el build del dueño)
+# ---------------------------------------------------------------------------
+# `plania/api_owner.py` está en MODULOS_SOLO_OWNER: `preparar_arbol()` lo borra
+# antes de compilar el producto, así que en la instalación de un cliente este
+# import falla y no se monta nada. No es un permiso que se pueda saltear ni una
+# ruta que devuelva 403 — las rutas /owner/* directamente no existen ahí,
+# porque el código no está.
+#
+# Se pregunta si el módulo existe en vez de envolver el import en un
+# try/except ImportError: ese except no distingue "el archivo no está" (lo
+# normal en el build del cliente) de "el archivo está pero uno de sus imports
+# falla" (un bug), y se tragaría el segundo en silencio dejando el panel del
+# dueño sin explicación. Con find_spec, si el módulo está y está roto, el
+# import de abajo revienta y se ve.
+if importlib.util.find_spec("plania.api_owner") is not None:
+    from plania import api_owner
+
+    app.include_router(api_owner.router)
