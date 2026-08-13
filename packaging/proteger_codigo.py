@@ -87,6 +87,9 @@ MODULOS_PROTEGIDOS = [
 #                          escenarios, precios, cuándo conviene contratar
 #   plania/contenido.py    el kit de contenido para redes
 #   plania/verificacion.py el control end-to-end, herramienta de desarrollo
+#   plania/api_owner.py    las rutas /owner/* que alimentan ese panel; sin
+#                          este archivo, `plania/api.py` no monta ninguna
+#                          (pregunta por él con find_spec antes de importarlo)
 #
 # Compilarlos con Cython no alcanzaba: seguían viajando en cada instalador y
 # en cada demo descargada. Un cliente no los necesita para nada —`app/app.py`
@@ -98,7 +101,8 @@ MODULOS_PROTEGIDOS = [
 # que no pasa por acá porque no sale de su máquina.
 MODULOS_SOLO_OWNER = {
     "app": ["owner.py"],
-    "plania": ["owner.py", "negocio.py", "contenido.py", "verificacion.py"],
+    "plania": ["owner.py", "negocio.py", "contenido.py", "verificacion.py",
+               "api_owner.py"],
 }
 
 # Lo mismo, pero para archivos que no son módulos y que igual no tienen por

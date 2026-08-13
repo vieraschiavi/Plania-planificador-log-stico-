@@ -2258,15 +2258,34 @@ def test_proteger_codigo_compila_y_se_comporta_igual(tmp_path):
                 arbol = ast.parse(open(os.path.join(base, f), encoding="utf-8").read())
             except SyntaxError:
                 continue
-            for n in ast.walk(arbol):
-                pedidos = []
+
+            def _pedidos(n):
                 if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("plania"):
                     partes = (n.module or "").split(".")
-                    pedidos = [partes[1]] if len(partes) > 1 else [a.name for a in n.names]
-                elif isinstance(n, ast.Import):
-                    pedidos = [a.name.split(".")[1] for a in n.names
-                               if a.name.startswith("plania.")]
-                for p in pedidos:
+                    return [partes[1]] if len(partes) > 1 else [a.name for a in n.names]
+                if isinstance(n, ast.Import):
+                    return [a.name.split(".")[1] for a in n.names
+                            if a.name.startswith("plania.")]
+                return []
+
+            # Un import adentro de `if find_spec("plania.X"):` es opcional a
+            # propósito: el módulo puede no estar y el código ya lo previó.
+            # Es el caso de plania/api.py con el panel del dueño, que se saca
+            # del build del cliente. Se reconoce el patrón en vez de listar
+            # excepciones por nombre: para quedar exento hay que escribir la
+            # guarda de verdad, no figurar en una lista. Que además funcione
+            # lo comprueba, importando el árbol podado,
+            # test_la_api_del_build_de_cliente_no_expone_ninguna_ruta_del_dueno.
+            opcionales = set()
+            for n in ast.walk(arbol):
+                if isinstance(n, ast.If) and "find_spec" in ast.dump(n.test):
+                    for sub in ast.walk(n):
+                        opcionales.update(_pedidos(sub))
+
+            for n in ast.walk(arbol):
+                for p in _pedidos(n):
+                    if p in opcionales:
+                        continue
                     assert p in disponibles, \
                         f"{os.path.relpath(os.path.join(base, f), destino)} importa " \
                         f"plania.{p}, que no está en el build: el cliente no podría abrirlo"
@@ -3694,6 +3713,40 @@ def test_el_build_de_cliente_no_lleva_el_panel_del_dueno(tmp_path):
             f"falta {imprescindible} en el build de cliente"
 
 
+def test_la_api_del_build_de_cliente_no_expone_ninguna_ruta_del_dueno(tmp_path):
+    """Que el archivo no esté es la mitad; la otra es que la API arranque igual.
+
+    `plania/api.py` monta las rutas /owner/* sólo si `plania/api_owner.py`
+    existe. En el build del cliente no existe, así que no tiene que haber
+    ninguna — y sobre todo, la API no puede morir en el import por buscar un
+    módulo que se sacó a propósito. Se comprueba importando de verdad el árbol
+    ya podado, en un proceso aparte para que no lo contamine el del repo, que
+    sí tiene el módulo.
+    """
+    import json
+    import subprocess
+    import sys
+
+    proteger = _proteger()
+    destino = str(tmp_path / "cliente")
+    proteger.preparar_arbol(destino)
+
+    guion = ("import sys, json;"
+             "sys.path.insert(0, sys.argv[1]);"
+             "from plania import api;"
+             "print(json.dumps(sorted(api.app.openapi()['paths'])))")
+    r = subprocess.run([sys.executable, "-c", guion, destino],
+                       capture_output=True, text=True, cwd=str(tmp_path))
+    assert r.returncode == 0, f"la API del cliente no arranca sin el panel:\n{r.stderr}"
+
+    rutas = json.loads(r.stdout.strip().splitlines()[-1])
+    del_dueno = [x for x in rutas if "owner" in x]
+    assert not del_dueno, f"el build del cliente expone rutas del dueño: {del_dueno}"
+    # Y las suyas siguen ahí: sacar de más rompe el producto en silencio.
+    for suya in ("/salud", "/inicio", "/config"):
+        assert suya in rutas, f"al podar el panel del dueño se llevó puesta {suya}"
+
+
 def test_el_producto_es_uno_solo_para_el_dueno_y_para_quien_lo_compra(tmp_path):
     """No hay una versión del producto para adentro y otra para vender.
 
@@ -4389,6 +4442,20 @@ def _cliente_api():
     return TestClient(api.app)
 
 
+def _rutas_de(app) -> set:
+    """Todas las rutas de una app FastAPI, incluidas las de routers montados.
+
+    No se recorre `app.routes` a mano: desde que la API monta el router del
+    panel del dueño con `include_router`, esa lista trae un objeto envoltorio
+    sin atributo `.path`, y las rutas de adentro no se ven. Eso importa sobre
+    todo para los controles que verifican que algo NO esté: leer `.path` con
+    un `getattr(r, "path", "")` los dejaría pasando sin mirar justamente las
+    rutas montadas. El esquema OpenAPI las lista todas, sin importar cómo se
+    registraron.
+    """
+    return set(app.openapi()["paths"])
+
+
 def test_la_api_local_responde_todas_las_pantallas():
     """Cada pantalla del producto tiene que poder alimentarse de la API. Si un
     endpoint devuelve 500 con la base demo, con una base real va a fallar
@@ -4488,7 +4555,7 @@ def test_la_api_local_no_es_el_backend_de_venta():
     """
     from plania import api
 
-    rutas_api = {r.path for r in api.app.routes}
+    rutas_api = _rutas_de(api.app)
     for prohibida in ("/webhooks/mercadopago", "/licencias/emitir",
                       "/licencias/trial", "/gateway/copiloto"):
         assert prohibida not in rutas_api, \
@@ -4554,13 +4621,116 @@ def test_la_api_cubre_las_doce_pantallas():
     """Toda pantalla de la interfaz de escritorio tiene su endpoint. Si falta
     uno, esa pantalla queda en blanco en la máquina del cliente."""
     from plania import api
-    rutas = {r.path for r in api.app.routes}
+    rutas = _rutas_de(api.app)
     for ruta in ("/inicio", "/panel", "/stock", "/precios", "/zonas", "/ofertas",
                  "/clientes/inactivos", "/rutas", "/rutas/opciones", "/copiloto",
                  "/licencia", "/licencia/activar", "/planes", "/checkout",
                  "/config", "/erp/probar", "/erp/guardar", "/erp/estado",
                  "/exportar/{clave}.{formato}", "/salud"):
         assert ruta in rutas, f"falta el endpoint {ruta}"
+
+
+def test_la_api_del_dueno_cubre_sus_seis_pantallas():
+    """Las seis secciones del panel del dueño tienen endpoint propio.
+
+    Es el equivalente del control de arriba para el otro programa: si falta
+    uno, esa pantalla queda en blanco cuando el dueño abre su panel.
+    """
+    from plania import api
+    rutas = _rutas_de(api.app)
+    for ruta in ("/owner/negocio", "/owner/licencias", "/owner/licencias/emitir",
+                 "/owner/rentabilidad", "/owner/mercado", "/owner/contenido",
+                 "/owner/verificacion", "/owner/exportar/{clave}.{formato}"):
+        assert ruta in rutas, f"falta el endpoint del panel del dueño {ruta}"
+
+
+def test_el_tablero_del_dueno_responde_con_sus_numeros():
+    c = _cliente_api()
+    r = c.get("/owner/negocio")
+    assert r.status_code == 200
+    cuerpo = r.json()
+    # Las cifras que justifican el panel: sin operación registrada dan cero,
+    # pero tienen que estar todas.
+    for clave in ("demos_entregadas", "clientes_pagos", "conversion_pct",
+                  "mrr_usd", "arr_usd", "margen_bruto_pct", "clientes_en_riesgo"):
+        assert clave in cuerpo["kpis"], f"falta el KPI {clave}"
+    assert "ok" in cuerpo["integridad"]
+
+
+def test_la_proyeccion_del_dueno_respeta_los_tres_controles():
+    """Escenario, pauta y meses son los tres controles de esa pantalla: si la
+    API los ignorara, mover un slider no cambiaría nada y no se notaría."""
+    c = _cliente_api()
+    r = c.get("/owner/rentabilidad?escenario=Base&ads=300&meses=6")
+    assert r.status_code == 200
+    cuerpo = r.json()
+    assert cuerpo["escenario"]["nombre"] == "Base"
+    assert cuerpo["detalle"]["total"] == 6, "el parámetro meses no llegó a la simulación"
+
+    optimista = c.get("/owner/rentabilidad?escenario=Optimista&ads=300&meses=6").json()
+    assert optimista["detalle"]["filas"] != cuerpo["detalle"]["filas"], \
+        "cambiar de escenario devolvió la misma simulación"
+
+    sin_pauta = c.get("/owner/rentabilidad?escenario=Base&ads=0&meses=6").json()
+    assert sin_pauta["detalle"]["filas"] != cuerpo["detalle"]["filas"], \
+        "la inversión en redes no movió la simulación"
+
+
+def test_la_proyeccion_del_dueno_rechaza_un_escenario_que_no_existe():
+    c = _cliente_api()
+    r = c.get("/owner/rentabilidad?escenario=Fantasia")
+    assert r.status_code == 400
+    # El texto del detalle se muestra tal cual en pantalla: tiene que decir
+    # cuáles son los escenarios válidos, no sólo que falló.
+    assert "Base" in r.json()["detail"]
+
+
+def test_la_sensibilidad_no_manda_una_columna_de_nombre_cambiante():
+    """`negocio.sensibilidad` nombra su primera columna como la variable que
+    simula. Si eso viaja tal cual, la interfaz tiene que adivinar cuál de las
+    columnas es el valor simulado, y cambia según la tabla."""
+    c = _cliente_api()
+    cuerpo = c.get("/owner/mercado").json()
+    for s in cuerpo["sensibilidades"]:
+        assert s["variable"] in ("churn_mensual", "conv_demo_cliente")
+        assert "valor" in s["tabla"]["columnas"], \
+            f"la tabla de {s['variable']} no expone su valor con un nombre fijo"
+        assert s["variable"] not in s["tabla"]["columnas"]
+
+
+def test_emitir_una_licencia_a_mano_queda_asentada_en_el_log(tmp_path, monkeypatch):
+    """Emitir de más y no acordarse es cómo se pierde de vista el MRR: el
+    historial y el tablero salen del log, así que la emisión tiene que
+    escribirlo. Si no, la licencia existe y el panel no la cuenta."""
+    from plania import auditoria as pauditoria
+
+    # `LOG_FILE` queda fijado en los defaults de registrar()/leer() al
+    # importar, así que cambiar la variable del módulo no desvía nada: se
+    # atan las dos funciones a un log de prueba para no escribir el real.
+    log = str(tmp_path / "auditoria.log")
+    real_registrar = pauditoria.registrar
+    monkeypatch.setattr(pauditoria, "registrar",
+                        lambda accion, detalle=None, **kw:
+                        real_registrar(accion, detalle, archivo=log, **kw))
+
+    c = _cliente_api()
+    r = c.post("/owner/licencias/emitir",
+               json={"cliente": "directa@plania.uy", "plan": "pro"})
+    assert r.status_code == 200
+    assert r.json()["token"], "no devolvió la licencia para copiar"
+
+    asentado = pauditoria.leer(archivo=log)
+    assert [e["accion"] for e in asentado] == ["licencia_emitida_manual"]
+    assert asentado[0]["detalle"]["cliente"] == "directa@plania.uy"
+    assert asentado[0]["detalle"]["plan"] == "pro"
+
+
+def test_emitir_una_licencia_a_mano_valida_lo_que_recibe():
+    c = _cliente_api()
+    assert c.post("/owner/licencias/emitir",
+                  json={"cliente": "   ", "plan": "pro"}).status_code == 400
+    assert c.post("/owner/licencias/emitir",
+                  json={"cliente": "x@y.uy", "plan": "inexistente"}).status_code == 400
 
 
 def test_las_funciones_de_pago_se_controlan_en_el_servidor(monkeypatch):
