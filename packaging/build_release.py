@@ -166,6 +166,11 @@ def paso_owner() -> str | None:
             print(f"  [!!] {p}")
         raise SystemExit("El paquete del panel junto al exe no quedó bien.")
 
+    # La ventana Electron del panel, con sus seis pantallas React. Va después
+    # del bundle de PyInstaller porque lo empaqueta adentro como recurso: es
+    # el motor que la ventana levanta (`dist/Plania Owner`).
+    paso_owner_electron()
+
     zpath = os.path.join(DIST, "Plania_Owner.zip")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for base, _dirs, files in os.walk(carpeta):
@@ -173,6 +178,44 @@ def paso_owner() -> str | None:
                 ruta = os.path.join(base, f)
                 z.write(ruta, os.path.relpath(ruta, os.path.dirname(carpeta)))
     return zpath
+
+
+def paso_owner_electron() -> str | None:
+    """Arma `Plania Owner Setup.exe`: la ventana Electron del panel.
+
+    Se arma acá y no en el workflow de Release a propósito. El workflow
+    publica lo que deja en disco, y tiene una guarda que directamente falla si
+    entre esos archivos aparece un `Plania_Owner*` — el panel no se publica
+    nunca. Este ejecutable sale de la máquina del dueño y se queda ahí.
+
+    Se saltea con aviso, no con error, si falta Node o las dependencias: el
+    resto del paquete del panel (el bundle de PyInstaller, su instalador de
+    Inno Setup y el ZIP) ya quedó armado y sirve igual.
+    """
+    import armar_desktop_owner
+
+    npm = shutil.which("npm")
+    if not npm:
+        print("[build] Node/npm no encontrado — salteo la ventana Electron del panel.")
+        return None
+
+    arbol = armar_desktop_owner.armar()
+    if not os.path.isdir(os.path.join(arbol, "node_modules")):
+        print("[build] El panel quedó sin node_modules (corré `npm install` en "
+              "desktop/) — salteo su ventana Electron.")
+        return None
+
+    print("[build] $ npm run dist  (ventana del panel del dueño)")
+    subprocess.run([npm, "run", "dist"], check=True, cwd=arbol)
+
+    salida = os.path.join(arbol, "dist_electron")
+    exes = [os.path.join(salida, f) for f in sorted(os.listdir(salida))
+            if f.endswith(".exe")] if os.path.isdir(salida) else []
+    if not exes:
+        raise SystemExit("electron-builder no dejó ningún .exe para el panel.")
+    for x in exes:
+        print(f"  {x}\n    sha256: {_sha256(x)}")
+    return exes[0]
 
 
 def paso_paquete_bat() -> str:

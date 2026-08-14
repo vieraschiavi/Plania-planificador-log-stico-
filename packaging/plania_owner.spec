@@ -71,6 +71,25 @@ hiddenimports += [
     "ventana",
 ]
 
+# El panel tiene dos ventanas y las dos salen de este mismo ejecutable:
+#
+#   · Streamlit — `Plania Owner.exe` a secas, o el .bat.
+#   · La API local — cuando lo lanza la ventana Electron del panel
+#     (desktop_owner/), que dibuja su propia interfaz React y pide
+#     PLANIA_MOTOR=api. Ahí `plania/api.py` monta además `plania/api_owner.py`
+#     con las rutas /owner/*.
+#
+# uvicorn resuelve estos módulos por NOMBRE en tiempo de ejecución ("auto"
+# elige implementación según el sistema), así que PyInstaller no los ve
+# siguiendo imports: hay que nombrarlos o el ejecutable compila bien y muere
+# al arrancar en modo API. Es la misma lista que packaging/plania.spec.
+hiddenimports += [
+    "plania.api", "plania.api_owner",
+    "uvicorn", "uvicorn.logging", "uvicorn.loops.auto",
+    "uvicorn.protocols.http.auto", "uvicorn.protocols.websockets.auto",
+    "uvicorn.lifespan.on",
+]
+
 _PATHEX_EXTRA = [os.path.join(REPO, "packaging")]
 _ICON = os.path.join(ROOT, "assets", "brand", "plania.ico")
 _icon = _ICON if os.path.exists(_ICON) else None

@@ -4076,6 +4076,62 @@ def test_el_panel_del_dueno_tiene_su_propia_ventana_completa():
         assert cfg["build"]["nsis"]["uninstallDisplayName"] == "Plania Owner"
 
 
+def test_el_ejecutable_del_panel_puede_servir_su_api():
+    """El `.exe` del panel tiene que saber levantar la API, no sólo Streamlit.
+
+    Son dos ventanas sobre el mismo ejecutable: `Plania Owner.exe` a secas
+    abre Streamlit, y lanzado por la ventana Electron del panel abre la API
+    local con las rutas /owner/*. Lo segundo es nuevo, y falla de la forma más
+    cara: PyInstaller compila sin quejarse y el ejecutable muere recién al
+    arrancar en modo API, porque uvicorn resuelve estos módulos por nombre en
+    tiempo de ejecución y nada los alcanza siguiendo imports.
+    """
+    import os
+    spec = open(os.path.join(RAIZ, "packaging", "plania_owner.spec"),
+                encoding="utf-8").read()
+    for modulo in ("plania.api", "plania.api_owner", "uvicorn.loops.auto",
+                   "uvicorn.protocols.http.auto", "uvicorn.lifespan.on"):
+        assert f'"{modulo}"' in spec, \
+            f"plania_owner.spec no declara {modulo}: el panel no abre en modo API"
+
+    # El lanzador no puede ignorar el pedido de API cuando la pantalla es la
+    # del dueño: si lo ignorara, la ventana Electron esperaría para siempre
+    # una API que nunca levanta.
+    lanzador = open(os.path.join(RAIZ, "packaging", "plania_launcher.py"),
+                    encoding="utf-8").read()
+    i = lanzador.index("if _modo_api():")
+    assert "PLANIA_PANEL" not in lanzador[i:i + 200], \
+        "el modo API se decide mirando la pantalla, y no tiene que hacerlo"
+
+    # Y el entry point del panel no puede limpiar PLANIA_MOTOR: eso forzaría
+    # Streamlit siempre y dejaría la ventana Electron sin API.
+    entrada = open(os.path.join(RAIZ, "packaging", "entrada_owner.py"),
+                   encoding="utf-8").read()
+    assert 'PLANIA_MOTOR"] = ""' not in entrada and "PLANIA_MOTOR\"]=\"\"" not in entrada, \
+        "entrada_owner.py limpia PLANIA_MOTOR: la ventana Electron del panel no abriría"
+
+
+def test_la_ventana_del_panel_se_arma_pero_no_se_publica():
+    """El instalador del panel se arma con --con-owner, en la máquina del
+    dueño, y nunca en el workflow que publica. Es la misma regla que ya rige
+    para el ZIP y para su instalador de Inno Setup, aplicada a la ventana
+    Electron."""
+    import os
+    build = open(os.path.join(RAIZ, "packaging", "build_release.py"),
+                 encoding="utf-8").read()
+    assert "paso_owner_electron" in build, \
+        "--con-owner no arma la ventana Electron del panel"
+    i = build.index("def paso_owner_electron")
+    assert "armar_desktop_owner" in build[i:i + 1200], \
+        "la ventana del panel se armaría sin componer su árbol"
+
+    # El workflow de Release no puede armarla: publica lo que deja en disco.
+    wf = _release_yml()
+    for prohibido in ("desktop_owner", "--con-owner", "armar_desktop_owner"):
+        assert prohibido not in wf, \
+            f"el workflow que publica nombra {prohibido!r}: el panel no se publica"
+
+
 def test_la_app_del_cliente_no_importa_nada_del_dueno():
     """Lo que decide si se puede sacar un módulo del build es quién lo importa.
 
@@ -4492,17 +4548,29 @@ def test_el_panel_del_dueno_nunca_se_publica_en_el_repo():
     # el texto del mensaje de error ya la satisfacía: al sacar el `Test-Path`
     # el control seguía en verde con la guarda borrada.
     #
-    # El patrón tiene que ser `Plania_Owner*`, con comodín, y no el nombre
-    # exacto de un archivo: el panel del dueño hoy se arma de dos formas
-    # (Plania_Owner.zip de PyInstaller y Plania_Owner_BAT.zip con el código y
-    # su .bat), y una guarda escrita contra el nombre exacto de la primera
-    # dejaba pasar la segunda.
+    # No se fija el texto del patrón sino LO QUE ATRAPA, con los nombres
+    # reales de las tres formas en que hoy se arma el panel. Fijar la cadena
+    # obliga a actualizar el test cada vez que se toca la guarda, y ese
+    # trámite invita a copiar el patrón nuevo sin comprobar si sigue
+    # cubriendo todo — que es justo cómo se pierde una guarda.
+    import re
     wf = _release_yml()
-    guarda = '$archivos | Where-Object { $_.Name -like "Plania_Owner*" }'
-    assert guarda in wf, \
-        f"falta la guarda real ({guarda}) que impide publicar el build del dueño"
-    i = wf.index(guarda)
-    bloque = wf[i:i + 300]
+    m = re.search(r"\$archivos \| Where-Object \{ \$_\.Name -match '([^']+)' \}", wf)
+    assert m, "falta la guarda que impide publicar el build del dueño"
+
+    patron = re.compile(m.group(1))
+    for nombre in ("Plania_Owner.zip",              # bundle de PyInstaller
+                   "Plania_Owner_BAT.zip",          # el código con su .bat
+                   "Plania Owner Setup 1.0.0.exe"): # la ventana Electron
+        assert patron.search(nombre), \
+            f"la guarda deja pasar {nombre!r}, que es el panel del dueño"
+    # Y no puede llevarse puesto el producto.
+    for nombre in ("Plania_Setup_v1.0.0.exe", "Plania.Setup.1.0.0.exe",
+                   "Plania_portable.zip", "Plania_BAT.zip"):
+        assert not patron.search(nombre), \
+            f"la guarda bloquea {nombre!r}, que sí se publica"
+
+    bloque = wf[m.start():m.start() + 300]
     assert "exit 1" in bloque, \
         "detectar el build del dueño en INSTALADOR/ tiene que cortar la corrida"
 
