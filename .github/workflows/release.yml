@@ -268,10 +268,15 @@ jobs:
 
           # El panel del dueño NO se publica: lleva adentro la facturación, los
           # clientes y el modelo financiero. Si aparece entre lo que se va a
-          # subir, es un error y el paso corta. Plania_Owner* cubre las dos
-          # formas del panel: el .zip de PyInstaller y el Plania_Owner_BAT.zip
-          # con el código y su .bat.
-          $delDueno = $archivos | Where-Object { $_.Name -like "Plania_Owner*" }
+          # subir, es un error y el paso corta.
+          #
+          # El patrón acepta guion bajo Y espacio. Antes era sólo
+          # "Plania_Owner*", que cubría el .zip de PyInstaller y el
+          # Plania_Owner_BAT.zip, pero la ventana Electron del panel sale de
+          # electron-builder con el productName tal cual — "Plania Owner Setup
+          # 1.0.0.exe", con espacio— y habría pasado por al lado de esta
+          # guarda sin que saltara nada.
+          $delDueno = $archivos | Where-Object { $_.Name -match '^Plania[ _]Owner' }
           if ($delDueno) {
             Write-Error "$($delDueno.Name) no puede publicarse: es el panel del dueño."
             exit 1

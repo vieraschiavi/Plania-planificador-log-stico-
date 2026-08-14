@@ -48,6 +48,37 @@ Si es la primera vez, corré antes `npm install` en `desktop/`: el armador
 reusa ese `node_modules` en vez de bajar las mismas tres dependencias otra
 vez.
 
+## El instalador
+
+```bash
+python packaging/build_release.py --con-owner
+```
+
+Deja `Plania Owner Setup <versión>.exe` en `build/desktop_owner/dist_electron/`,
+con ícono en el escritorio, entrada en el menú Inicio, elección de carpeta y
+desinstalador propio. El `appId` es distinto del producto (`uy.plania.owner`),
+así que instalar uno no desinstala el otro.
+
+Ese mismo comando arma antes el motor con PyInstaller (`dist/Plania Owner`),
+que es lo que el instalador mete adentro como recurso y lo que la ventana
+levanta al abrirse. **Sólo corre en Windows**, y sólo en tu máquina: el
+workflow de Release no lo arma ni lo publica, y tiene una guarda que corta la
+corrida si un archivo del panel aparece entre lo que se va a subir.
+
+### Las dos ventanas salen del mismo motor
+
+`Plania Owner.exe` sirve dos cosas según cómo lo lancen:
+
+| Cómo se lanza | Qué levanta |
+|---|---|
+| a secas, o por el `.bat` | la pantalla Streamlit (`app/owner.py`) |
+| desde esta ventana Electron (`PLANIA_MOTOR=api`) | la API local con las rutas `/owner/*` |
+
+Por eso `packaging/plania_owner.spec` declara `plania.api`, `plania.api_owner`
+y los módulos que uvicorn resuelve por nombre en tiempo de ejecución
+(`uvicorn.loops.auto` y compañía). Sin ellos PyInstaller compila sin quejarse
+y el ejecutable muere recién al abrirse en modo API.
+
 ## Qué hay en cada archivo
 
 | Archivo | Qué es |
