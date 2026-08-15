@@ -31,12 +31,13 @@ from __future__ import annotations
 import importlib.util
 import math
 import os
+import secrets
 from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from plania import (analitica, conectores, copiloto, exportes, licencia, rutas,
@@ -45,20 +46,72 @@ from plania import config as pconfig
 
 app = FastAPI(title="Plania · API local", docs_url="/_docs")
 
-# La ventana de Electron carga la interfaz desde file:// , y ese origen viaja
-# como "null". Sin esto, el navegador embebido bloquea cada llamada por CORS y
-# la aplicación arranca en blanco sin decir por qué.
+# Escuchar sólo en 127.0.0.1 impide que llegue tráfico de la red, pero NO
+# impide que llegue del navegador del propio usuario: si mientras Plania corre
+# alguien abre una página cualquiera, el JavaScript de esa página puede pedirle
+# a http://127.0.0.1:<puerto> igual que a cualquier servidor.
 #
-# Que sea permisivo no abre nada a la red: el servidor escucha únicamente en
-# 127.0.0.1 (lo fija quien lo lanza), así que sólo llega tráfico de esta
-# máquina. CORS no es lo que protege acá — lo que protege es la interfaz de
-# escucha.
+# Con `allow_origins=["*"]` —como estaba— el navegador además le dejaba LEER la
+# respuesta, y los puertos que prueba el lanzador son cinco fijos, o sea
+# triviales de escanear. Comprobado: con un Origin de un sitio cualquiera,
+# `/inicio` devolvía la venta y el margen del cliente, y `/erp/guardar` le
+# cambiaba la conexión a su base. En el build del dueño, además,
+# `/owner/negocio` entrega la facturación y `/owner/licencias/emitir` fabrica
+# licencias.
+#
+# Dos capas, porque ninguna sola alcanza:
+#
+#   1. El origen. La interfaz se carga desde file://, cuyo origen viaja como
+#      "null": es el único que se acepta. Un sitio real (https://…) ya no puede
+#      leer nada. No alcanza solo, porque un <iframe sandbox> también manda
+#      "null" — por eso está la segunda.
+#   2. El token. Lo genera la ventana, se lo pasa al motor por entorno y a la
+#      interfaz por la query. Una página ajena no lo puede adivinar.
+ORIGEN_VENTANA = "null"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[ORIGEN_VENTANA],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rutas que se responden sin token. `/salud` es lo que la ventana consulta para
+# saber cuándo levantó el motor, antes de tener nada cargado, y no dice más que
+# "sí, estoy". Dejarla abierta no filtra nada y evita que un error de token se
+# vea como "el servidor no levantó", que manda a buscar el problema al lugar
+# equivocado.
+SIN_TOKEN = {"/salud"}
+
+
+def _token_esperado() -> str | None:
+    """El token de esta corrida, o None si nadie lo fijó.
+
+    Se lee en cada pedido y no una vez al importar: los tests y el arranque a
+    mano lo ponen y lo sacan del entorno, y cachearlo haría que el primer
+    import decidiera para siempre.
+    """
+    return os.environ.get("PLANIA_API_TOKEN") or None
+
+
+@app.middleware("http")
+async def exigir_token(request, call_next):
+    """Sin el token de esta corrida, no se contesta.
+
+    Si nadie fijó `PLANIA_API_TOKEN` no se exige nada: es el arranque a mano
+    para desarrollo (`uvicorn plania.api:app`), donde no hay ventana que lo
+    genere. Ahí la única capa es el origen, que ya bloquea a cualquier sitio
+    real. En el producto instalado siempre está, porque lo pone la ventana.
+    """
+    esperado = _token_esperado()
+    if esperado and request.url.path not in SIN_TOKEN:
+        recibido = (request.headers.get("x-plania-token")
+                    or request.query_params.get("token"))
+        # Comparación en tiempo constante: comparar con `!=` filtra, por lo que
+        # tarda, cuántos caracteres del principio acertó quien prueba.
+        if not recibido or not secrets.compare_digest(recibido, esperado):
+            return JSONResponse({"detail": "Token de acceso inválido."}, status_code=403)
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,18 @@ const net = require("net");
 const path = require("path");
 const fs = require("fs");
 
+const crypto = require("crypto");
+
+/* Token de esta corrida, generado acá y compartido con el motor.
+ *
+ * Escuchar en 127.0.0.1 frena a la red, pero no al navegador del propio
+ * usuario: una página cualquiera que abra mientras Plania corre puede pedirle
+ * a http://127.0.0.1:<puerto>, y los puertos que prueba el lanzador son cinco
+ * fijos. Sin esto, esa página leía la venta y el margen del cliente y podía
+ * cambiarle la conexión a su base. Se genera nuevo en cada arranque: no hay
+ * nada que guardar ni que rotar. */
+const TOKEN_API = crypto.randomBytes(32).toString("hex");
+
 let backend = null;
 let win = null;
 
@@ -75,6 +87,7 @@ function lanzarBackend(port, archivoPuerto) {
     ...process.env,
     STREAMLIT_SERVER_HEADLESS: "true",
     STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false",
+    PLANIA_API_TOKEN: TOKEN_API,
     PLANIA_NO_BROWSER: "1", // que el launcher no abra otro navegador
     PLANIA_PUERTO_ARCHIVO: archivoPuerto,
     // La ventana dibuja su propia interfaz en React, así que el motor sirve
@@ -176,7 +189,7 @@ async function crearVentana() {
     // inyectar. Con la query está disponible desde la primera línea que corre.
     if (win && !win.isDestroyed()) {
       await win.loadFile(path.join(__dirname, "renderer", "ui", "index.html"),
-        { query: { api: url } });
+        { query: { api: url, token: TOKEN_API } });
     }
   } catch (e) {
     mostrarError(e.message);

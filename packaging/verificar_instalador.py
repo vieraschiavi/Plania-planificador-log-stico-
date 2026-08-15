@@ -449,9 +449,20 @@ def controles() -> list[tuple[bool, str, str]]:
     # El puerto tiene que llegar por la query: inyectarlo con executeJavaScript
     # obliga a recargar, y la recarga crea un contexto nuevo que borra
     # justamente lo inyectado.
-    ok("query: { api: url }" in main_js,
+    ok("query: { api: url" in main_js,
        "El puerto de la API le llega a la interfaz al arrancar",
        "sin esto la interfaz pide siempre al puerto por defecto")
+
+    # El token viaja por el mismo camino que el puerto y tiene que llegar a
+    # las dos puntas: al motor por entorno y a la interfaz por la query. Si
+    # falta en una, o la API queda abierta a cualquier página que el usuario
+    # tenga abierta, o la ventana recibe 403 en todo y arranca en blanco.
+    ok("PLANIA_API_TOKEN: TOKEN_API" in main_js,
+       "El motor recibe el token de acceso de esta corrida",
+       "sin esto la API local queda sin la segunda capa de protección")
+    ok("token: TOKEN_API" in main_js,
+       "El token le llega a la interfaz al arrancar",
+       "sin esto la ventana recibe 403 en cada pedido y queda en blanco")
 
     spec_txt = _leer(SPEC)
     for modulo in ("plania.api", "uvicorn"):

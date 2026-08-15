@@ -20,11 +20,28 @@ const API = (new URLSearchParams(location.search).get("api")
              || window.PLANIA_API
              || "http://127.0.0.1:8777").replace(/\/$/, "");
 
+/* El token de esta corrida, por el mismo camino que el puerto.
+ *
+ * Lo genera la ventana y se lo pasa al motor por entorno; sin él, el motor no
+ * contesta. Hace falta porque escuchar en 127.0.0.1 frena a la red pero no al
+ * navegador del propio usuario: una página cualquiera que alguien abra
+ * mientras Plania corre puede pedirle a http://127.0.0.1:<puerto>, y los
+ * puertos que prueba el lanzador son cinco fijos. Sin esto, esa página leía la
+ * venta y el margen del cliente, y podía cambiarle la conexión a su base. */
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+
+function cabecerasBase(extra) {
+  const h = { ...(extra || {}) };
+  if (TOKEN) h["X-Plania-Token"] = TOKEN;
+  return h;
+}
+
 async function pedir(ruta, cuerpo) {
   const opciones = cuerpo
-    ? { method: "POST", headers: { "Content-Type": "application/json" },
+    ? { method: "POST",
+        headers: cabecerasBase({ "Content-Type": "application/json" }),
         body: JSON.stringify(cuerpo) }
-    : {};
+    : { headers: cabecerasBase() };
   const r = await fetch(API + ruta, opciones);
   if (!r.ok) {
     // El detalle del backend es más útil que "Error 500": dice qué endpoint y
@@ -268,7 +285,8 @@ function Exportar({ clave, etiqueta, base }) {
   async function bajar(formato) {
     setEstado("Generando…");
     try {
-      const r = await fetch(`${API}${raiz}/${clave}.${formato}`);
+      const r = await fetch(`${API}${raiz}/${clave}.${formato}`,
+                            { headers: cabecerasBase() });
       if (!r.ok) {
         let d = ""; try { d = (await r.json()).detail || ""; } catch (_) {}
         throw new Error(d || `El servidor respondió ${r.status}`);
