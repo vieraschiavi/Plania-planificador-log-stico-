@@ -48,7 +48,13 @@ async function pedir(ruta, cuerpo) {
     // por qué. Si no viene, al menos queda el código.
     let detalle = "";
     try { detalle = (await r.json()).detail || ""; } catch (_) { /* sin cuerpo */ }
-    throw new Error(detalle || `${ruta} respondió ${r.status}`);
+    const err = new Error(detalle || `${ruta} respondió ${r.status}`);
+    // El status queda en el error y no sólo en el mensaje: la demo vencida
+    // (402) necesita una pantalla distinta de "no se pudo conectar", y
+    // adivinarlo por el texto del mensaje se rompe el día que se lo
+    // traduzca o se le cambie una palabra.
+    err.status = r.status;
+    throw err;
   }
   return r.json();
 }
@@ -173,12 +179,23 @@ function Cargando({ que }) {
 
 /* El error se muestra completo y con el reintento a mano. Un mensaje genérico
  * obliga al usuario a llamar a soporte para algo que muchas veces se resuelve
- * solo (el motor todavía estaba levantando). */
+ * solo (el motor todavía estaba levantando).
+ *
+ * 402 es un caso aparte: la demo venció y ningún "Reintentar" lo arregla —
+ * pedir de nuevo devuelve el mismo 402. Antes esto caía en el genérico "No se
+ * pudieron traer los datos", que en Stock, Precios, Panel ejecutivo, Zonas y
+ * Ofertas parecía un error del programa cuando en realidad es exactamente lo
+ * que tiene que pasar (`plania/api.py::_exigir_licencia_vigente`). */
 function Error_({ mensaje, reintentar }) {
-  return e("div", { className: "error-caja" },
-    e("div", { className: "error-titulo" }, "No se pudieron traer los datos"),
-    e("div", { className: "error-detalle" }, String(mensaje)),
-    reintentar ? e("button", { className: "btn", onClick: reintentar }, "Reintentar") : null);
+  const vencida = mensaje && mensaje.status === 402;
+  const texto = String((mensaje && mensaje.message) || mensaje);
+  return e("div", { className: vencida ? "aviso-vencida" : "error-caja" },
+    e("div", { className: vencida ? null : "error-titulo" },
+      vencida ? null : "No se pudieron traer los datos"),
+    e("div", { className: vencida ? null : "error-detalle" }, texto),
+    !vencida && reintentar
+      ? e("button", { className: "btn", onClick: reintentar }, "Reintentar")
+      : null);
 }
 
 /* Hook de carga: estados de carga, error y reintento en un solo lugar, para
@@ -191,7 +208,9 @@ function useDatos(cargar, deps) {
     setEstado({ cargando: true, datos: null, error: null });
     cargar()
       .then((d) => { if (vivo) setEstado({ cargando: false, datos: d, error: null }); })
-      .catch((err) => { if (vivo) setEstado({ cargando: false, datos: null, error: err.message }); });
+      // Se guarda el error entero (no `err.message`): `Error_` necesita
+      // `.status` para distinguir "la demo venció" de un error de verdad.
+      .catch((err) => { if (vivo) setEstado({ cargando: false, datos: null, error: err }); });
     return () => { vivo = false; };
   }, [...(deps || []), intento]);
   return { ...estado, reintentar: () => setIntento((n) => n + 1) };

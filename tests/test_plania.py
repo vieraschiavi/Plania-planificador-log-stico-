@@ -4197,6 +4197,28 @@ def test_el_panel_del_dueno_tiene_su_propia_ventana_completa():
         assert cfg["build"]["nsis"]["uninstallDisplayName"] == "Plania Owner"
 
 
+def test_la_interfaz_distingue_la_demo_vencida_de_un_error_de_verdad():
+    """El 402 de `_exigir_licencia_vigente` (plania/api.py) tiene que llegar
+    marcado hasta `Error_`, o cae en el mensaje genérico "No se pudieron
+    traer los datos" — que en Stock, Precios o Panel ejecutivo se lee como un
+    bug del programa cuando en realidad es exactamente lo que tiene que
+    pasar cuando vence la demo."""
+    import os
+    base = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "base.js"),
+               encoding="utf-8").read()
+
+    assert "err.status = r.status" in base, \
+        "pedir() no le pega el status HTTP al error: Error_ no puede distinguir 402"
+    assert 'error: err' in base and 'error: err.message' not in base, \
+        "useDatos sigue guardando sólo err.message: se perdió el status en el camino"
+
+    i = base.index("function Error_")
+    bloque = base[i:i + 800]
+    assert "mensaje.status === 402" in bloque, \
+        "Error_ no distingue la demo vencida de un error real"
+    assert "aviso-vencida" in bloque
+
+
 def test_el_ejecutable_del_panel_puede_servir_su_api():
     """El `.exe` del panel tiene que saber levantar la API, no sólo Streamlit.
 
@@ -5132,6 +5154,90 @@ def test_las_funciones_de_pago_se_controlan_en_el_servidor(monkeypatch):
         r = c.request(metodo, ruta, json=cuerpo)
         assert r.status_code == 403, \
             f"{metodo} {ruta} devolvió {r.status_code} con la feature apagada"
+
+
+def test_la_demo_vencida_bloquea_los_datos_reales_no_solo_rutas_copiloto_y_exportes(
+        tmp_path, monkeypatch):
+    """La API entera tiene que exigir licencia, no sólo las tres features de
+    plan (rutas/copiloto/exportes).
+
+    Comprobado ejecutando el pedido de verdad con una demo vencida: `/panel`,
+    `/stock`, `/precios`, `/zonas`, `/ofertas`, `/clientes/inactivos`,
+    `/rutas/opciones`, `/erp/probar`, `/erp/guardar` y `/erp/estado`
+    devolvían 200 con la analítica y los datos completos del cliente,
+    indefinidamente, sin ninguna licencia activa — la ventana Electron/React
+    no tiene ningún bloqueo del lado cliente (a diferencia de `app/app.py`,
+    que sí corta con `BLOQUEADA`). Un cliente podía dejar vencer la demo y
+    seguir usando casi todo el producto gratis para siempre.
+
+    `/inicio` queda afuera a propósito: sigue mostrando el mismo teaser de 4
+    números que `app/app.py` deja ver en su página "Inicio" aun vencida.
+    """
+    import importlib
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    from plania import config as pconfig
+    from plania import licencia
+    importlib.reload(licencia)
+
+    pconfig.guardar_extra(
+        "DEMO_INICIO", (datetime.now(timezone.utc) - timedelta(days=10)).isoformat())
+    assert licencia.estado()["modo"] == "vencida"
+
+    from fastapi.testclient import TestClient
+    from plania import api
+    importlib.reload(api)
+    api.invalidar_cache()
+    c = TestClient(api.app)
+
+    bloqueadas = [
+        ("GET", "/panel", None), ("GET", "/stock", None), ("GET", "/precios", None),
+        ("GET", "/zonas", None), ("GET", "/ofertas", None),
+        ("GET", "/clientes/inactivos", None), ("GET", "/rutas/opciones", None),
+        ("GET", "/erp/estado", None),
+        ("POST", "/erp/probar", {"url": "sqlite:///nada.db"}),
+        ("POST", "/erp/guardar", {"url": "sqlite:///nada.db"}),
+    ]
+    for metodo, ruta, cuerpo in bloqueadas:
+        r = c.request(metodo, ruta, json=cuerpo)
+        assert r.status_code == 402, \
+            f"{metodo} {ruta} devolvió {r.status_code} con la demo vencida"
+        assert "licencia" in r.json()["detail"].lower()
+
+    # Lo que sigue andando: el teaser, y lo que hace falta para pagar.
+    for libre in ("/salud", "/licencia", "/planes", "/inicio"):
+        assert c.get(libre).status_code == 200, f"{libre} no tendría que bloquearse"
+
+
+def test_una_licencia_activa_no_bloquea_nada(tmp_path, monkeypatch):
+    """Contracara del test de arriba: el chequeo nuevo no puede bloquear a
+    quien sí pagó."""
+    import importlib
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("PLANIA_CONFIG_DIR", str(tmp_path))
+    from plania import config as pconfig
+    from plania import licencia
+    importlib.reload(licencia)
+
+    pconfig.guardar_extra("LICENCIA_JWT", "x.y.z")
+    pconfig.guardar_extra("LICENCIA_CLAIMS", {
+        "plan": "pro", "features": ["copiloto", "erp", "exportes", "rutas"],
+        "expira": (datetime.now(timezone.utc) + timedelta(days=25)).timestamp(),
+        "cliente": "cliente@empresa.uy"})
+    pconfig.guardar_extra("LICENCIA_VERIFICADA_EL", datetime.now(timezone.utc).isoformat())
+    assert licencia.estado()["modo"] == "licencia"
+
+    from fastapi.testclient import TestClient
+    from plania import api
+    importlib.reload(api)
+    api.invalidar_cache()
+    c = TestClient(api.app)
+
+    for ruta in ("/panel", "/stock", "/precios", "/zonas", "/ofertas",
+                "/clientes/inactivos", "/rutas/opciones", "/erp/estado"):
+        assert c.get(ruta).status_code == 200, f"{ruta} bloqueó a un cliente con licencia"
 
 
 def test_la_api_no_deja_agrupar_por_una_columna_cualquiera():
