@@ -37,8 +37,19 @@
     <h1 id="titulo">·</h1>
     <p class="sub-c" id="bajada"></p>
 
-    <!-- Solo en /gracias: la licencia y la descarga. Arranca oculto y lo
-         muestra el script cuando el backend confirma el pago. -->
+    <!-- Solo en /gracias: se pide el email de la compra antes de entregar
+         nada. El identificador de pago viaja a la vista en esta misma URL y
+         los de MercadoPago son numéricos: sin el email, cualquiera que
+         probara números se llevaba la licencia de otro comprador. -->
+    <form id="confirmar" hidden>
+      <p class="nota-c" id="pedir-email"></p>
+      <p><input id="email" type="email" required autocomplete="email"
+                style="width:100%;max-width:22rem;padding:.6rem;font-size:1rem"></p>
+      <p><button class="btn btn-amber" type="submit" id="ver-licencia">·</button></p>
+    </form>
+
+    <!-- La licencia y la descarga. Arranca oculto y lo muestra el script
+         cuando el backend confirma que ese email es el que pagó. -->
     <div id="entrega" hidden>
       <p class="nota-c" id="lic-nota"></p>
       <textarea id="licencia" readonly rows="4" style="width:100%"></textarea>
@@ -81,6 +92,10 @@
       no_aprobado: "MercadoPago todavía no aprobó el pago. Refrescá esta página en un rato; si en una hora sigue igual, escribinos a ventas@plania.uy.",
       sin_backend: "Escribinos a ventas@plania.uy con tu comprobante y te enviamos la licencia.",
       error_red: "No pudimos conectar con el servidor. Refrescá en un rato o escribinos a ventas@plania.uy.",
+      pedir_email: "Por seguridad, confirmá el email con el que hiciste la compra. Sólo a esa dirección le entregamos la licencia.",
+      ver_licencia: "Ver mi licencia",
+      sin_email: "Escribí el email con el que compraste.",
+      no_coincide: "No encontramos una compra con esos datos. Revisá el email; si estás seguro, escribinos a ventas@plania.uy con tu comprobante.",
       volver: "Volver al inicio"
     },
     en: {
@@ -97,6 +112,10 @@
       no_aprobado: "MercadoPago has not approved the payment yet. Refresh this page shortly; if it is still the same in an hour, write to ventas@plania.uy.",
       sin_backend: "Write to ventas@plania.uy with your receipt and we will send you the licence.",
       error_red: "We could not reach the server. Refresh shortly or write to ventas@plania.uy.",
+      pedir_email: "For your security, confirm the email you used to buy. We only hand the licence to that address.",
+      ver_licencia: "Show my licence",
+      sin_email: "Type the email you bought with.",
+      no_coincide: "We could not find a purchase with those details. Check the email; if you are sure, write to ventas@plania.uy with your receipt.",
       volver: "Back to home"
     },
     pt: {
@@ -113,6 +132,10 @@
       no_aprobado: "O MercadoPago ainda não aprovou o pagamento. Atualize esta página em instantes; se em uma hora continuar igual, escreva para ventas@plania.uy.",
       sin_backend: "Escreva para ventas@plania.uy com o comprovante e enviamos a licença.",
       error_red: "Não conseguimos conectar ao servidor. Atualize em instantes ou escreva para ventas@plania.uy.",
+      pedir_email: "Por segurança, confirme o email com o qual você comprou. Só entregamos a licença para esse endereço.",
+      ver_licencia: "Ver a minha licença",
+      sin_email: "Escreva o email com o qual você comprou.",
+      no_coincide: "Não encontramos uma compra com esses dados. Confira o email; se tiver certeza, escreva para ventas@plania.uy com o comprovante.",
       volver: "Voltar ao início"
     }
   };
@@ -132,31 +155,53 @@
   if (!pago) { $("#ayuda").textContent = t.sin_pago; return; }
   if (!BACKEND) { $("#ayuda").textContent = t.sin_backend; return; }
 
-  $("#ayuda").textContent = t.buscando;
-  fetch(BACKEND + "/licencias/por-pago/" + encodeURIComponent(pago))
-    .then(function (r) {
-      return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
-    })
-    .then(function (res) {
-      if (!res.ok) {
-        $("#ayuda").textContent = res.status === 404 ? t.no_aprobado : t.error_red;
-        return;
-      }
-      $("#bajada").textContent = "";
-      $("#ayuda").textContent = "";
-      $("#lic-nota").textContent = t.lic_nota;
-      // textContent y no innerHTML: la licencia viene del backend y nunca se
-      // interpreta como HTML, aunque hoy sea un JWT que no puede contenerlo.
-      $("#licencia").textContent = res.d.licencia || "";
-      $("#entrega").hidden = false;
-      if (res.d.token_descarga) {
-        var b = $("#bajar");
-        b.setAttribute("href", BACKEND + "/descargar/" + encodeURIComponent(res.d.token_descarga));
-        b.textContent = t.bajar;
-        b.hidden = false;
-      }
-    })
-    .catch(function () { $("#ayuda").textContent = t.error_red; });
+  // Se pide el email antes de ir a buscar nada: el identificador del pago
+  // está a la vista en esta URL y los de MercadoPago son numéricos, así que
+  // sin el email cualquiera que probara números se llevaba la licencia de
+  // otro comprador. El que compró lo acaba de escribir para pagar.
+  $("#bajada").textContent = "";
+  $("#pedir-email").textContent = t.pedir_email;
+  $("#ver-licencia").textContent = t.ver_licencia;
+  $("#confirmar").hidden = false;
+
+  $("#confirmar").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var email = ($("#email").value || "").trim();
+    if (!email) { $("#ayuda").textContent = t.sin_email; return; }
+
+    $("#ayuda").textContent = t.buscando;
+    fetch(BACKEND + "/licencias/por-pago/" + encodeURIComponent(pago)
+          + "?email=" + encodeURIComponent(email))
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          // 404 ahora significa dos cosas —el pago no está aprobado todavía, o
+          // el email no es el de esa compra— porque el backend no las
+          // distingue a propósito: hacerlo le confirmaría a quien enumera que
+          // el pago existe y sólo le falta el email.
+          $("#ayuda").textContent = res.status === 404 ? t.no_coincide
+                                  : res.status === 400 ? t.sin_email
+                                  : t.error_red;
+          return;
+        }
+        $("#confirmar").hidden = true;
+        $("#ayuda").textContent = "";
+        $("#lic-nota").textContent = t.lic_nota;
+        // textContent y no innerHTML: la licencia viene del backend y nunca se
+        // interpreta como HTML, aunque hoy sea un JWT que no puede contenerlo.
+        $("#licencia").textContent = res.d.licencia || "";
+        $("#entrega").hidden = false;
+        if (res.d.token_descarga) {
+          var b = $("#bajar");
+          b.setAttribute("href", BACKEND + "/descargar/" + encodeURIComponent(res.d.token_descarga));
+          b.textContent = t.bajar;
+          b.hidden = false;
+        }
+      })
+      .catch(function () { $("#ayuda").textContent = t.error_red; });
+  });
 })();
 </script>
 </body>

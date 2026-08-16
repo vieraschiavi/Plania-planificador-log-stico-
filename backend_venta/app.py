@@ -314,24 +314,49 @@ def _emitir_por_pago(payment_id: str, pago: dict) -> dict:
     return guardado
 
 
+def _es_el_comprador(email: str, cliente_id: str) -> bool:
+    """¿El que pregunta es el que pagó?
+
+    Se compara en tiempo constante y sin distinguir mayúsculas: el comprador
+    escribe su email a mano en la página de gracias y puede tipearlo distinto
+    de como lo puso en MercadoPago.
+    """
+    return secrets.compare_digest(email.strip().lower(), (cliente_id or "").strip().lower())
+
+
 @app.get("/licencias/por-pago/{payment_id}")
 @limiter.limit("20/minute")
-async def licencia_por_pago(request: Request, payment_id: str):
+async def licencia_por_pago(request: Request, payment_id: str, email: str = ""):
     """Le entrega al comprador la licencia de SU pago.
 
     Existe porque el webhook le responde a MercadoPago, no al comprador: la
     licencia viajaba en un cuerpo que MP descarta. El cliente pagaba y no
     recibía nada.
 
-    Acá el comprador llega desde la página de gracias con el `payment_id` que
-    MercadoPago le puso en la URL de retorno. Antes de entregar nada se
-    re-consulta el pago contra la API real de MercadoPago: saber un
-    `payment_id` no alcanza, tiene que estar aprobado de verdad. Y como
-    `_emitir_por_pago` es idempotente, pedirla diez veces devuelve siempre la
-    misma licencia, no diez.
+    Pide el email además del `payment_id`, y no es burocracia: el `payment_id`
+    viaja a la vista en la URL de retorno y los de MercadoPago son numéricos,
+    o sea enumerables. Sin el email, cualquiera que probara identificadores se
+    llevaba la licencia y el token de descarga de OTRO comprador — probado:
+    con el pago ya registrado, un tercero que sólo sabía el número recibía las
+    dos cosas. El docstring anterior decía que el pago se re-verificaba contra
+    MercadoPago antes de entregar nada, y era cierto sólo en el camino de
+    rescate: cuando el pago ya estaba en la base —el caso normal— devolvía sin
+    comprobar nada.
+
+    El email lo sabe el comprador (lo acaba de escribir para pagar) y no lo
+    sabe quien enumera. `_emitir_por_pago` sigue siendo idempotente: pedirla
+    diez veces devuelve la misma licencia, no diez.
     """
+    if not email.strip():
+        raise HTTPException(
+            400, "Falta el email con el que se hizo la compra.")
+
     ya = pagos.buscar(payment_id)
     if ya:
+        if not _es_el_comprador(email, ya["cliente_id"]):
+            # Mismo texto que "no existe": distinguirlos le confirma a quien
+            # enumera que ese pago existe y sólo le falta el email.
+            raise HTTPException(404, "No encontramos una compra con esos datos.")
         return {"ok": True, "licencia": ya["licencia"],
                 "token_descarga": ya["token_descarga"], "plan": ya["plan"]}
 
@@ -346,6 +371,14 @@ async def licencia_por_pago(request: Request, payment_id: str):
     pago = r.json()
     if pago.get("status") != "approved":
         raise HTTPException(404, "ese pago todavía no está aprobado")
+
+    # El mismo control que arriba, antes de emitir. Sin esto el rescate era la
+    # puerta de atrás del control: alcanzaba con enumerar pagos que el webhook
+    # todavía no hubiera procesado para hacerse emitir la licencia de otro.
+    md = pago.get("metadata") or {}
+    del_pago = md.get("email") or md.get("cliente_id") or ""
+    if not _es_el_comprador(email, del_pago):
+        raise HTTPException(404, "No encontramos una compra con esos datos.")
 
     emitido = _emitir_por_pago(payment_id, pago)
     return {"ok": True, "licencia": emitido["licencia"],
@@ -418,9 +451,15 @@ async def descargar(request: Request, token: str):
     """El token es largo y de un solo uso pensado, pero el límite es defensa
     en profundidad contra que alguien lo intente adivinar a fuerza bruta en
     vez de confiar solo en el espacio de valores del token."""
-    r = descargas.validar_token_descarga(token)
+    # Se mira el token SIN consumirlo, porque abajo puede no haber nada que
+    # entregar. Consumirlo primero —como estaba— significaba que un servidor
+    # sin el instalador publicado le quemaba al comprador su única descarga:
+    # devolvía 503, y cuando el instalador aparecía, el mismo token ya daba
+    # 403 "ya usado". Pagó, no bajó nada, y encima perdió el derecho a bajarlo.
+    r = descargas.validar_token_descarga(token, marcar_usado=False)
     if not r["ok"]:
         raise HTTPException(403, r["error"])
+
     ruta = os.environ.get("PLANIA_INSTALADOR_PATH",
                           os.path.join(ROOT, "dist", "Plania_Setup.exe"))
     if not os.path.exists(ruta):
@@ -431,6 +470,14 @@ async def descargar(request: Request, token: str):
                      "en PLANIA_INSTALADOR_PATH=%s", ruta)
         raise HTTPException(503, "El instalador todavía no está publicado en este servidor "
                                  "(configurá PLANIA_INSTALADOR_PATH).")
+
+    # Recién con el archivo en la mano se gasta el token. Entre este chequeo y
+    # el consumo hay una ventana en la que dos pedidos simultáneos podrían
+    # pasar los dos, pero el resultado de eso es que alguien que pagó baje dos
+    # veces el mismo instalador — mucho menos grave que no poder bajarlo.
+    consumido = descargas.validar_token_descarga(token)
+    if not consumido["ok"]:
+        raise HTTPException(403, consumido["error"])
     return FileResponse(ruta, filename=os.path.basename(ruta))
 
 

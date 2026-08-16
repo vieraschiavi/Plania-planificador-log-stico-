@@ -938,6 +938,89 @@ def test_webhook_mercadopago_pago_no_aprobado_no_emite_licencia():
         os.environ.pop("MP_ACCESS_TOKEN", None)
 
 
+def test_la_licencia_de_un_pago_no_se_le_entrega_a_cualquiera(tmp_path, monkeypatch):
+    """Saber el número de pago no puede alcanzar para llevarse la licencia.
+
+    El `payment_id` viaja a la vista en la URL de retorno de MercadoPago y los
+    de MP son numéricos, o sea enumerables: con 20 pedidos por minuto son casi
+    30.000 por día. Antes, si el pago ya estaba registrado —el caso normal, ni
+    bien pasó el webhook— el endpoint devolvía la licencia y el token de
+    descarga sin comprobar nada. El docstring decía que el pago se
+    re-verificaba contra MercadoPago, y era cierto sólo en el camino de
+    rescate; el camino normal entregaba de una.
+    """
+    import importlib
+
+    monkeypatch.setenv("PLANIA_USO_DB", str(tmp_path / "uso.db"))
+    from backend_venta import descargas, pagos, uso
+    for m in (uso, pagos, descargas):
+        importlib.reload(m)
+    from fastapi.testclient import TestClient
+
+    from backend_venta import app as bapp
+    importlib.reload(bapp)
+
+    pagos.registrar("112233445566", "comprador@empresa.uy", "pro",
+                    "JWT-DEL-COMPRADOR", "token-del-comprador",
+                    db_path=str(tmp_path / "uso.db"))
+    c = TestClient(bapp.app, client=("203.0.113.210", 50000))
+
+    # Un tercero que sólo conoce el número no se lleva nada.
+    r = c.get("/licencias/por-pago/112233445566")
+    assert r.status_code == 400
+    assert "JWT-DEL-COMPRADOR" not in r.text
+
+    r = c.get("/licencias/por-pago/112233445566?email=otro@ajeno.com")
+    assert r.status_code == 404, "entregó la licencia a quien no compró"
+    assert "JWT-DEL-COMPRADOR" not in r.text
+    assert "token-del-comprador" not in r.text
+    # El texto no puede delatar que ese pago existe: si dijera "email
+    # incorrecto" en vez de "no encontramos la compra", quien enumera sabría
+    # que acertó el número y sólo le falta el email.
+    assert "existe" not in r.json()["detail"].lower()
+
+    # Y el comprador sí, escriba el email como lo escriba.
+    for como_lo_escriba in ("comprador@empresa.uy", "Comprador@Empresa.UY",
+                            "  comprador@empresa.uy  "):
+        r = c.get("/licencias/por-pago/112233445566",
+                  params={"email": como_lo_escriba})
+        assert r.status_code == 200, f"le negó su licencia al comprador ({como_lo_escriba!r})"
+        assert r.json()["licencia"] == "JWT-DEL-COMPRADOR"
+        assert r.json()["token_descarga"] == "token-del-comprador"
+
+
+def test_el_rescate_de_un_pago_tampoco_emite_para_cualquiera(tmp_path, monkeypatch):
+    """El camino de rescate —cuando el webhook todavía no llegó— no puede ser
+    la puerta de atrás del control de arriba: sin esto alcanzaba con enumerar
+    pagos sin procesar para hacerse emitir la licencia de otro."""
+    import importlib
+    from unittest.mock import patch
+
+    monkeypatch.setenv("PLANIA_USO_DB", str(tmp_path / "uso.db"))
+    monkeypatch.setenv("MP_ACCESS_TOKEN", "TEST-token")
+    from backend_venta import descargas, pagos, uso
+    for m in (uso, pagos, descargas):
+        importlib.reload(m)
+    from fastapi.testclient import TestClient
+
+    from backend_venta import app as bapp
+    importlib.reload(bapp)
+
+    aprobado = _RespuestaFalsa(
+        ok=True, json_data={"status": "approved",
+                            "metadata": {"plan": "pro", "email": "quien-pago@empresa.uy"}})
+    c = TestClient(bapp.app, client=("203.0.113.211", 50000))
+
+    with patch("backend_venta.app.requests.get", return_value=aprobado):
+        r = c.get("/licencias/por-pago/999888777?email=ajeno@otro.com")
+        assert r.status_code == 404, "el rescate emitió la licencia para un tercero"
+        assert pagos.buscar("999888777", db_path=str(tmp_path / "uso.db")) is None, \
+            "el rescate llegó a emitir antes de comprobar quién preguntaba"
+
+        r = c.get("/licencias/por-pago/999888777?email=quien-pago@empresa.uy")
+        assert r.status_code == 200 and r.json()["licencia"]
+
+
 def test_webhook_mercadopago_pago_aprobado_emite_licencia_y_token_de_descarga():
     """El camino que de verdad mueve plata: sin esto probado, un bug acá
     significa clientes que pagaron y no reciben ni licencia ni instalador,
@@ -1143,6 +1226,41 @@ def test_descargar_token_invalido_403():
 
     c = TestClient(app, client=("203.0.113.75", 51000))
     assert c.get("/descargar/token-que-no-existe").status_code == 403
+
+
+def test_un_servidor_sin_instalador_no_le_quema_la_descarga_al_comprador(tmp_path):
+    """El token de descarga es de un solo uso, así que el orden importa.
+
+    Se consumía ANTES de mirar si había instalador que entregar: en un
+    servidor recién desplegado, sin `PLANIA_INSTALADOR_PATH` apuntando a nada,
+    el comprador recibía un 503 y su única descarga quedaba gastada. Cuando el
+    dueño publicaba el instalador, ese mismo token ya devolvía 403 "ya usado".
+    Pagó, no bajó nada y encima perdió el derecho a bajarlo.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend_venta import descargas
+    from backend_venta.app import app
+
+    instalador = tmp_path / "Plania_Setup.exe"
+    token = descargas.crear_token_descarga("comprador-503@plania.uy")
+    os.environ["PLANIA_INSTALADOR_PATH"] = str(instalador)
+    try:
+        c = TestClient(app, client=("203.0.113.222", 51000))
+        assert c.get(f"/descargar/{token}").status_code == 503
+
+        # El dueño publica el instalador: el token de ese comprador tiene que
+        # seguir sirviendo.
+        instalador.write_bytes(b"instalador-publicado")
+        r = c.get(f"/descargar/{token}")
+        assert r.status_code == 200, "el 503 le había quemado la descarga"
+        assert r.content == b"instalador-publicado"
+
+        # Y sigue siendo de un solo uso: el arreglo no puede haber convertido
+        # el token en reutilizable.
+        assert c.get(f"/descargar/{token}").status_code == 403
+    finally:
+        os.environ.pop("PLANIA_INSTALADOR_PATH", None)
 
 
 def test_descargar_instalador_no_publicado_503(tmp_path):
@@ -3239,9 +3357,12 @@ def test_el_comprador_puede_recuperar_la_licencia_que_pago(tmp_path, monkeypatch
             return {"status": "pending", "metadata": {}}
 
     c = TestClient(app)
-    # Llega primero el comprador, antes que el webhook: igual la recibe.
+    # Llega primero el comprador, antes que el webhook: igual la recibe. Pide
+    # con su email, que es lo que prueba que la compra es suya — el payment_id
+    # solo viaja a la vista en la URL y se puede enumerar.
+    suyo = {"email": "compro@uy"}
     with patch("backend_venta.app.requests.get", return_value=_Aprobado):
-        g = c.get("/licencias/por-pago/888").json()
+        g = c.get("/licencias/por-pago/888", params=suyo).json()
         assert licencias.validar_licencia(g["licencia"])["plan"] == "starter"
         # Y el webhook posterior no emite otra distinta.
         w = c.post("/webhooks/mercadopago",
@@ -3250,7 +3371,7 @@ def test_el_comprador_puede_recuperar_la_licencia_que_pago(tmp_path, monkeypatch
 
     # Saber un payment_id no alcanza: tiene que estar aprobado de verdad.
     with patch("backend_venta.app.requests.get", return_value=_Pendiente):
-        assert c.get("/licencias/por-pago/000").status_code == 404
+        assert c.get("/licencias/por-pago/000", params=suyo).status_code == 404
 
 
 def test_activar_una_licencia_no_rompe_el_arranque(tmp_path, monkeypatch):
@@ -4699,6 +4820,102 @@ def test_la_api_recorta_pero_dice_cuanto_recorto():
     salida = api.tabla_json(df, limite=200)
     assert len(salida["filas"]) == 200
     assert salida["total"] == 1000, "sin el total, la pantalla no puede avisar que recortó"
+
+
+def test_una_pagina_cualquiera_no_puede_leer_los_datos_del_cliente():
+    """Escuchar sólo en 127.0.0.1 frena a la red, no al navegador del usuario.
+
+    Si mientras Plania corre alguien abre una página cualquiera, el JavaScript
+    de esa página puede pedirle a http://127.0.0.1:<puerto> igual que a
+    cualquier servidor, y los puertos que prueba el lanzador son cinco fijos:
+    escanearlos es trivial. Lo único que decide si esa página puede LEER la
+    respuesta es el encabezado CORS.
+
+    Con `allow_origins=["*"]`, que era lo que había, se comprobó que `/inicio`
+    le entregaba la venta y el margen del cliente a un origen cualquiera, y que
+    `/erp/guardar` le cambiaba la conexión a su base — de hecho la cambió al
+    probarlo. El único origen que se acepta es el de la ventana (file://, que
+    viaja como "null").
+    """
+    from fastapi.testclient import TestClient
+    from plania import api
+
+    c = TestClient(api.app)
+    hostil = "https://sitio-cualquiera.example"
+
+    r = c.get("/salud", headers={"Origin": hostil})
+    assert r.headers.get("access-control-allow-origin") is None, \
+        "la API le deja leer la respuesta a un sitio cualquiera"
+
+    # Y la ventana, que carga desde file://, tiene que seguir entrando.
+    r = c.get("/salud", headers={"Origin": "null"})
+    assert r.headers.get("access-control-allow-origin") == "null", \
+        "la ventana no puede leer su propia API: arrancaría en blanco"
+
+
+def test_sin_el_token_de_la_corrida_la_api_no_contesta(monkeypatch):
+    """Segunda capa, porque el origen solo no alcanza: un <iframe sandbox>
+    también manda Origin "null". El token lo genera la ventana en cada
+    arranque y una página ajena no lo puede adivinar."""
+    from fastapi.testclient import TestClient
+    from plania import api
+
+    monkeypatch.setenv("PLANIA_API_TOKEN", "el-token-de-esta-corrida")
+    c = TestClient(api.app)
+
+    assert c.get("/inicio").status_code == 403, "contestó sin token"
+    assert c.get("/inicio", headers={"X-Plania-Token": "otro"}).status_code == 403, \
+        "aceptó un token equivocado"
+    # Lo que de verdad duele: escribir. Cambiar el ERP apunta los datos del
+    # cliente a donde quiera el atacante.
+    assert c.post("/erp/guardar", json={"url": "sqlite:///robado.db"}).status_code == 403
+
+    # La ventana, con el suyo, entra normal.
+    bien = {"X-Plania-Token": "el-token-de-esta-corrida"}
+    assert c.get("/inicio", headers=bien).status_code == 200
+
+    # `/salud` queda abierta a propósito: es lo que la ventana consulta para
+    # saber cuándo levantó el motor y no dice más que "sí, estoy". Si pidiera
+    # token, un token mal pasado se vería como "el servidor no levantó".
+    assert c.get("/salud").status_code == 200
+
+
+def test_sin_token_configurado_la_api_sigue_abriendo(monkeypatch):
+    """El arranque a mano para desarrollo (`uvicorn plania.api:app`) no tiene
+    ventana que genere el token. Ahí no se exige, y la capa que queda es el
+    origen — que ya bloquea a cualquier sitio real."""
+    from fastapi.testclient import TestClient
+    from plania import api
+
+    monkeypatch.delenv("PLANIA_API_TOKEN", raising=False)
+    assert TestClient(api.app).get("/salud").status_code == 200
+
+
+def test_la_ventana_le_pasa_el_token_al_motor_y_a_la_interfaz():
+    """El token sirve si las tres piezas están de acuerdo: la ventana lo
+    genera, el motor lo espera y la interfaz lo manda. Si una se olvida, o no
+    protege nada o la aplicación no abre."""
+    import os
+
+    for ventana in ("desktop/main.js", "desktop_owner/main.js"):
+        main = open(os.path.join(RAIZ, *ventana.split("/")), encoding="utf-8").read()
+        assert "crypto.randomBytes" in main, \
+            f"{ventana} no genera un token nuevo por arranque"
+        assert "PLANIA_API_TOKEN: TOKEN_API" in main, \
+            f"{ventana} no le pasa el token al motor"
+        assert "token: TOKEN_API" in main, \
+            f"{ventana} no le pasa el token a la interfaz"
+
+    base = open(os.path.join(RAIZ, "desktop", "renderer", "ui", "base.js"),
+                encoding="utf-8").read()
+    assert 'get("token")' in base, "la interfaz no lee el token de la query"
+    assert "X-Plania-Token" in base, "la interfaz no manda el token"
+    # Los exportes bajan con `fetch` aparte de `pedir`: si ese olvida el
+    # token, los tres botones de descarga devuelven 403 y no se nota hasta
+    # que alguien intenta bajar un informe.
+    i = base.index("function Exportar")
+    assert "cabecerasBase()" in base[i:i + 1200], \
+        "la descarga de informes no manda el token: daría 403"
 
 
 def test_la_api_local_no_es_el_backend_de_venta():

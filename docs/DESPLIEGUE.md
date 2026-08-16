@@ -230,10 +230,19 @@ navegador). Son las direcciones que el checkout le pasa a MercadoPago en
 estático, cobrado y con las manos vacías.
 
 `/gracias/` no se limita a agradecer: toma el `payment_id` que MercadoPago
-deja en la URL, pide `GET {backend}/licencias/por-pago/{payment_id}` y le
-muestra al comprador su licencia y el link de descarga del instalador. Ese
-endpoint verifica el pago contra la API real de MercadoPago y es idempotente,
-así que sirve igual si el webhook todavía no llegó.
+deja en la URL, le pide al comprador que confirme el email con el que compró,
+y con los dos pide `GET {backend}/licencias/por-pago/{payment_id}?email=…`
+para mostrarle su licencia y el link de descarga del instalador. Ese endpoint
+verifica el pago contra la API real de MercadoPago y es idempotente, así que
+sirve igual si el webhook todavía no llegó.
+
+El email no es burocracia: el `payment_id` viaja a la vista en la URL de
+retorno y los de MercadoPago son numéricos, o sea enumerables. Sin él,
+cualquiera que probara números se llevaba la licencia y el token de descarga
+de otro comprador — y el endpoint no lo impedía, porque cuando el pago ya
+estaba registrado (el caso normal) respondía sin comprobar nada. Un email
+equivocado y un pago inexistente devuelven el mismo 404 a propósito:
+distinguirlos le confirmaría a quien enumera que acertó el número.
 
 ### Dominio
 
