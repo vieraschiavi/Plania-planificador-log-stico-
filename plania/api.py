@@ -206,6 +206,31 @@ def activar(a: Activacion) -> dict:
 # ---------------------------------------------------------------------------
 # Pantallas
 # ---------------------------------------------------------------------------
+MENSAJE_DEMO_VENCIDA = ('La demo de 7 días terminó. Activá tu licencia en '
+                        '"Planes y licencia" para seguir usando Plania con tus datos intactos.')
+
+
+def _exigir_licencia_vigente() -> None:
+    """Corta acá, con los datos reales del cliente todavía sin tocar.
+
+    Sin esto, la ventana de Electron seguía mostrando Stock, Precios, Panel
+    ejecutivo, Zonas, Ofertas y Clientes inactivos —con la analítica
+    completa— indefinidamente después de que la demo de 7 días vence.
+    Comprobado pidiéndolos de verdad con una demo vencida: los seis
+    devolvían 200 con el paquete entero. `app/app.py` sí lo bloquea
+    (`BLOQUEADA`, línea ~299); esta API no lo hacía — dos superficies del
+    mismo producto con dos reglas de negocio distintas, y la que de verdad
+    importa (¿el cliente pagó?) era la que fallaba.
+
+    `/inicio` no llama a esto a propósito: `app/app.py` deja ver esa página
+    —un teaser de 4 números, no la analítica completa— aun con la demo
+    vencida, y esta API hace lo mismo por coherencia con el producto que ya
+    existe.
+    """
+    if licencia.estado()["modo"] == "vencida":
+        raise HTTPException(402, MENSAJE_DEMO_VENCIDA)
+
+
 @app.get("/inicio")
 def inicio() -> dict:
     """Lo primero que ve el usuario: cuánto vendió, con qué margen, y las dos
@@ -227,6 +252,7 @@ def inicio() -> dict:
 
 @app.get("/panel")
 def panel(dias: int = 30) -> dict:
+    _exigir_licencia_vigente()
     d, v = _datos(), _ventas()
     return {
         "kpis": {k: _limpiar(x) for k, x in analitica.kpis(d["productos"], v, dias).items()},
@@ -240,6 +266,7 @@ def panel(dias: int = 30) -> dict:
 
 @app.get("/stock")
 def stock() -> dict:
+    _exigir_licencia_vigente()
     d, v = _datos(), _ventas()
     rot = analitica.rotacion(d["productos"], v)
     return {
@@ -259,6 +286,7 @@ def stock() -> dict:
 
 @app.get("/precios")
 def precios() -> dict:
+    _exigir_licencia_vigente()
     d, v = _datos(), _ventas()
     pr = sugerencias.precios(d["productos"], v)
     venta = float(v["venta"].sum())
@@ -280,6 +308,7 @@ def zonas(dim: str = "zona") -> dict:
     cambia con un selector. Se valida contra una lista blanca: `por_dimension`
     agrupa por el nombre de columna que reciba, así que sin esta comprobación
     la pantalla podría pedir cualquier columna de la base del cliente."""
+    _exigir_licencia_vigente()
     if dim not in ("zona", "departamento", "tipo_negocio"):
         raise HTTPException(400, f"Dimensión no válida: {dim!r}")
     v = _ventas()
@@ -298,6 +327,7 @@ def ofertas() -> dict:
     """El paquete completo, igual que la pantalla: los cinco motores más el
     resumen en pesos. Es el mismo `generar_todas` que alimenta el informe
     exportado, así que la pantalla y el PDF no pueden dar distinto."""
+    _exigir_licencia_vigente()
     d = _datos()
     paq = sugerencias.generar_todas(d)
     return {
@@ -315,6 +345,7 @@ def ofertas() -> dict:
 
 @app.get("/clientes/inactivos")
 def clientes_inactivos(dias: int = 60) -> dict:
+    _exigir_licencia_vigente()
     d, v = _datos(), _ventas()
     return {
         "inactivos": tabla_json(analitica.clientes_inactivos(v, d["clientes"], dias), limite=300),
@@ -328,6 +359,7 @@ def clientes_inactivos(dias: int = 60) -> dict:
 @app.get("/rutas/opciones")
 def opciones_rutas() -> dict:
     """Lo que la pantalla necesita para armar los filtros antes de planificar."""
+    _exigir_licencia_vigente()
     d = _datos()
     deptos = (sorted(d["clientes"]["departamento"].dropna().unique().tolist())
               if "departamento" in d["clientes"].columns else [])
@@ -455,6 +487,7 @@ class Conexion(BaseModel):
 def probar_erp(c: Conexion) -> dict:
     """Prueba la conexión sin guardarla: el usuario tiene que poder verificar
     antes de que toda la aplicación pase a leer de ahí."""
+    _exigir_licencia_vigente()
     try:
         eng = conectores.conectar_sql(c.url)
         tablas = conectores.listar_tablas(eng)
@@ -482,6 +515,7 @@ def probar_erp(c: Conexion) -> dict:
 
 @app.post("/erp/guardar")
 def guardar_erp(c: Conexion) -> dict:
+    _exigir_licencia_vigente()
     try:
         conectores.conectar_sql(c.url)
     except Exception as ex:
@@ -495,6 +529,7 @@ def guardar_erp(c: Conexion) -> dict:
 
 @app.get("/erp/estado")
 def estado_erp() -> dict:
+    _exigir_licencia_vigente()
     url = pconfig.leer_extra("ERP_DB_URL") or ""
     return {"conectado": bool(url), "url_enmascarada": pconfig.enmascarar(url) if url else ""}
 
