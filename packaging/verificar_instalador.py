@@ -373,6 +373,23 @@ def controles() -> list[tuple[bool, str, str]]:
     ok(nsis.get("allowToChangeInstallationDirectory") is True,
        "El instalador Electron deja elegir la carpeta",
        "allowToChangeInstallationDirectory tiene que estar en true")
+    # electron-builder ignora allowToChangeInstallationDirectory en silencio
+    # si perMachine no es también true: la página de carpeta directamente no
+    # se muestra y el instalador cae siempre en %LOCALAPPDATA% (el perfil de
+    # Windows, típicamente el disco C), sin avisar ni fallar el build. No es
+    # un bug de electron-builder documentado como tal, es una combinación que
+    # hay que pedir a propósito.
+    ok(nsis.get("perMachine") is True,
+       "El instalador Electron puede mostrar la página de carpeta",
+       "sin perMachine=true, allowToChangeInstallationDirectory no tiene "
+       "efecto: electron-builder instala siempre en %LOCALAPPDATA% (disco C) "
+       "y nunca muestra la página para elegir carpeta, aunque la opción de "
+       "arriba esté en true")
+    ok(nsis.get("allowElevation") is not False,
+       "El instalador Electron puede pedir elevación de permisos",
+       "perMachine=true instala en Archivos de programa, que necesita "
+       "permisos de administrador; con allowElevation=false el instalador "
+       "falla en vez de pedirlos")
     ok(nsis.get("createDesktopShortcut") is not False,
        "El instalador Electron crea el ícono del escritorio", "")
     ok(nsis.get("createStartMenuShortcut") is not False,
@@ -386,6 +403,7 @@ def controles() -> list[tuple[bool, str, str]]:
     TIPOS_NSIS = {
         "oneClick": bool, "allowToChangeInstallationDirectory": bool,
         "createStartMenuShortcut": bool, "perMachine": bool,
+        "allowElevation": bool,
         "license": str, "shortcutName": str, "uninstallDisplayName": str,
         "menuCategory": (str, bool), "artifactName": str,
         "installerLanguages": list, "include": str, "script": str,
