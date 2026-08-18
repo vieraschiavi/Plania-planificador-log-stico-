@@ -1,23 +1,29 @@
 name: CI
-# NOTA: los triggers automáticos (push/pull_request) están desactivados a
-# propósito: esta cuenta de GitHub hoy no asigna runners a los jobs de este
-# repo privado (los runs mueren en 1-4 s con runner_id 0, sin logs), así que
-# cada push marcaba una ✗ roja engañosa sin ejecutar nada del código.
+# Corre en cada pull request ANTES de mergear. Eso es todo el punto de este
+# archivo: que una rama rota se vea en el PR y no después, en el build de
+# main.
 #
-# Para reactivar el CI automático cuando Actions esté destrabado
-# (Settings → Billing → Spending limits de Actions, o repo Settings →
-# Actions → General, o haciendo el repo público), reemplazá el bloque `on:`
-# por:
+# Estuvo apagado un tiempo porque la cuenta no asignaba runners a este repo
+# cuando era privado (los runs morían en 1-4 s con runner_id 0, sin logs) y
+# cada push marcaba una ✗ roja engañosa sin ejecutar nada. Eso ya no pasa: el
+# repo es público —o sea, minutos de Actions gratis— y el workflow Release
+# viene corriendo en windows-latest sin problemas.
 #
-#   on:
-#     workflow_dispatch:
-#     push:
-#       branches: ["**"]
-#     pull_request:
+# Lo que se estuvo pagando por tenerlo apagado: el merge del PR #44 rompió el
+# build de main porque `desktop/build/installer.nsh` nunca llegó al
+# repositorio (.gitignore filtra `build/`). La suite corre
+# packaging/verificar_instalador.py, que comprueba justamente que ese archivo
+# exista; con el CI prendido, el PR habría quedado en rojo y no se habría
+# mergeado.
 #
-# Mientras tanto se puede correr a mano: pestaña Actions → CI → Run workflow.
+# `push` sólo en main: sin esa restricción, cada rama con PR abierto
+# dispararía las dos veces (push y pull_request) y se pagaría el doble por el
+# mismo commit.
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+    branches: ["main"]
 
 jobs:
   tests:
@@ -32,6 +38,13 @@ jobs:
         # texto), para que una clave en el nivel equivocado del árbol se note
         # acá y no en un despliegue.
         run: pip install -r requirements.txt pytest httpx pyyaml
+      - name: Revisar el instalador
+        # Primero y aparte de la suite aunque la suite ya lo corre
+        # (test_el_instalador_esta_coherente): tarda un segundo y falla con el
+        # control puntual en pantalla, en vez de con un assert adentro de 225
+        # tests. Es el control que caza los errores que si no aparecen recién
+        # en el runner de Windows, veinte minutos después.
+        run: python packaging/verificar_instalador.py
       - name: Generar base demo
         run: python data/generate_dataset.py --seed 42
       - name: Tests
