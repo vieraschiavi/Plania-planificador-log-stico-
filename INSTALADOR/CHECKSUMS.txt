@@ -1,8 +1,8 @@
 # sha256 de los archivos publicados en la página de Releases
 # generado por .github/workflows/release.yml
-# commit: e4c8d8890b456930b337112d21d23d73df56e271
-3c59fa5b6af1d63918fa1c3456296a9fb7833df9cda8d132b8abfa684d008eaa  Plania_Setup_v1.0.0.exe  (100.1 MB)
-d50da7c984a9ac0e369ec7d716129bb46e275e0ee5427e1ad676f86e1237eabc  Plania.1.0.0.exe  (191.3 MB)
-3db7407d106b0d868b60c91508797aa9a165de35e78787d235913b6fb89c60ac  Plania.Setup.1.0.0.exe  (191.5 MB)
-6f9b29df07590dcb108afec3b9e7ba9cb626a3c5575f3de5177559f1914bdb9f  Plania_portable.zip  (139.2 MB)
-6351916615aae77a374c671e5bedbaa04af622f75c178365fa34ebf537c7ff19  Plania_BAT.zip  (1.8 MB)
+# commit: 72333e1bdafaa9366b6d3ad95927aa1be22a6474
+613499e6fdf8a3ffed7bb5da4d4b9e8c45aa2b9c66ce61140661bf1fa4054505  Plania_Setup_v1.0.0.exe  (100.1 MB)
+e08b03ec2cf637e5ba73948532946f930ef683632110fc3f59e7cf391071c77d  Plania.1.0.0.exe  (191.4 MB)
+757c4658a6a5ffcd1c1e89d36c0091d16d00a5d82d79763a29a7c46d5e967501  Plania.Setup.1.0.0.exe  (191.5 MB)
+04ff8c330d005fde23699ba3881df1cab495144ff151ab48f70cc73ab4a26589  Plania_portable.zip  (139.2 MB)
+e5e11b1ce9e57c68dd95b8c40eef554a84c2a42a3514574b255a25e482f46e2d  Plania_BAT.zip  (1.8 MB)
