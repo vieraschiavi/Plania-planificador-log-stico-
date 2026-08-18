@@ -1,0 +1,135 @@
+name: Release Owner (privado)
+# Arma el panel del dueño y lo publica en un repositorio PRIVADO aparte.
+#
+# Por qué no va en release.yml
+# ----------------------------
+# Este repositorio es público. El panel lleva adentro `plania/negocio.py`
+# (modelo financiero, costos y márgenes), `plania/owner.py` y `app/owner.py`
+# (facturación y clientes) y la `docs/` interna. Publicarlo en las Releases de
+# acá es dárselo a cualquiera que pase.
+#
+# Por eso release.yml tiene una guarda que FALLA si entre lo que va a publicar
+# aparece un `Plania Owner*`, y este workflow es un archivo separado que
+# publica en otro lado. Las dos cosas se controlan desde los tests
+# (test_el_panel_del_dueno_no_se_publica_en_el_repo_publico): si alguien saca
+# la guarda o le cambia el destino a este workflow, la suite se pone roja.
+#
+# Sólo manual: el panel no cambia en cada commit y el build es caro
+# (PyInstaller + Electron en Windows). Actions → Release Owner (privado) →
+# Run workflow.
+#
+# Hace falta configurar una vez
+# -----------------------------
+#   1. Crear el repositorio PRIVADO destino (por defecto: <tu-usuario>/plania-owner).
+#   2. Crear un token fine-grained con permiso "Contents: Read and write"
+#      SOLO sobre ese repositorio.
+#   3. Guardarlo acá en Settings → Secrets and variables → Actions →
+#      New repository secret, con el nombre PLANIA_OWNER_REPO_TOKEN.
+#
+# Sin el secreto el workflow corta en el primer paso con el instructivo, en
+# vez de construir veinte minutos y fallar al publicar.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión (ej. 1.0.0)"
+        default: "1.0.0"
+        required: true
+      repo_destino:
+        description: "Repositorio PRIVADO donde publicar (usuario/repo)"
+        default: "vieraschiavi/plania-owner"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  panel-del-dueno:
+    runs-on: windows-latest
+    steps:
+      - name: Comprobar que hay dónde publicar
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.PLANIA_OWNER_REPO_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Falta el secreto PLANIA_OWNER_REPO_TOKEN."
+            echo "Creá un token fine-grained con 'Contents: Read and write' sobre"
+            echo "${{ inputs.repo_destino }} y guardalo en Settings → Secrets and"
+            echo "variables → Actions con ese nombre."
+            exit 1
+          fi
+
+      - name: Comprobar que el destino NO es este repositorio
+        # La razón de existir de este workflow es no publicar el panel acá.
+        # Un dedazo en el input lo mandaría justo adonde no tiene que ir, y
+        # una vez que un archivo estuvo en una Release pública, estuvo.
+        shell: bash
+        run: |
+          if [ "${{ inputs.repo_destino }}" = "${{ github.repository }}" ]; then
+            echo "::error::El destino es este mismo repositorio, que es público."
+            echo "El panel del dueño lleva facturación, clientes y márgenes."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+        shell: pwsh
+
+      - name: Dependencias
+        run: |
+          pip install -r requirements.txt pyinstaller cython
+          npm ci --prefix desktop
+
+      - name: Armar el panel del dueño
+        # --con-owner es lo que agrega los pasos del panel; sin esa bandera
+        # build_release.py arma solamente el producto que se vende.
+        run: python packaging/build_release.py --con-owner
+
+      - name: Ver qué quedó
+        shell: pwsh
+        run: |
+          $items = @()
+          $items += Get-ChildItem "dist/Plania_Owner_Setup.exe" -ErrorAction SilentlyContinue
+          $items += Get-ChildItem "build/desktop_owner/dist_electron/*.exe" -ErrorAction SilentlyContinue
+          if (-not $items) {
+            Write-Error "No se generó ningún instalador del panel."
+            exit 1
+          }
+          foreach ($i in $items) {
+            Write-Host "[owner] $($i.Name)  $([math]::Round($i.Length / 1MB, 1)) MB"
+          }
+
+      - name: Publicar en el repositorio privado
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ inputs.repo_destino }}
+          token: ${{ secrets.PLANIA_OWNER_REPO_TOKEN }}
+          tag_name: owner-v${{ inputs.version }}
+          name: Plania Owner ${{ inputs.version }}
+          fail_on_unmatched_files: false
+          files: |
+            dist/Plania_Owner_Setup.exe
+            build/desktop_owner/dist_electron/*.exe
+          body: |
+            Panel del dueño de Plania ${{ inputs.version }}.
+
+            `Plania Owner Setup *.exe` es la ventana Electron con las seis
+            pantallas del panel; `Plania_Owner_Setup.exe` es el instalador
+            liviano que abre en el navegador. Los dos dejan ícono en el
+            escritorio, entrada en el menú Inicio y desinstalador.
+
+            **No compartir.** Lleva adentro la facturación, los clientes, los
+            costos y los márgenes del negocio.
+
+            Construido desde `${{ github.repository }}@${{ github.sha }}`.
