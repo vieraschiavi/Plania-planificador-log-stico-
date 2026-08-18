@@ -236,6 +236,31 @@ jobs:
             }
           }
 
+      # Para poder PROBAR un arreglo del instalador sin publicarlo.
+      #
+      # Hasta ahora una corrida con `solo_verificar` construía el .exe y lo
+      # tiraba a la basura: confirmaba que compila, pero no dejaba nada que
+      # alguien pudiera bajar y ejecutar. Como el instalador es justo la parte
+      # que no se puede probar en el entorno de desarrollo (Linux), eso dejaba
+      # los arreglos del instalador sin forma de verificarse salvo publicando
+      # una versión a los clientes y esperando a ver qué pasa.
+      #
+      # Queda adjunto a la corrida, visible sólo para quien entra al repo, y
+      # se borra solo a los 7 días. No reemplaza a Releases: ahí va lo que se
+      # le entrega a un cliente, acá lo que todavía se está probando.
+      - name: Dejar el instalador adjunto a esta corrida (para probarlo)
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows-para-probar
+          # Sólo el instalador de Electron: el portable y los ZIP ya se
+          # publican por otras vías y acá sólo gastarían cuota.
+          path: desktop/dist_electron/*Setup*.exe
+          retention-days: 7
+          # El .exe ya viene comprimido; volver a comprimirlo tarda minutos y
+          # no baja el tamaño.
+          compression-level: 0
+          if-no-files-found: error
+
       # Los binarios NO se commitean al repositorio, y no es una preferencia:
       # es un límite duro de GitHub. La primera corrida que llegó hasta acá
       # terminó así:

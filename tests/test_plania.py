@@ -2934,6 +2934,43 @@ def test_el_instalador_esta_coherente():
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_el_script_del_instalador_compila():
+    """desktop/build/installer.nsh tiene que COMPILAR, no sólo parecer correcto.
+
+    Es un script NSIS que nadie ejecuta hasta que alguien baja el instalador:
+    un error de sintaxis o un macro mal cerrado no lo agarra ningún control de
+    texto, y en el runner de Windows aparece recién después de los veinte
+    minutos de PyInstaller. `makensis` compila igual en Linux, así que se
+    compila acá contra un envoltorio mínimo que le pasa las constantes que
+    normalmente pone electron-builder.
+    """
+    import shutil, subprocess, os, tempfile
+    if shutil.which("makensis") is None:
+        import pytest
+        pytest.skip("makensis no está instalado en este entorno")
+
+    incluido = os.path.join(RAIZ, "desktop", "build", "installer.nsh")
+    envoltorio = f'''
+OutFile "prueba.exe"
+InstallDir "$PROGRAMFILES64\\Plania"
+!define APP_FILENAME "Plania"
+!define INSTALL_REGISTRY_KEY "Software\\PlaniaPrueba"
+!include "{incluido}"
+Section "x"
+SectionEnd
+Function .onInit
+  !insertmacro customInit
+FunctionEnd
+'''
+    with tempfile.TemporaryDirectory() as tmp:
+        guion = os.path.join(tmp, "prueba.nsi")
+        with open(guion, "w", encoding="utf-8") as f:
+            f.write(envoltorio)
+        r = subprocess.run(["makensis", guion], capture_output=True, text=True,
+                           cwd=tmp)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+
 # ---------------------------------------------------------------------------
 # Todo en el disco elegido: config/licencia y logs junto al .exe, no en C:
 # ---------------------------------------------------------------------------

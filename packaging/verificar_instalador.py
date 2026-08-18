@@ -373,23 +373,54 @@ def controles() -> list[tuple[bool, str, str]]:
     ok(nsis.get("allowToChangeInstallationDirectory") is True,
        "El instalador Electron deja elegir la carpeta",
        "allowToChangeInstallationDirectory tiene que estar en true")
-    # electron-builder ignora allowToChangeInstallationDirectory en silencio
-    # si perMachine no es también true: la página de carpeta directamente no
-    # se muestra y el instalador cae siempre en %LOCALAPPDATA% (el perfil de
-    # Windows, típicamente el disco C), sin avisar ni fallar el build. No es
-    # un bug de electron-builder documentado como tal, es una combinación que
-    # hay que pedir a propósito.
+    # perMachine no habilita la página de carpeta —esa sale sola con
+    # oneClick:false + allowToChangeInstallationDirectory—, pero sí decide si
+    # la carpeta que propone desktop/build/installer.nsh sobrevive.
+    #
+    # En la plantilla de electron-builder, .onInit corre initMultiUser y
+    # DESPUÉS customInit. Con perMachine:true, initMultiUser fija $INSTDIR de
+    # una (setInstallModePerAllUsers) y ya nada lo vuelve a tocar: lo que
+    # escriba customInit queda. Sin perMachine queda en el medio la página de
+    # "¿para quién instalar?", que fija $INSTDIR cuando el usuario elige —o
+    # sea, después de customInit— y pisa la propuesta sin dejar rastro.
+    # Además el desinstalador se registra en HKLM y aparece en "Agregar o
+    # quitar programas" para toda la máquina, no sólo para un perfil.
     ok(nsis.get("perMachine") is True,
-       "El instalador Electron puede mostrar la página de carpeta",
-       "sin perMachine=true, allowToChangeInstallationDirectory no tiene "
-       "efecto: electron-builder instala siempre en %LOCALAPPDATA% (disco C) "
-       "y nunca muestra la página para elegir carpeta, aunque la opción de "
-       "arriba esté en true")
+       "La carpeta que propone el instalador no se pisa sola",
+       "sin perMachine=true, la página de '¿para quién instalar?' vuelve a "
+       "fijar $INSTDIR después de customInit y la propuesta de "
+       "desktop/build/installer.nsh no llega nunca a la página de carpeta")
     ok(nsis.get("allowElevation") is not False,
        "El instalador Electron puede pedir elevación de permisos",
        "perMachine=true instala en Archivos de programa, que necesita "
        "permisos de administrador; con allowElevation=false el instalador "
        "falla en vez de pedirlos")
+
+    # El script propio que propone un disco con lugar. electron-builder lo
+    # levanta por convención —busca "installer.nsh" en la carpeta de recursos
+    # de build— y si no está, se arma un instalador válido pero sin esto
+    # adentro, sin aviso ninguno. De ahí que se controle acá.
+    incluido = os.path.join(RAIZ, "desktop", "build", "installer.nsh")
+    ok(os.path.exists(incluido),
+       "El instalador Electron lleva el script que elige disco",
+       "falta desktop/build/installer.nsh: electron-builder lo busca por "
+       "convención en la carpeta de recursos de build y, si no lo encuentra, "
+       "construye igual y en silencio sin él")
+    if os.path.exists(incluido):
+        nsh = _leer(incluido)
+        ok("!macro customInit" in nsh,
+           "El script del instalador se engancha donde corresponde",
+           "tiene que definir el macro customInit: es el único punto que "
+           "corre después de initMultiUser, o sea el único donde escribir "
+           "$INSTDIR no lo pisa la propia plantilla de electron-builder")
+        ok("GetDrives" in nsh and '"HDD"' in nsh,
+           "Sólo se proponen discos fijos",
+           "sin el filtro HDD se puede proponer un pendrive o una unidad de "
+           "red: Plania instala bien y deja de abrir el día que no está")
+        ok("INSTALL_REGISTRY_KEY" in nsh,
+           "Una reinstalación respeta la carpeta ya elegida",
+           "sin leer InstallLocation del registro, actualizar mudaría Plania "
+           "de disco solo y dejaría la licencia activada en la carpeta vieja")
     ok(nsis.get("createDesktopShortcut") is not False,
        "El instalador Electron crea el ícono del escritorio", "")
     ok(nsis.get("createStartMenuShortcut") is not False,
