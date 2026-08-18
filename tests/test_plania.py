@@ -2934,6 +2934,48 @@ def test_el_instalador_esta_coherente():
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_el_producto_no_usa_emojis_decorativos():
+    """Un emoji colgado de cada título delata que lo escribió un modelo.
+
+    Lo que se vende es software de gestión para un distribuidor: la cara del
+    producto —las pantallas, el README, los exportes que el cliente le muestra
+    a su contador— tiene que leerse como la de un programa, no como la de un
+    chat. El README llegó a tener un emoji por fila en la tabla de funciones.
+
+    Ojo con el alcance: NO entra el sitio de venta, que usa ✓ y ✗ en la tabla
+    comparativa. Esos son signos tipográficos con significado (y con clase CSS
+    propia, .si/.no), no decoración, y sacarlos empeoraría la tabla.
+    """
+    import os, re
+    # Pictogramas y símbolos misceláneos. El rango 2600-27BF incluye ✓/✗, por
+    # eso mismo el sitio queda fuera de lo que se recorre.
+    emoji = re.compile("[\U0001F300-\U0001FAFF\U00002600-\U000027BF]")
+    superficies = [
+        os.path.join(RAIZ, "README.md"),
+        os.path.join(RAIZ, "app"),
+        os.path.join(RAIZ, "plania"),
+        os.path.join(RAIZ, "desktop", "renderer"),
+    ]
+
+    encontrados = []
+    for superficie in superficies:
+        archivos = [superficie] if os.path.isfile(superficie) else [
+            os.path.join(raiz, f)
+            for raiz, _dirs, fs in os.walk(superficie) for f in fs
+            if f.endswith((".py", ".js", ".html", ".css", ".md"))
+        ]
+        for ruta in archivos:
+            with open(ruta, encoding="utf-8", errors="replace") as f:
+                for n, linea in enumerate(f, 1):
+                    for m in emoji.finditer(linea):
+                        rel = os.path.relpath(ruta, RAIZ)
+                        encontrados.append(f"{rel}:{n}: {m.group()}")
+
+    assert not encontrados, (
+        "hay emojis decorativos en la cara del producto:\n  "
+        + "\n  ".join(encontrados))
+
+
 def test_el_script_del_instalador_compila():
     """desktop/build/installer.nsh tiene que COMPILAR, no sólo parecer correcto.
 
