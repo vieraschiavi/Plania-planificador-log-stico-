@@ -2934,6 +2934,48 @@ def test_el_instalador_esta_coherente():
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_el_panel_del_dueno_no_se_publica_en_el_repo_publico():
+    """El panel del dueño no puede terminar en las Releases de este repo.
+
+    El repositorio es público. El panel lleva `plania/negocio.py` (modelo
+    financiero, costos, márgenes), `plania/owner.py` y `app/owner.py`
+    (facturación y clientes). Un archivo que estuvo en una Release pública,
+    estuvo: no hay forma de saber quién lo bajó.
+
+    Hay dos piezas que lo evitan y las dos son fáciles de sacar sin querer:
+    la guarda de release.yml, que falla si entre lo que va a publicar aparece
+    un `Plania Owner*`, y el destino de release-owner.yml, que tiene que ser
+    otro repositorio. Este control las mira a las dos.
+    """
+    import os
+    import yaml
+
+    wf = os.path.join(RAIZ, ".github", "workflows")
+
+    publico = open(os.path.join(wf, "release.yml"), encoding="utf-8").read()
+    assert "Plania[ _]Owner" in publico, (
+        "release.yml perdió la guarda que corta si se va a publicar el panel "
+        "del dueño en este repositorio público")
+    assert "no puede publicarse" in publico, (
+        "la guarda de release.yml tiene que FALLAR, no sólo avisar")
+
+    owner_txt = open(os.path.join(wf, "release-owner.yml"), encoding="utf-8").read()
+    owner = yaml.safe_load(owner_txt)
+    # `on:` lo lee PyYAML como True (booleano de YAML 1.1), no como la cadena.
+    disparadores = owner.get("on", owner.get(True, {}))
+    assert set(disparadores) == {"workflow_dispatch"}, (
+        f"release-owner.yml tiene que ser sólo manual, y hoy corre con "
+        f"{sorted(disparadores)}: el panel no se construye ni se publica solo")
+
+    destino = disparadores["workflow_dispatch"]["inputs"]["repo_destino"]["default"]
+    assert destino != "vieraschiavi/Plania-planificador-log-stico-", (
+        "release-owner.yml apunta al repositorio público")
+    assert "github.repository" in owner_txt and "es público" in owner_txt, (
+        "release-owner.yml tiene que comparar el destino contra el repositorio "
+        "actual en tiempo de ejecución: el default correcto no sirve de nada "
+        "si alguien escribe otra cosa al lanzarlo a mano")
+
+
 def test_el_producto_no_usa_emojis_decorativos():
     """Un emoji colgado de cada título delata que lo escribió un modelo.
 
