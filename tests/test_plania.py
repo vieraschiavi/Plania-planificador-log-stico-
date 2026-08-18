@@ -2949,7 +2949,7 @@ def test_el_script_del_instalador_compila():
         import pytest
         pytest.skip("makensis no está instalado en este entorno")
 
-    incluido = os.path.join(RAIZ, "desktop", "build", "installer.nsh")
+    incluido = os.path.join(RAIZ, "desktop", "installer.nsh")
     envoltorio = f'''
 OutFile "prueba.exe"
 InstallDir "$PROGRAMFILES64\\Plania"
