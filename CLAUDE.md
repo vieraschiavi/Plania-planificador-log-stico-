@@ -43,12 +43,11 @@ automática vía MercadoPago y licencias JWT (demo de 7 días full).
 | Instalar deps de test | `pip install -r requirements.txt pytest httpx` (ver `.github/workflows/ci.yml`) |
 
 > No hay linter/formatter configurado en el repo. No introduzcas uno sin pedirlo.
-> El CI (`.github/workflows/ci.yml`) hoy solo corre manual (`workflow_dispatch`). Se apagaron
-> los triggers automáticos porque en su momento la cuenta no asignaba runners; **ya no es el
-> caso** — el workflow **Release** corrió en Windows con éxito varias veces (ver
-> `INSTALADOR/CHECKSUMS.txt` y la página de Releases), así que la causa original ya no
-> aplica. Sigue apagado porque es una decisión que hay que tomar, no porque esté roto — **no
-> lo reactivés sin que te lo pidan** (ver el comentario en ese archivo antes de "arreglarlo").
+> El CI (`.github/workflows/ci.yml`) corre en **cada pull request** y en push a `main`.
+> Estuvo apagado un tiempo porque la cuenta no asignaba runners cuando el repo era privado;
+> se reactivó a pedido, después de que el merge del PR #44 rompiera el build de `main` por un
+> archivo que `.gitignore` filtraba — con el CI prendido, ese PR habría quedado en rojo antes
+> de mergearse. **No lo vuelvas a apagar sin que te lo pidan.**
 > **El repositorio es público** (no privado, como decía esta nota antes): todo lo que
 > `packaging/proteger_codigo.py` saca de los instaladores para que un cliente no lo lea
 > —`plania/negocio.py`, `plania/owner.py`, `docs/` interna, `backend_venta/`— está igual acá
@@ -112,7 +111,8 @@ automática vía MercadoPago y licencias JWT (demo de 7 días full).
 **Don't**
 - No commitees `.env`, `config.json`/`config.enc` de `~/.plania`, claves ni tokens de MercadoPago.
 - No corras los builds de `packaging/` (PyInstaller/Inno Setup) ni `desktop/` (Electron) en Linux.
-- No reactivés los triggers automáticos de `.github/workflows/ci.yml` sin que te lo pidan.
+- No apagués los triggers automáticos de `.github/workflows/ci.yml` sin que te lo pidan: corren
+  en cada PR y son lo único que evita mergear una rama rota.
 - No introduzcas dependencias pesadas nuevas sin justificarlo.
 - No uses `git push --force` ni `rm -rf`.
 

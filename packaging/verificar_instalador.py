@@ -396,16 +396,41 @@ def controles() -> list[tuple[bool, str, str]]:
        "permisos de administrador; con allowElevation=false el instalador "
        "falla en vez de pedirlos")
 
-    # El script propio que propone un disco con lugar. electron-builder lo
-    # levanta por convención —busca "installer.nsh" en la carpeta de recursos
-    # de build— y si no está, se arma un instalador válido pero sin esto
-    # adentro, sin aviso ninguno. De ahí que se controle acá.
-    incluido = os.path.join(RAIZ, "desktop", "build", "installer.nsh")
+    # El script propio que propone un disco con lugar.
+    #
+    # Se declara con `include` en vez de dejarlo en la carpeta de recursos de
+    # build, que es donde electron-builder lo buscaría solo. Con la
+    # convención, un archivo ausente se saltea EN SILENCIO y sale un
+    # instalador válido pero sin esto adentro; con `include`, electron-builder
+    # tira InvalidConfigurationError y el build se cae. Un arreglo del
+    # instalador que no se aplica es exactamente lo que no se puede detectar
+    # desde acá, así que conviene que reviente.
+    ok(nsis.get("include") == "installer.nsh",
+       "El instalador Electron declara su script propio",
+       "sin `include`, electron-builder sólo lo levanta si está en la carpeta "
+       "de recursos de build, y si no está no avisa: construye sin él")
+    incluido = os.path.join(RAIZ, "desktop", "installer.nsh")
     ok(os.path.exists(incluido),
        "El instalador Electron lleva el script que elige disco",
-       "falta desktop/build/installer.nsh: electron-builder lo busca por "
-       "convención en la carpeta de recursos de build y, si no lo encuentra, "
-       "construye igual y en silencio sin él")
+       "falta desktop/installer.nsh")
+
+    # Que exista en el disco de quien edita no alcanza: tiene que estar en el
+    # repositorio. La primera versión de esto vivía en desktop/build/, que
+    # .gitignore filtra por la regla `build/`, así que `git add` lo salteó sin
+    # decir nada y el build de Windows se cayó buscándolo. Un archivo que el
+    # build necesita y que git ignora es un error que sólo se ve en CI.
+    if os.path.exists(incluido):
+        import subprocess
+        try:
+            ignorado = subprocess.run(
+                ["git", "check-ignore", "-q", incluido],
+                cwd=RAIZ, capture_output=True).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ignorado = False  # sin git no se puede afirmar que esté mal
+        ok(not ignorado,
+           "El script del instalador está versionado, no ignorado",
+           "desktop/installer.nsh lo filtra .gitignore: existe acá pero no "
+           "llega al repositorio, y el build de Windows no lo va a encontrar")
     if os.path.exists(incluido):
         nsh = _leer(incluido)
         ok("!macro customInit" in nsh,

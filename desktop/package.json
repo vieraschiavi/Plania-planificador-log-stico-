@@ -60,6 +60,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Plania",
       "uninstallDisplayName": "Plania",
+      "include": "installer.nsh",
       "installerLanguages": [
         "es_ES"
       ]
