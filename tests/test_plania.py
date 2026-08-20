@@ -1806,11 +1806,24 @@ def test_cada_erp_nombrado_tiene_su_propia_seccion():
 def test_las_cinco_sugerencias_tienen_ejemplo_numerico_real(datos):
     """Los cinco motores de sitio/i18n/*.json no pueden ser una promesa
     genérica: para sobrestock, reposición, precios y recupero se vuelve a
-    correr el motor real sobre la base de demostración committeada
-    (data/erp_demo.db) y se comprueba que el número que muestra la landing
-    es el que el motor devuelve HOY — si alguien regenera la demo con otra
-    semilla y no actualiza el texto, esto lo agarra en vez de dejar un
-    número inventado publicado.
+    correr el motor real sobre la base de demostración y se comprueba que el
+    número que muestra la landing sea el que el motor devuelve. Si alguien
+    publica un número inventado, o regenera la demo con otra semilla y no
+    actualiza el texto, esto lo agarra.
+
+    Por qué con tolerancia y no con el número exacto
+    ------------------------------------------------
+    `data/erp_demo.db` NO está versionada (`.gitignore`: `data/*.db`) y
+    `data/generate_dataset.py` la arma con `hoy = date.today()`: la ventana
+    de ventas se corre un día por día. Con la misma semilla y el mismo
+    código, el total de margen recuperable dio 96.402 un martes y 96.384 el
+    jueves siguiente.
+
+    Comparar el número exacto convertía eso en un CI que se ponía rojo solo,
+    sin que nadie hubiera tocado nada — que es peor que no tener control:
+    enseña a ignorarlo. La tolerancia deja pasar la deriva normal del
+    calendario y sigue cazando lo que importa, que es un número inventado o
+    de otra base (esos no fallan por 1%, fallan por un orden de magnitud).
 
     Venta cruzada no tiene ejemplo en esa base (la semilla 42 no genera una
     brecha de zona accionable — se comprobó a mano probando semillas), así
@@ -1818,27 +1831,40 @@ def test_las_cinco_sugerencias_tienen_ejemplo_numerico_real(datos):
     real (dos porcentajes distintos y una zona), no un número recalculado.
     """
     import json
+    import re
     paquete = sugerencias.generar_todas(datos)
 
-    def money(n):
-        return f"{round(n):,}".replace(",", ".")
+    # 3%: la deriva medida es del orden del 2% mensual en el peor de los
+    # cuatro (venta_recuperable). Da meses de margen antes de pedir un
+    # refresco, y un número de otra base o inventado queda afuera igual.
+    TOLERANCIA = 0.03
 
     esperado = {
-        "s1_d": money(paquete["resumen"]["capital_liberable"]),
-        "s2_d": money(paquete["resumen"]["venta_en_riesgo"]),
-        "s3_d": money(paquete["resumen"]["margen_extra_mensual"]),
-        "s5_d": money(paquete["resumen"]["venta_recuperable"]),
+        "s1_d": paquete["resumen"]["capital_liberable"],
+        "s2_d": paquete["resumen"]["venta_en_riesgo"],
+        "s3_d": paquete["resumen"]["margen_extra_mensual"],
+        "s5_d": paquete["resumen"]["venta_recuperable"],
     }
     for idioma in ("es", "en", "pt"):
         with open(os.path.join(RAIZ, "sitio", "i18n", f"{idioma}.json"), encoding="utf-8") as f:
             textos = json.load(f)
-        for clave, numero in esperado.items():
-            texto = textos[clave].replace(",", ".")  # EN usa coma de miles
-            assert numero in texto, (
-                f"{clave} de {idioma}.json no menciona el total real ${numero} "
-                f"que hoy devuelve sugerencias.generar_todas() sobre data/erp_demo.db.\n"
-                f"NO lo corrijas a mano: son 4 números x 3 idiomas y este control "
-                f"corta en el primero, así que se arregla uno y quedan tres.\n"
+        for clave, valor in esperado.items():
+            # Los miles se separan con "." en es/pt y con "," en en; se
+            # normaliza y se sacan todos los números del texto, porque cada
+            # párrafo trae además el del ejemplo puntual y algún porcentaje.
+            texto = textos[clave].replace(",", ".")
+            candidatos = [float(n.replace(".", ""))
+                          for n in re.findall(r"\d[\d.]*\d|\d", texto)]
+            cerca = [n for n in candidatos
+                     if valor and abs(n - valor) / valor <= TOLERANCIA]
+            assert cerca, (
+                f"{clave} de {idioma}.json no menciona ningún número parecido "
+                f"al que devuelve hoy sugerencias.generar_todas(): "
+                f"{round(valor):,}".replace(",", ".") + ".\n"
+                f"Los números del texto son {[round(c) for c in candidatos]}.\n"
+                f"Si es sólo deriva del calendario (la base demo se genera con "
+                f"la fecha de hoy), refrescalos — NO los corrijas a mano, son "
+                f"4 números x 3 idiomas y este control corta en el primero:\n"
                 f"    python3 sitio/actualizar_ejemplos.py            # ver qué cambió\n"
                 f"    python3 sitio/actualizar_ejemplos.py --escribir # aplicarlo\n"
                 f"    python3 sitio/build.py                          # regenerar la web")
@@ -3236,9 +3262,22 @@ def test_el_instalador_no_borra_la_carpeta_de_datos_al_desinstalar():
 # ---------------------------------------------------------------------------
 def test_imagenes_del_asistente_son_reproducibles_y_de_la_misma_marca():
     """Las BMP del panel de Inno Setup salen de un script, no de un archivo
-    subido a mano: correrlo dos veces tiene que dar el mismo resultado, y el
-    color de fondo tiene que ser el navy real de assets/brand/plania_icon.png,
-    no uno inventado aparte — si no, el instalador se ve de otro producto."""
+    subido a mano: correrlo dos veces tiene que dar el mismo resultado, y las
+    que están commiteadas tienen que ser de la MISMA marca que el ícono de la
+    app en este momento.
+
+    Lo segundo es lo que importa y es lo que falló de verdad: al cambiar la
+    marca a MV, el ícono quedó actualizado y las imágenes del instalador
+    siguieron mostrando el logo anterior, porque son archivos aparte que hay
+    que regenerar. Un instalador con el logo viejo y una app con el nuevo se ve
+    como dos productos distintos, y no lo nota nadie hasta que un cliente lo
+    instala.
+
+    No se comparan bytes contra una corrida nueva: el rango de Pillow que
+    admite requirements.txt es amplio y dos versiones pueden codificar el BMP
+    o interpolar el resize distinto sin que la marca haya cambiado. Se
+    comparan los colores, que es lo que se mira con los ojos.
+    """
     import importlib
     import io
     import os
@@ -3249,9 +3288,36 @@ def test_imagenes_del_asistente_son_reproducibles_y_de_la_misma_marca():
     sys.path.insert(0, os.path.join(RAIZ, "packaging"))
     gen = importlib.import_module("generar_imagenes_instalador")
 
-    icono = Image.open(os.path.join(RAIZ, "assets", "brand", "plania_icon.png")).convert("RGB")
-    assert icono.getpixel((4, icono.size[1] // 2)) == gen.NAVY, \
-        "el navy del instalador tiene que ser el mismo que el del ícono de la app"
+    # El color que el generador sacaría HOY del ícono de la app. Comparar el
+    # BMP commiteado contra esto es lo que detecta que la marca cambió y las
+    # imágenes del instalador quedaron sin regenerar: seguirían teniendo el
+    # navy anterior.
+    navy_actual = gen._navy()
+
+    for nombre in ("plania_wizard.bmp", "plania_wizard_small.bmp"):
+        ruta = os.path.join(RAIZ, "assets", "brand", nombre)
+        assert os.path.exists(ruta), f"falta {nombre} — correr generar_imagenes_instalador.py"
+        with Image.open(ruta) as bmp:
+            rgb = bmp.convert("RGB")
+            # La esquina: en las dos imágenes el ícono va centrado y con
+            # margen, así que ahí siempre hay fondo del panel. Arriba al
+            # centro no sirve — en el logo chico cae adentro del ícono.
+            fondo_bmp = rgb.getpixel((2, 2))
+            colores = {c for _n, c in rgb.getcolors(maxcolors=100000)}
+
+        assert fondo_bmp == navy_actual, (
+            f"{nombre} tiene fondo {fondo_bmp} y el ícono de la app da hoy "
+            f"{navy_actual}: son de marcas distintas. Corré "
+            f"python3 packaging/generar_imagenes_instalador.py")
+
+        # Y que el ícono esté REALMENTE adentro, no sólo el fondo del color
+        # correcto: se busca el verde de la V, que no aparece en ningún otro
+        # elemento del panel.
+        verde = [c for c in colores
+                 if c[1] > 110 and c[1] > c[0] + 40 and c[1] > c[2] + 40]
+        assert verde, (
+            f"{nombre} no contiene el verde de la marca: la imagen tiene el "
+            f"fondo bien pero el logo no está adentro")
 
     def _bytes(img):
         buf = io.BytesIO()
