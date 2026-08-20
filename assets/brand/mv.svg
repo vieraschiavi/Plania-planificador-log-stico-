@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c3f63"/>
+      <stop offset="1" stop-color="#0d2440"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="1012" height="1012" rx="230" fill="url(#bg)"/>
+  <!-- M/V en tipografía real (glifos de DejaVu Sans Bold, convertidos a path
+       con fontTools) — nunca depende de que la fuente esté instalada donde
+       se vea el logo (favicon, ícono de app, etc.), a diferencia de <text>. -->
+  <g transform="translate(205,650) scale(0.21484375,-0.21484375)">
+    <path fill="#ffffff" d="M188 1493H678L1018 694L1360 1493H1849V0H1485V1092L1141 287H897L553 1092V0H188Z"/>
+  </g>
+  <g transform="translate(540,650) scale(0.21484375,-0.21484375)">
+    <path fill="#5cb531" d="M10 1493H397L793 391L1188 1493H1575L1022 0H563Z"/>
+  </g>
+</svg>

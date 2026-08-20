@@ -8,14 +8,23 @@ Genera las dos imágenes que Inno Setup muestra en el instalador Windows:
   assets/brand/plania_wizard_small.bmp  logo chico (esquina de las páginas
                                         intermedias: carpeta, progreso, etc.)
 
-Por qué un script y no dos .bmp sueltos: son la misma family de marca que
+Por qué un script y no dos .bmp sueltos: son la misma marca que
 `assets/brand/plania_icon.png` (el ícono de la app y de la web) — generarlas
-a partir de los mismos colores exactos, en vez de diseñarlas aparte a mano,
-es lo que evita que el instalador se vea "de otro producto". Los colores de
-abajo salen de leer los píxeles reales de `plania_icon.png`, no de adivinar.
+del mismo archivo, en vez de diseñarlas aparte a mano, es lo que evita que el
+instalador se vea "de otro producto".
+
+Y por qué se PEGA el ícono en vez de redibujarlo: antes este script dibujaba
+el logo a mano con primitivas de Pillow, replicando la forma. Funcionaba
+mientras la marca no cambiara; el día que cambió, el ícono de la app quedó
+actualizado y el instalador siguió mostrando el logo viejo, porque eran dos
+dibujos distintos que sólo se parecían por disciplina. Ahora hay un único
+original y esto lo escala.
 
 Uso (no requiere Windows ni Inno Setup, solo Pillow):
     python3 packaging/generar_imagenes_instalador.py
+
+Si cambió la marca, correr antes `packaging/generar_iconos.py`, que es quien
+rasteriza `assets/brand/mv.svg` al PNG que esto consume.
 
 Tamaños: Inno Setup con WizardStyle=modern usa como base 192x386 para el panel
 grande y 76x80 para el logo chico, y escala solo para pantallas de alto DPI
@@ -30,39 +39,35 @@ from PIL import Image, ImageDraw
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DESTINO = os.path.join(RAIZ, "assets", "brand")
 
-# Los tres colores reales del ícono ya publicado (assets/brand/plania_icon.png),
-# leídos con Pillow, no elegidos de nuevo — así el instalador es la misma
-# marca que el ícono del .exe y el favicon de la web, no una variación.
-NAVY = (31, 61, 122)
-AMBER = (243, 156, 18)
-BLUE = (46, 134, 222)
-BLANCO_TENUE = (255, 255, 255)
+ICONO = os.path.join(RAIZ, "assets", "brand", "plania_icon.png")
 
 PANEL = (192, 386)
 LOGO_CHICO = (76, 80)
 
 
-def _icono_red(draw: ImageDraw.ImageDraw, cx: int, cy: int, escala: float) -> None:
-    """Los tres nodos conectados de plania_icon.png, a cualquier escala.
+def _navy() -> tuple[int, int, int]:
+    """El azul del fondo, leído del ícono real y no elegido de nuevo.
 
-    Mismo trazo que el ícono original: dos líneas azules bajando desde el
-    nodo de arriba a los dos de abajo, tres círculos ámbar. Repetir la forma
-    exacta es lo que hace que se reconozca como el mismo logo y no como un
-    logo parecido.
+    Se muestrea arriba al centro: ahí el ícono es fondo puro, lejos de las
+    esquinas redondeadas (que son transparentes) y de las letras. Si algún día
+    cambia el color de la marca, el panel del instalador lo sigue solo.
     """
-    radio = int(18 * escala)
-    grosor = max(2, int(7 * escala))
-    dx, dy = int(46 * escala), int(40 * escala)
+    with Image.open(ICONO) as img:
+        rgba = img.convert("RGBA")
+        r, g, b, _a = rgba.getpixel((rgba.width // 2, rgba.height // 8))
+    return (r, g, b)
 
-    arriba = (cx, cy - dy)
-    izq = (cx - dx, cy + dy)
-    der = (cx + dx, cy + dy)
 
-    for destino in (izq, der):
-        draw.line([arriba, destino], fill=BLUE, width=grosor)
-    for nodo in (arriba, izq, der):
-        draw.ellipse([nodo[0] - radio, nodo[1] - radio,
-                      nodo[0] + radio, nodo[1] + radio], fill=AMBER)
+def _pegar_icono(base: Image.Image, cx: int, cy: int, lado: int) -> None:
+    """El ícono de la app, centrado en (cx, cy) y escalado a `lado` píxeles.
+
+    Se pega con su propio canal alfa como máscara: el ícono tiene las esquinas
+    redondeadas y transparentes, así que sin la máscara aparecería un cuadrado
+    negro alrededor.
+    """
+    with Image.open(ICONO) as img:
+        icono = img.convert("RGBA").resize((lado, lado), Image.LANCZOS)
+    base.paste(icono, (cx - lado // 2, cy - lado // 2), icono)
 
 
 def _pictograma_instalacion(base: Image.Image, cx: int, cy: int) -> None:
@@ -98,19 +103,18 @@ def _pictograma_instalacion(base: Image.Image, cx: int, cy: int) -> None:
 
 def panel_grande() -> Image.Image:
     ancho, alto = PANEL
-    img = Image.new("RGB", (ancho, alto), NAVY)
-    draw = ImageDraw.Draw(img)
-
-    _icono_red(draw, ancho // 2, int(alto * 0.30), escala=1.55)
+    img = Image.new("RGB", (ancho, alto), _navy())
+    _pegar_icono(img, ancho // 2, int(alto * 0.30), lado=112)
     _pictograma_instalacion(img, ancho // 2, int(alto * 0.66))
     return img
 
 
 def logo_chico() -> Image.Image:
     ancho, alto = LOGO_CHICO
-    img = Image.new("RGB", (ancho, alto), NAVY)
-    draw = ImageDraw.Draw(img)
-    _icono_red(draw, ancho // 2, alto // 2, escala=0.62)
+    img = Image.new("RGB", (ancho, alto), _navy())
+    # Con margen: pegado al borde, Inno Setup lo recorta contra el borde de la
+    # página y se ve como si estuviera mal alineado.
+    _pegar_icono(img, ancho // 2, alto // 2, lado=min(ancho, alto) - 14)
     return img
 
 
