@@ -132,14 +132,60 @@ async def emitir(request: Request, payload: dict, _admin: None = Depends(requeri
     return {"licencia": lic, "plan": plan}
 
 
+@app.post("/demo/solicitar")
+@limiter.limit("5/minute")
+async def solicitar_demo(request: Request, payload: dict):
+    """Un pedido de demo. NO entrega licencia: la habilita el dueño después.
+
+    Reemplaza al autoservicio que había acá antes, donde cualquiera con un
+    email recibía al instante una licencia de 7 días con todo habilitado. Eso
+    le regalaba el producto entero —incluido el ejecutable— a quien pasara,
+    sin dejar rastro de quién era ni forma de distinguir un prospecto de un
+    competidor mirando cómo está hecho.
+
+    Por eso se piden nombre, empresa y país además del email: son los datos
+    que hacen que el pedido sirva para decidir a quién le mostrás y para
+    llamarlo. Quedan guardados y se ven en el panel del dueño.
+
+    El límite por IP sigue siendo el más estricto de los públicos sin
+    credenciales: alcanza para una persona completando el formulario y no
+    para llenar la base de pedidos falsos.
+    """
+    def _campo(clave: str, maximo: int = 120) -> str:
+        return str(payload.get(clave) or "").strip()[:maximo]
+
+    email = _campo("email").lower()
+    nombre, empresa, pais = _campo("nombre"), _campo("empresa"), _campo("pais", 60)
+
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(400, "Escribí un email de contacto válido.")
+    faltan = [n for n, v in (("nombre", nombre), ("empresa", empresa), ("país", pais))
+              if len(v) < 2]
+    if faltan:
+        raise HTTPException(400, f"Falta completar: {', '.join(faltan)}.")
+
+    uso.registrar_solicitud_demo(email, nombre, empresa, pais,
+                                 _campo("mensaje", 600))
+    pauditoria.registrar("demo_solicitada",
+                         {"cliente": email, "empresa": empresa, "pais": pais})
+    return {"ok": True,
+            "mensaje": "Recibimos tu pedido. Te escribimos para coordinar una "
+                       "demo en vivo con tus propios datos."}
+
+
 @app.post("/licencias/trial")
 @limiter.limit("5/minute")
-async def trial(request: Request, payload: dict):
-    """Demo 7 días full self-service: solo pide un email. Una por email.
-    Es el endpoint más expuesto a abuso — nadie necesita credenciales para
-    llamarlo — así que el límite es el más estricto de los públicos sin
-    auth: alcanza de sobra para un humano probando el formulario y no
-    alcanza para generar licencias en cantidad."""
+async def trial(request: Request, payload: dict,
+                _admin: None = Depends(requerir_admin)):
+    """Emite la demo de 7 días. Sólo el dueño, después de atender el pedido.
+
+    Antes era autoservicio: bastaba mandar un email para llevarse una licencia
+    full. Ahora exige el token de administrador, así que la demo se entrega
+    cuando vos decidís, sobre el pedido que llegó por `/demo/solicitar`.
+
+    Se mantiene el control de una demo por email: que la habilites vos no
+    quita que alguien pueda pedirla dos veces con la misma dirección.
+    """
     email = str(payload.get("email") or "").strip().lower()
     if "@" not in email:
         raise HTTPException(400, "email inválido")

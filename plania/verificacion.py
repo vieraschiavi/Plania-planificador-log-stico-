@@ -303,13 +303,40 @@ def verificar_todo(incluir_backend: bool = True) -> list[Resultado]:
                 return FALLA, "/planes no expone el trial"
             import uuid
             email = f"verif-{uuid.uuid4().hex[:8]}@plania.uy"
-            r = c.post("/licencias/trial", json={"email": email})
+
+            # El pedido de demo: registra al interesado y NO entrega producto.
+            pedido = c.post("/demo/solicitar", json={
+                "email": email, "nombre": "Verificación Automática",
+                "empresa": "Control interno", "pais": "Uruguay"})
+            if pedido.status_code != 200:
+                return FALLA, f"/demo/solicitar devolvió {pedido.status_code}: {pedido.text[:120]}"
+            if "licencia" in pedido.json():
+                return FALLA, "el formulario de demo está entregando licencias"
+
+            # La demo sólo la habilita el dueño. Que un visitante no pueda es
+            # justamente lo que hay que comprobar: si esto empezara a devolver
+            # 200, el producto volvería a regalarse a cualquiera que pase.
+            sin_permiso = c.post("/licencias/trial", json={"email": email})
+            if sin_permiso.status_code == 200:
+                return FALLA, ("la demo se entrega sin credenciales: cualquiera "
+                               "puede sacarse una licencia full")
+
+            token = os.environ.get("PLANIA_BACKEND_ADMIN_TOKEN")
+            if not token:
+                return ADVERTENCIA, ("pedido de demo y bloqueo del autoservicio "
+                                     "verificados; falta PLANIA_BACKEND_ADMIN_TOKEN "
+                                     "para probar la emisión del dueño")
+
+            cabecera = {"Authorization": f"Bearer {token}"}
+            r = c.post("/licencias/trial", json={"email": email}, headers=cabecera)
             if r.status_code != 200 or r.json().get("dias") != 7:
                 return FALLA, f"/licencias/trial devolvió {r.status_code}: {r.text[:120]}"
-            repetido = c.post("/licencias/trial", json={"email": email})
+            repetido = c.post("/licencias/trial", json={"email": email},
+                              headers=cabecera)
             if repetido.status_code != 409:
                 return FALLA, "un mismo email pudo sacar dos demos"
-            return OK, "salud, planes, alta de demo y bloqueo de demo repetida"
+            return OK, ("salud, planes, pedido de demo registrado, autoservicio "
+                        "cerrado y bloqueo de demo repetida")
 
         resultados.append(_control("Backend de venta", "Endpoints del circuito", _backend))
 

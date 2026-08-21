@@ -119,11 +119,11 @@
   "p3_4": "Acordo de nível de serviço",
   "p_cta": "Pagar com MercadoPago",
   "p_cta_ent": "Falar com vendas",
-  "demo_h": "Teste 7 dias com tudo liberado",
-  "demo_sub": "Sem cartão e sem compromisso. Você conecta a sua base e a primeira tela já mostra quanto dinheiro está parado. Se não encontrar nada que valha a pena, você não paga nada.",
-  "demo_email": "voce@empresa.com",
-  "demo_cta": "Quero o teste completo",
-  "demo_nota": "Um teste por e-mail. A licença chega na hora.",
+  "demo_h": "Peça uma demo ao vivo",
+  "demo_sub": "Não é um vídeo nem um teste para olhar sozinho: conversamos 20 minutos, carregamos os seus dados e você vê o que a Plania encontra na sua operação.",
+  "demo_email": "E-mail de contato",
+  "demo_cta": "Pedir minha demo",
+  "demo_nota": "Escrevemos para combinar dia e hora. A demo é pessoal, não é para baixar.",
   "desc_h": "Escolha como usar",
   "desc_sub": "O mesmo produto, três formas de começar. Os dados ficam sempre do seu lado.",
   "d1_t": "Instalador para Windows",
@@ -184,5 +184,9 @@
   "impl_form_sub": "Conte com quais ERPs você trabalha e para quantos clientes dá suporte hoje.",
   "impl_form_msg": "Com quais ERPs você trabalha e para quantos clientes dá suporte hoje",
   "impl_form_cta": "Enviar candidatura",
-  "impl_legal": "Os percentuais desta página são as condições vigentes do programa e podem ser atualizados; são confirmados por escrito antes de começar. Os valores estão em dólares."
+  "impl_legal": "Os percentuais desta página são as condições vigentes do programa e podem ser atualizados; são confirmados por escrito antes de começar. Os valores estão em dólares.",
+  "demo_nombre": "Nome completo",
+  "demo_empresa": "Empresa",
+  "demo_pais": "País",
+  "demo_mensaje": "Que sistema você usa hoje? (opcional)"
 }

@@ -2,6 +2,7 @@
 """Tests de Plania: dataset, conectores, analítica, sugerencias, copiloto,
 exportes, rutas, licencias y backend de venta."""
 import os
+import uuid
 import re
 import sys
 import zipfile
@@ -237,17 +238,24 @@ def test_existe_el_archivo_de_la_eula():
     assert "descompilar" in texto.lower()
 
 
-def test_backend_endpoints():
+def test_backend_endpoints(monkeypatch):
     from fastapi.testclient import TestClient
     from backend_venta.app import app
     c = TestClient(app)
     assert c.get("/salud").json()["ok"]
     planes = c.get("/planes").json()
     assert "trial" in planes and "pro" in planes
-    r = c.post("/licencias/trial", json={"email": "demo1@test.uy"})
+
+    # La demo la habilita el dueño, no el visitante: el endpoint pide su token.
+    monkeypatch.setenv("PLANIA_BACKEND_ADMIN_TOKEN", "token-smoke")
+    del_dueno = {"Authorization": "Bearer token-smoke"}
+    correo = f"demo-{uuid.uuid4().hex[:8]}@test.uy"
+
+    r = c.post("/licencias/trial", json={"email": correo}, headers=del_dueno)
     assert r.status_code == 200 and r.json()["dias"] == 7
     # segunda demo con el mismo email: rechazada
-    assert c.post("/licencias/trial", json={"email": "demo1@test.uy"}).status_code == 409
+    assert c.post("/licencias/trial", json={"email": correo},
+                  headers=del_dueno).status_code == 409
     # checkout sin MP_ACCESS_TOKEN: 503 claro, no un 500 críptico
     os.environ.pop("MP_ACCESS_TOKEN", None)
     r = c.post("/checkout", json={"plan": "pro", "email": "x@y.uy"})
@@ -1077,13 +1085,21 @@ def test_webhook_mercadopago_plan_desconocido_cae_a_starter():
         os.environ.pop("MP_ACCESS_TOKEN", None)
 
 
-def test_trial_email_invalido_400():
+def test_trial_email_invalido_400(monkeypatch):
+    """Ya autenticado como dueño, un email mal escrito sigue siendo un 400.
+
+    El token de admin da permiso para emitir, no para emitir cualquier cosa:
+    una licencia atada a una dirección inválida no se la puede activar nadie.
+    """
     from fastapi.testclient import TestClient
 
     from backend_venta.app import app
 
+    monkeypatch.setenv("PLANIA_BACKEND_ADMIN_TOKEN", "token-invalido-400")
     c = TestClient(app, client=("203.0.113.78", 51000))
-    assert c.post("/licencias/trial", json={"email": "no-es-un-email"}).status_code == 400
+    r = c.post("/licencias/trial", json={"email": "no-es-un-email"},
+               headers={"Authorization": "Bearer token-invalido-400"})
+    assert r.status_code == 400
 
 
 def test_emitir_licencia_plan_desconocido_lanza_valueerror():
@@ -1379,10 +1395,13 @@ def test_rate_limit_corta_una_rafaga_de_altas_de_demo():
 
     c = TestClient(app, client=("203.0.113.50", 51000))
 
+    def pedido(n):
+        return {"email": f"rafaga{n}-{uuid.uuid4().hex[:6]}@ratelimit-test.uy",
+                "nombre": "Ráfaga", "empresa": "Prueba", "pais": "Uruguay"}
+
     respuestas = []
     for i in range(6):
-        r = c.post("/licencias/trial", json={"email": f"rafaga{i}@ratelimit-test.uy"})
-        respuestas.append(r.status_code)
+        respuestas.append(c.post("/demo/solicitar", json=pedido(i)).status_code)
 
     assert respuestas[:5] == [200] * 5, f"las primeras 5 deberían pasar: {respuestas}"
     assert respuestas[5] == 429, f"la 6ta tiene que cortarse por límite: {respuestas}"
@@ -1390,8 +1409,7 @@ def test_rate_limit_corta_una_rafaga_de_altas_de_demo():
     # Y una IP distinta no está afectada por la ráfaga de la otra: el límite
     # es por origen, no un semáforo global que deja a todo el mundo afuera.
     otra = TestClient(app, client=("203.0.113.51", 51000))
-    assert otra.post("/licencias/trial",
-                     json={"email": "otra-ip@ratelimit-test.uy"}).status_code == 200
+    assert otra.post("/demo/solicitar", json=pedido("otra-ip")).status_code == 200
 
 
 def test_licencia_cliente_demo_local():
@@ -1401,10 +1419,22 @@ def test_licencia_cliente_demo_local():
     assert "copiloto" in est["features"]
 
 
-def test_e2e_demo_a_licencia_paga():
-    """Circuito completo del cliente: demo local → compra → activación.
+def test_e2e_demo_a_licencia_paga(monkeypatch):
+    """Circuito completo del cliente: pide demo → el dueño se la habilita →
+    compra → activación.
+
+    El pedido de demo y la emisión son dos pasos distintos a propósito: la
+    demo dejó de ser autoservicio para no regalarle el producto a cualquiera
+    que deje un email. Acá se recorren los dos.
+
     (El pago real lo simula la emisión directa: el webhook de MP termina
-    llamando exactamente a licencias.emitir_licencia.)"""
+    llamando exactamente a licencias.emitir_licencia.)
+
+    Todo lo que toca la configuración local va dentro de un try/finally. Sin
+    eso, cuando este test falla en el medio deja la demo vencida en el disco y
+    arrastra a media suite con él — que es exactamente lo que pasó cuando la
+    demo dejó de ser autoservicio: una falla acá se convirtió en cinco.
+    """
     from datetime import datetime, timedelta, timezone
 
     from fastapi.testclient import TestClient
@@ -1414,43 +1444,57 @@ def test_e2e_demo_a_licencia_paga():
     from plania import config as pconfig
     from plania import licencia
 
-    # 1) demo local vencida (instalada hace 10 días, más que los 7 de demo)
-    pconfig.guardar_extra("LICENCIA_JWT", "")
-    pconfig.guardar_extra("LICENCIA_CLAIMS", None)
-    inicio_viejo = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
-    pconfig.guardar_extra("DEMO_INICIO", inicio_viejo)
-    est = licencia.estado()
-    assert est["modo"] == "vencida"
-    assert est["features"] == []
+    monkeypatch.setenv("PLANIA_BACKEND_ADMIN_TOKEN", "token-e2e")
+    del_dueno = {"Authorization": "Bearer token-e2e"}
+    correo = f"e2e-{uuid.uuid4().hex[:8]}@plania.uy"
 
-    # 2) el cliente pide la demo por la landing y la activa en la app.
-    # `activar_licencia` consulta al backend (no le cree al token sin
-    # verificar) — acá se le inyecta el mismo TestClient así la activación
-    # golpea al backend de este mismo test en vez de a una URL real.
-    c = TestClient(app)
-    r = c.post("/licencias/trial", json={"email": "e2e@plania.uy"})
-    assert r.status_code == 200
-    act = licencia.activar_licencia(r.json()["licencia"], backend_url="", cliente_http=c)
-    assert act["ok"], act
-    est = licencia.estado()
-    assert est["modo"] == "licencia" and est["plan"] == "trial"
-    assert "rutas" in est["features"]
+    try:
+        # 1) demo local vencida (instalada hace 10 días, más que los 7 de demo)
+        pconfig.guardar_extra("LICENCIA_JWT", "")
+        pconfig.guardar_extra("LICENCIA_CLAIMS", None)
+        inicio_viejo = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        pconfig.guardar_extra("DEMO_INICIO", inicio_viejo)
+        est = licencia.estado()
+        assert est["modo"] == "vencida"
+        assert est["features"] == []
 
-    # 3) paga → webhook emite plan pro → activa y desbloquea todo
-    lic_pro = licencias.emitir_licencia("e2e@plania.uy", "pro")
-    assert licencia.activar_licencia(lic_pro, backend_url="", cliente_http=c)["ok"]
-    est = licencia.estado()
-    assert est["plan"] == "pro" and licencia.tiene("rutas") and licencia.tiene("copiloto")
+        c = TestClient(app)
 
-    # 4) contra el backend, esa licencia consulta su estado/cupo
-    r = c.get("/licencias/estado", headers={"Authorization": f"Bearer {lic_pro}"})
-    assert r.status_code == 200 and r.json()["cupo_mensual"] == 2000
+        # 2) el interesado pide la demo por la landing: queda registrado, y
+        #    NO se lleva ninguna licencia.
+        r = c.post("/demo/solicitar", json={
+            "email": correo, "nombre": "Ana Prospecto",
+            "empresa": "Mayorista del Sur", "pais": "Uruguay"})
+        assert r.status_code == 200, r.text
+        assert "licencia" not in r.json()
 
-    # limpiar para no afectar otros tests
-    pconfig.guardar_extra("LICENCIA_JWT", "")
-    pconfig.guardar_extra("LICENCIA_CLAIMS", None)
-    pconfig.guardar_extra("LICENCIA_VERIFICADA_EL", None)
-    pconfig.guardar_extra("DEMO_INICIO", "")
+        # 3) el dueño lo atiende y recién ahí le habilita la demo.
+        #    `activar_licencia` consulta al backend (no le cree al token sin
+        #    verificar) — se le inyecta el mismo TestClient así la activación
+        #    golpea al backend de este test en vez de a una URL real.
+        r = c.post("/licencias/trial", json={"email": correo}, headers=del_dueno)
+        assert r.status_code == 200, r.text
+        act = licencia.activar_licencia(r.json()["licencia"], backend_url="",
+                                        cliente_http=c)
+        assert act["ok"], act
+        est = licencia.estado()
+        assert est["modo"] == "licencia" and est["plan"] == "trial"
+        assert "rutas" in est["features"]
+
+        # 4) paga → webhook emite plan pro → activa y desbloquea todo
+        lic_pro = licencias.emitir_licencia(correo, "pro")
+        assert licencia.activar_licencia(lic_pro, backend_url="", cliente_http=c)["ok"]
+        est = licencia.estado()
+        assert est["plan"] == "pro" and licencia.tiene("rutas") and licencia.tiene("copiloto")
+
+        # 5) contra el backend, esa licencia consulta su estado/cupo
+        r = c.get("/licencias/estado", headers={"Authorization": f"Bearer {lic_pro}"})
+        assert r.status_code == 200 and r.json()["cupo_mensual"] == 2000
+    finally:
+        pconfig.guardar_extra("LICENCIA_JWT", "")
+        pconfig.guardar_extra("LICENCIA_CLAIMS", None)
+        pconfig.guardar_extra("LICENCIA_VERIFICADA_EL", None)
+        pconfig.guardar_extra("DEMO_INICIO", "")
 
 
 def test_archivos_subidos_quedan_como_fuente(datos, tmp_path):
@@ -1686,7 +1730,8 @@ def test_la_web_no_promete_mercadopago_si_no_hay_con_que_cobrar():
                 f"web/{idioma}/{pagina} nombra MercadoPago sin backend que cobre"
     es = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
     assert "Hablar con ventas" in es
-    assert "llega al instante" not in es, "sin backend la licencia se manda a mano"
+    assert "coordinamos día y hora" in es, \
+        "sin backend la demo se coordina por mail, no se promete automática"
 
     entorno["PLANIA_BACKEND"] = "https://api.ejemplo.uy"
     try:
@@ -1694,7 +1739,8 @@ def test_la_web_no_promete_mercadopago_si_no_hay_con_que_cobrar():
         es = open(os.path.join(RAIZ, "web", "es", "index.html"), encoding="utf-8").read()
         assert "Pagar con MercadoPago" in es, \
             "con backend configurado el botón vuelve a ser el de pago"
-        assert "llega al instante" in es
+        assert "Te escribimos para coordinar" in es, \
+            "con backend el formulario registra el pedido y avisa que lo van a contactar"
     finally:
         del entorno["PLANIA_BACKEND"]
         generar()
@@ -2770,45 +2816,36 @@ PAYLOADS_XSS = [
 
 
 @pytest.mark.skipif(not _node_disponible(), reason="hace falta node para correr el JS real")
-def test_escaparHtml_neutraliza_los_payloads_de_xss_conocidos():
-    """La regresión central del eje de seguridad web: escaparHtml() (definida
-    en web/assets/plania.js) es la única vía permitida para insertar datos
-    externos con innerHTML. Se la corre con Node —el JS real, no una
-    reimplementación en Python que podría desincronizarse— contra una lista
-    de payloads de XSS típicos y se comprueba que ninguno sobrevive."""
-    import json
-    import subprocess
+def test_la_web_no_inserta_html_dinamico_en_ningun_lado():
+    """La forma más segura de escapar datos externos es no interpretarlos.
 
-    ruta_js = os.path.join(RAIZ, "web", "assets", "plania.js")
-    fuente = open(ruta_js, encoding="utf-8").read()
-    assert "function escaparHtml(" in fuente, "no está la función de escape esperada"
+    Antes, el formulario de demo devolvía la licencia y la pintaba con
+    `innerHTML`, así que hacía falta `escaparHtml()` y un test que lo
+    bombardeara con payloads de XSS. Cuando la demo dejó de entregarse sola,
+    esa inserción desapareció y con ella la función.
 
-    script = f"""
-    {fuente}
-    var casos = {json.dumps(PAYLOADS_XSS)};
-    var resultados = casos.map(function(c) {{ return escaparHtml(c); }});
-    console.log(JSON.stringify(resultados));
+    Este control reemplaza a aquel y es más fuerte: en vez de comprobar que la
+    única vía de escape funcione, exige que no haya ninguna vía de inserción
+    de HTML. Todo lo que venga del backend tiene que ir por `textContent`, que
+    no interpreta etiquetas — no hay nada que escapar porque no hay nada que
+    se parsee.
+
+    Si alguien vuelve a necesitar `innerHTML`, este test se pone rojo y ahí sí
+    corresponde volver a introducir un escape y su batería de payloads.
     """
-    # escaparHtml queda dentro de la IIFE de plania.js, así que se la vuelve a
-    # declarar en un ámbito propio para el test en vez de tocar el archivo:
-    # se extrae solo el cuerpo de la función con una expresión regular chica.
-    m = re.search(r"function escaparHtml\([^)]*\)\s*\{.*?\n  \}", fuente, re.S)
-    assert m, "no se pudo aislar el cuerpo de escaparHtml() para probarla"
-    script = m.group(0) + "\n" + f"""
-    var casos = {json.dumps(PAYLOADS_XSS)};
-    console.log(JSON.stringify(casos.map(function(c) {{ return escaparHtml(c); }})));
-    """
-    r = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
-    assert r.returncode == 0, f"el JS de escaparHtml() no corrió:\n{r.stderr}"
-    escapados = json.loads(r.stdout.strip().splitlines()[-1])
+    import glob
 
-    peligrosos = re.compile(r"[<>\"']")
-    for original, escapado in zip(PAYLOADS_XSS, escapados):
-        assert not peligrosos.search(escapado), (
-            f"'{original}' quedó con un carácter peligroso sin escapar: {escapado!r}")
-        # y que sea reversible en sentido semántico: el texto sigue legible,
-        # no se convirtió en otra cosa.
-        assert "alert" not in escapado or "&lt;" in escapado or "&amp;" not in original
+    riesgosas = re.compile(r"\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML|document\.write")
+    hallazgos = []
+    for ruta in glob.glob(os.path.join(RAIZ, "web", "assets", "*.js")):
+        for n, linea in enumerate(open(ruta, encoding="utf-8"), 1):
+            if riesgosas.search(linea):
+                hallazgos.append(f"{os.path.basename(ruta)}:{n}: {linea.strip()[:90]}")
+
+    assert not hallazgos, (
+        "el sitio volvió a insertar HTML dinámico; si es a propósito hay que "
+        "reintroducir un escape y probarlo con payloads de XSS:\n  "
+        + "\n  ".join(hallazgos))
 
 
 def test_ningun_innerHTML_con_variable_sin_pasar_por_escaparHtml():
@@ -3170,6 +3207,87 @@ def test_lo_que_dice_cada_plan_es_lo_que_ese_plan_hace():
     # Y lo que sí distingue a Pro tiene que seguir siendo cierto.
     assert "excedente" in pro and "excedente" not in starter, (
         "si Starter y Pro habilitan lo mismo, no queda motivo para pagar Pro")
+
+
+def test_la_demo_ya_no_se_entrega_sola_a_quien_la_pida(tmp_path, monkeypatch):
+    """La demo dejó de ser autoservicio, y esto lo comprueba de verdad.
+
+    Antes, `POST /licencias/trial` con un email cualquiera devolvía al instante
+    una licencia de 7 días con TODO habilitado, sin credenciales de por medio.
+    Eso le entregaba el producto entero a cualquiera que pasara —incluido un
+    competidor— sin dejar rastro de quién era.
+
+    Ahora ese endpoint exige el token de administrador: la demo la habilita el
+    dueño, después de atender el pedido.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend_venta.app import app
+
+    # Sólo el token de admin, que `_admin_token()` lee en cada llamada. No se
+    # recargan módulos: `uso.DB_PATH` se fija al importar, así que un reload
+    # acá le deja la base de prueba a todos los tests que corren después.
+    monkeypatch.setenv("PLANIA_BACKEND_ADMIN_TOKEN", "token-de-prueba")
+
+    c = TestClient(app, client=("203.0.113.240", 52000))
+    email_nuevo = f"prospecto-{uuid.uuid4().hex[:10]}@empresa.uy"
+
+    # Sin credenciales: no se lleva nada.
+    r = c.post("/licencias/trial", json={"email": "curioso@competencia.uy"})
+    assert r.status_code in (401, 403, 422), (
+        f"la demo sigue siendo autoservicio: devolvió {r.status_code}")
+    assert "licencia" not in r.json(), "entregó una licencia sin credenciales"
+
+    # Con el token del dueño: sí, porque es él quien decide a quién mostrarle.
+    r = c.post("/licencias/trial", json={"email": email_nuevo},
+               headers={"Authorization": "Bearer token-de-prueba"})
+    assert r.status_code == 200, r.text
+    assert r.json()["plan"] == "trial"
+
+
+def test_el_pedido_de_demo_queda_registrado_con_quien_lo_pidio():
+    """El formulario tiene que dejar rastro, que es medio motivo de existir.
+
+    Guardar sólo el email no alcanza para decidir a quién le mostrás el
+    producto ni para llamarlo: por eso nombre, empresa y país son obligatorios
+    y el endpoint los rechaza si faltan.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend_venta import uso
+    from backend_venta.app import app
+
+    c = TestClient(app, client=("203.0.113.241", 52100))
+    # Email único: la suite comparte la base, así que un valor fijo haría que
+    # el test dependa de si ya corrió antes.
+    email = f"juan-{uuid.uuid4().hex[:10]}@distribuidora.uy"
+    completo = {"email": email, "nombre": "Juan Pérez",
+                "empresa": "Distribuidora del Este", "pais": "Uruguay",
+                "mensaje": "Tenemos Zureo y 12 camiones."}
+
+    r = c.post("/demo/solicitar", json=completo)
+    assert r.status_code == 200, r.text
+    # Lo que NO tiene que pasar: que el formulario entregue el producto.
+    assert "licencia" not in r.json(), "el formulario entregó una licencia"
+
+    guardadas = {s["email"]: s for s in uso.solicitudes_demo()}
+    assert email in guardadas, "el pedido no quedó registrado"
+    fila = guardadas[email]
+    assert fila["nombre"] == "Juan Pérez"
+    assert fila["empresa"] == "Distribuidora del Este"
+    assert fila["pais"] == "Uruguay"
+
+    # Insistir no ensucia la lista con la misma persona repetida.
+    c.post("/demo/solicitar", json=completo)
+    repetidos = [s for s in uso.solicitudes_demo() if s["email"] == email]
+    assert len(repetidos) == 1, "el mismo interesado quedó cargado dos veces"
+
+    # Y un pedido sin datos no entra: un email suelto no sirve para nada.
+    for falta in ("nombre", "empresa", "pais"):
+        incompleto = dict(completo, email=f"otro-{falta}-{uuid.uuid4().hex[:8]}@x.uy")
+        incompleto[falta] = ""
+        r = c.post("/demo/solicitar", json=incompleto)
+        assert r.status_code == 400, f"aceptó un pedido sin {falta}"
 
 
 def test_el_producto_no_usa_emojis_decorativos():

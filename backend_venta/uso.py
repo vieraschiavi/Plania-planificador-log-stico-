@@ -49,6 +49,25 @@ trials_tabla = sa.Table(
     sa.Column("fecha", sa.String, nullable=False),
 )
 
+# Quién pidió ver el producto. La demo dejó de ser autoservicio: no se entrega
+# sola contra un email suelto, se pide acá y la habilita el dueño después de
+# una reunión. Por eso se guardan nombre, empresa y país — sin eso no se puede
+# distinguir un prospecto real de un competidor mirando, que es justamente para
+# lo que existe este formulario.
+#
+# La clave primaria es el email para que insistir no genere veinte filas del
+# mismo interesado; `insertar_ignorando_duplicados` deja la primera, que es la
+# que tiene la fecha en que realmente pidió.
+solicitudes_tabla = sa.Table(
+    "solicitudes_demo", metadata,
+    sa.Column("email", sa.String, primary_key=True),
+    sa.Column("nombre", sa.String, nullable=False),
+    sa.Column("empresa", sa.String, nullable=False),
+    sa.Column("pais", sa.String, nullable=False),
+    sa.Column("mensaje", sa.String),
+    sa.Column("fecha", sa.String, nullable=False),
+)
+
 
 def _engine(db_path: str = DB_PATH) -> sa.engine.Engine:
     engine = obtener_engine(db_path)
@@ -104,6 +123,27 @@ def marcar_trial(email: str, db_path: str = DB_PATH) -> None:
     insertar_ignorando_duplicados(
         engine, trials_tabla,
         email=email.lower(), fecha=datetime.now(timezone.utc).isoformat())
+
+
+def registrar_solicitud_demo(email: str, nombre: str, empresa: str, pais: str,
+                             mensaje: str = "", db_path: str = DB_PATH) -> None:
+    """Guarda un pedido de demo. Repetirlo no duplica la fila."""
+    engine = _engine(db_path)
+    insertar_ignorando_duplicados(
+        engine, solicitudes_tabla,
+        email=email.lower().strip(), nombre=nombre.strip(),
+        empresa=empresa.strip(), pais=pais.strip(), mensaje=(mensaje or "").strip(),
+        fecha=datetime.now(timezone.utc).isoformat())
+
+
+def solicitudes_demo(db_path: str = DB_PATH) -> list[dict]:
+    """Los pedidos de demo, del más nuevo al más viejo. Lo lee el panel del dueño."""
+    engine = _engine(db_path)
+    with engine.connect() as conn:
+        filas = conn.execute(
+            sa.select(solicitudes_tabla).order_by(solicitudes_tabla.c.fecha.desc())
+        ).mappings().all()
+    return [dict(f) for f in filas]
 
 
 @contextlib.contextmanager

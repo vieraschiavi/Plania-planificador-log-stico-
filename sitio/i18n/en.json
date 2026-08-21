@@ -119,11 +119,11 @@
   "p3_4": "Service level agreement",
   "p_cta": "Pay with MercadoPago",
   "p_cta_ent": "Talk to sales",
-  "demo_h": "Try it for 7 days with everything unlocked",
-  "demo_sub": "No card, no commitment. Connect your database and the first screen already shows how much cash you have tied up. If it finds nothing worth acting on, you pay nothing.",
-  "demo_email": "you@company.com",
-  "demo_cta": "Get the full trial",
-  "demo_nota": "One trial per email address. The licence arrives instantly.",
+  "demo_h": "Request a live demo",
+  "demo_sub": "Not a video, and not a trial to poke at alone: we meet for 20 minutes, load your own data and you see what Plania finds in your operation.",
+  "demo_email": "Contact email",
+  "demo_cta": "Request my demo",
+  "demo_nota": "We will write to arrange a time. The demo is one-to-one, not a download.",
   "desc_h": "Choose how to run it",
   "desc_sub": "The same product, three ways to start. Your data always stays on your side.",
   "d1_t": "Windows installer",
@@ -184,5 +184,9 @@
   "impl_form_sub": "Tell us which ERPs you work with and how many clients you currently support.",
   "impl_form_msg": "Which ERPs you work with and how many clients you currently support",
   "impl_form_cta": "Send application",
-  "impl_legal": "The percentages on this page are the program's current terms and may be updated; they are confirmed in writing before you start. Amounts are in US dollars."
+  "impl_legal": "The percentages on this page are the program's current terms and may be updated; they are confirmed in writing before you start. Amounts are in US dollars.",
+  "demo_nombre": "Full name",
+  "demo_empresa": "Company",
+  "demo_pais": "Country",
+  "demo_mensaje": "What system do you use today? (optional)"
 }

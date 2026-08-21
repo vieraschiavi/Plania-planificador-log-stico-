@@ -62,6 +62,20 @@ def trials_entregados() -> pd.DataFrame:
     return df
 
 
+def solicitudes_de_demo() -> pd.DataFrame:
+    """Quién pidió ver el producto y todavía no lo vio.
+
+    Es la lista de trabajo del dueño: cada fila es alguien que dejó su nombre,
+    empresa y país esperando que lo llamen. Se ordena por fecha descendente
+    porque el pedido de hoy vale más que el de hace tres semanas.
+    """
+    df = _leer_tabla("solicitudes_demo")
+    if len(df):
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce", utc=True)
+        df = df.sort_values("fecha", ascending=False)
+    return df
+
+
 def licencias_emitidas() -> pd.DataFrame:
     """Licencias emitidas, leídas del log de auditoría (trial, manual y pago).
 
@@ -172,6 +186,16 @@ def secciones_para_informe_owner() -> list:
         f"{k['margen_bruto_pct']}%. "
         f"{k['clientes_en_riesgo']} clientes sin actividad hace más de 14 días.")
     secciones = [("Estado del negocio", resumen, None)]
+
+    # Antes que nada lo accionable: gente esperando que la llamen. Un informe
+    # que arranca con métricas y esconde la lista de pedidos hace que el dueño
+    # lea el estado y no haga nada con él.
+    pedidos = solicitudes_de_demo()
+    if len(pedidos):
+        secciones.append(("Pedidos de demo sin atender",
+                          "Quiénes pidieron ver Plania, con su empresa y país. "
+                          "La demo no se entrega sola: se habilita desde acá "
+                          "después de la reunión.", pedidos))
 
     emitidas = licencias_emitidas()
     if len(emitidas):

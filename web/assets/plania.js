@@ -9,7 +9,7 @@
  * Este archivo resuelve solo lo que necesita ser dinámico:
  *   1. El selector de idioma del VIDEO (independiente del idioma de la página:
  *      alguien puede leer en inglés y querer escuchar el audio en español).
- *   2. El alta de la demo de 7 días contra el backend de venta.
+ *   2. El pedido de demo (registra al interesado; no entrega licencia).
  *   3. El checkout de MercadoPago.
  *   4. El formulario de contacto.
  */
@@ -19,52 +19,35 @@
   var LANG = window.PLANIA_LANG || "es";
   var BACKEND = window.PLANIA_BACKEND || "";
 
-  // ---------------------------------------------------------------------
-  // Escape explícito para lo poco que se inserta con innerHTML.
-  // ---------------------------------------------------------------------
-  // Todo dato que venga del backend, de una API externa o del usuario y
-  // termine dentro de un innerHTML pasa por acá — sin excepción, sin
-  // "total, esto no lo escribe nadie más que nosotros". La licencia que
-  // devuelve /licencias/trial es un JWT: no debería poder contener HTML,
-  // pero la función no depende de esa promesa del backend para ser segura.
-  // Cubre las cinco entidades peligrosas, no solo "<" (que es lo mínimo
-  // para no poder cerrar el <textarea> antes de tiempo, pero deja pasar
-  // "&" y las comillas, que rompen atributos si el HTML de alrededor
-  // cambia el día de mañana).
-  function escaparHtml(valor) {
-    var mapa = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-    return String(valor).replace(/[&<>"']/g, function (c) { return mapa[c]; });
-  }
-
   var TXT = {
     es: {
-      sinBackend: "Escribinos a ventas@plania.uy y te enviamos la licencia de prueba en el día.",
+      sinBackend: "Escribinos a vieraschiavi@gmail.com y coordinamos la demo.",
       emailInvalido: "Ingresá un email válido.",
       enviando: "Enviando…",
-      demoOk: "Listo. Tu licencia de 7 días es:",
-      demoRepetida: "Ese email ya usó la prueba. Escribinos y la extendemos.",
+      demoPedida: "Recibimos tu pedido. Te escribimos para coordinar la demo.",
+      demoFalta: "Completá nombre, empresa y país: la demo es personal y necesitamos saber con quién hablamos.",
       errorRed: "No pudimos conectar con el servidor. Probá de nuevo en un rato.",
       contOk: "Gracias, te respondemos en menos de 24 horas hábiles.",
       contFalta: "Completá al menos tu email y un mensaje.",
       videoFalta: "El audio en este idioma todavía no está publicado. Se reproduce la pista original con subtítulos en tu idioma."
     },
     en: {
-      sinBackend: "Write to ventas@plania.uy and we will send you the trial licence the same day.",
+      sinBackend: "Write to vieraschiavi@gmail.com and we will arrange the demo.",
       emailInvalido: "Please enter a valid email address.",
       enviando: "Sending…",
-      demoOk: "Done. Your 7-day licence is:",
-      demoRepetida: "That email already used the trial. Write to us and we will extend it.",
+      demoPedida: "We received your request. We will write to arrange the demo.",
+      demoFalta: "Please add name, company and country: the demo is one-to-one and we need to know who we are talking to.",
       errorRed: "We could not reach the server. Please try again shortly.",
       contOk: "Thank you, we will reply within 24 business hours.",
       contFalta: "Please fill in at least your email and a message.",
       videoFalta: "The audio in this language is not published yet. Playing the original track with subtitles in your language."
     },
     pt: {
-      sinBackend: "Escreva para ventas@plania.uy e enviamos a licença de teste no mesmo dia.",
+      sinBackend: "Escreva para vieraschiavi@gmail.com e combinamos a demo.",
       emailInvalido: "Digite um e-mail válido.",
       enviando: "Enviando…",
-      demoOk: "Pronto. Sua licença de 7 dias é:",
-      demoRepetida: "Esse e-mail já usou o teste. Fale conosco e estendemos.",
+      demoPedida: "Recebemos o seu pedido. Escrevemos para combinar a demo.",
+      demoFalta: "Preencha nome, empresa e país: a demo é pessoal e precisamos saber com quem falamos.",
       errorRed: "Não conseguimos conectar ao servidor. Tente novamente em instantes.",
       contOk: "Obrigado, respondemos em até 24 horas úteis.",
       contFalta: "Preencha ao menos o seu e-mail e uma mensagem.",
@@ -147,24 +130,36 @@
     formDemo.addEventListener("submit", function (e) {
       e.preventDefault();
       var msg = $("#demo-msg");
-      var email = ($("#demo-email").value || "").trim();
+      var valor = function (sel) { var e = $(sel); return e ? (e.value || "").trim() : ""; };
+      var email = valor("#demo-email");
+      var pedido = {
+        email: email,
+        nombre: valor("#demo-nombre"),
+        empresa: valor("#demo-empresa"),
+        pais: valor("#demo-pais"),
+        mensaje: valor("#demo-mensaje")
+      };
 
       if (!emailValido(email)) { msg.textContent = t.emailInvalido; return; }
+      if (!pedido.nombre || !pedido.empresa || !pedido.pais) {
+        msg.textContent = t.demoFalta; return;
+      }
       if (!BACKEND) { msg.textContent = t.sinBackend; return; }
 
       msg.textContent = t.enviando;
-      fetch(BACKEND + "/licencias/trial", {
+      // /demo/solicitar sólo REGISTRA el pedido. La demo ya no se entrega
+      // sola contra un email: la habilita el dueño después de la reunión, que
+      // es lo que evita regalarle el producto a cualquiera que pase.
+      fetch(BACKEND + "/demo/solicitar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email })
+        body: JSON.stringify(pedido)
       }).then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
       }).then(function (res) {
         if (res.ok) {
-          msg.innerHTML = t.demoOk + '<br><textarea readonly rows="3" style="width:100%;margin-top:8px">' +
-            escaparHtml(res.d.licencia) + "</textarea>";
-        } else if (res.status === 409) {
-          msg.textContent = t.demoRepetida;
+          msg.textContent = t.demoPedida;
+          formDemo.reset();
         } else {
           msg.textContent = (res.d && res.d.detail) || t.errorRed;
         }

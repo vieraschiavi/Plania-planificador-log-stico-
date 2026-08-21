@@ -178,6 +178,18 @@ table.vs tbody tr:last-child td{border-bottom:0}
 .form-demo input{flex:1 1 240px; min-width:0; padding:13px 15px; border-radius:10px;
   border:1px solid var(--line2); background:rgba(255,255,255,.95); color:var(--ink-d);
   font-family:inherit; font-size:1rem}
+/* El pedido de demo pasó de un campo a cinco: en una fila flex quedaban
+   apretados y el botón se perdía entre medio. Dos columnas donde entran, una
+   sola en teléfono, y el mensaje y el botón ocupando el ancho completo. */
+.form-demo-larga{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:12px; max-width:620px; text-align:left}
+.form-demo-larga input,.form-demo-larga textarea{width:100%; min-width:0;
+  padding:13px 15px; border-radius:10px; border:1px solid var(--line2);
+  background:rgba(255,255,255,.95); color:var(--ink-d);
+  font-family:inherit; font-size:1rem; resize:vertical}
+.form-demo-larga textarea,.form-demo-larga .btn{grid-column:1 / -1}
+.form-demo-larga .btn{justify-self:start}
+
 .form-cont{display:flex; flex-direction:column; gap:6px; text-align:left}
 .form-cont label{font-size:.85rem; font-weight:600; color:var(--muted-d); margin-top:8px}
 .form-cont input,.form-cont textarea{width:100%; padding:12px 14px; border-radius:10px;

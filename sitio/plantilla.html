@@ -187,9 +187,17 @@
   <div class="wrap estrecho">
     <h2>{{demo_h}}</h2>
     <p class="sub-c">{{demo_sub}}</p>
-    <form class="form-demo" id="form-demo" novalidate>
+    <form class="form-demo form-demo-larga" id="form-demo" novalidate>
+      <label class="sr" for="demo-nombre">{{demo_nombre}}</label>
+      <input id="demo-nombre" type="text" placeholder="{{demo_nombre}}" autocomplete="name" required>
+      <label class="sr" for="demo-empresa">{{demo_empresa}}</label>
+      <input id="demo-empresa" type="text" placeholder="{{demo_empresa}}" autocomplete="organization" required>
+      <label class="sr" for="demo-pais">{{demo_pais}}</label>
+      <input id="demo-pais" type="text" placeholder="{{demo_pais}}" autocomplete="country-name" required>
       <label class="sr" for="demo-email">{{demo_email}}</label>
       <input id="demo-email" type="email" placeholder="{{demo_email}}" autocomplete="email" required>
+      <label class="sr" for="demo-mensaje">{{demo_mensaje}}</label>
+      <textarea id="demo-mensaje" placeholder="{{demo_mensaje}}" rows="2"></textarea>
       <button type="submit" class="btn btn-green">{{demo_cta}}</button>
     </form>
     <p class="nota-c" id="demo-msg">{{demo_nota}}</p>
