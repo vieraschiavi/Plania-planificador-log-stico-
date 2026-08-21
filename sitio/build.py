@@ -86,8 +86,8 @@ SIN_BACKEND = {
         "precios_sub": "Sin permanencia mínima: si un mes no te sirve, lo das de baja. "
                        "El alta la coordinamos por mail.",
         "p_cta": "Hablar con ventas",
-        "demo_cta": "Pedir la demo completa",
-        "demo_nota": "Una demo por email. Te la enviamos a mano, en el día.",
+        "demo_cta": "Pedir la demo",
+        "demo_nota": "Escribinos a vieraschiavi@gmail.com y coordinamos día y hora.",
         "foot_legal": "Los importes están expresados en dólares. "
                       "Plania no reemplaza tu ERP: lo lee.",
     },
@@ -95,8 +95,8 @@ SIN_BACKEND = {
         "precios_sub": "No lock-in: if a month is not worth it, you cancel. "
                        "We set the subscription up by email.",
         "p_cta": "Talk to sales",
-        "demo_cta": "Request the full demo",
-        "demo_nota": "One demo per email. We send it by hand, the same day.",
+        "demo_cta": "Request the demo",
+        "demo_nota": "Write to vieraschiavi@gmail.com and we will arrange a time.",
         "foot_legal": "Prices are stated in US dollars. "
                       "Plania does not replace your ERP: it reads it.",
     },
@@ -104,8 +104,8 @@ SIN_BACKEND = {
         "precios_sub": "Sem fidelidade: se um mês não valer a pena, você cancela. "
                        "A assinatura é combinada por e-mail.",
         "p_cta": "Falar com vendas",
-        "demo_cta": "Pedir a demo completa",
-        "demo_nota": "Uma demo por e-mail. Enviamos manualmente, no mesmo dia.",
+        "demo_cta": "Pedir a demo",
+        "demo_nota": "Escreva para vieraschiavi@gmail.com e combinamos dia e hora.",
         "foot_legal": "Os valores estão em dólares. "
                       "A Plania não substitui o seu ERP: ela o lê.",
     },

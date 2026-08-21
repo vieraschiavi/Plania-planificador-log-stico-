@@ -543,9 +543,9 @@ def planes() -> dict:
     frontend para que no haya dos listas de precios que se desincronicen."""
     return {"planes": [
         {"id": "starter", "titulo": "Starter", "precio": "USD 59/mes",
-         "detalle": "Copiloto + ERP + exportes · 500 consultas/mes"},
+         "detalle": "Copiloto + ERP + rutas + exportes · 500 consultas/mes"},
         {"id": "pro", "titulo": "Pro — recomendado", "precio": "USD 129/mes",
-         "detalle": "Todo Starter + rutas + excedente · 2.000 consultas/mes"},
+         "detalle": "Todo Starter · 2.000 consultas/mes, y seguís aunque te pases"},
         {"id": "enterprise", "titulo": "Enterprise", "precio": "a medida",
          "detalle": "Multi-sucursal, white label, SSO, SLA"},
     ]}
