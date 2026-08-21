@@ -3067,6 +3067,45 @@ def test_el_servidor_de_licencias_se_puede_configurar_desde_el_programa():
         assert api._es_sensible(credencial), f"{credencial} tiene que ocultarse"
 
 
+def test_el_tablero_del_dueno_lee_la_base_del_backend_desplegado(tmp_path, monkeypatch):
+    """Un tablero que muestra cero mientras el negocio vende es peor que no tenerlo.
+
+    `plania/owner.py` abría la base con `sqlite3.connect()` detrás de un
+    `os.path.exists(db_path)`. Con el backend desplegado de verdad,
+    `PLANIA_USO_DB` es una URL (`postgresql://…`): `os.path.exists` de una URL
+    da False, así que devolvía DataFrames vacíos y el dueño veía CERO demos,
+    CERO clientes y CERO facturación con el negocio andando.
+
+    Se prueba la rama de URL con `sqlite:///`, que recorre exactamente el
+    mismo camino que una URL de Postgres sin necesitar un Postgres levantado.
+    """
+    import importlib
+
+    ruta = str(tmp_path / "uso.db")
+    monkeypatch.setenv("PLANIA_USO_DB", ruta)
+
+    from backend_venta import uso
+    importlib.reload(uso)
+    for email in ("a@ejemplo.uy", "b@ejemplo.uy", "c@ejemplo.uy"):
+        uso.marcar_trial(email)
+
+    import plania.owner as owner
+    importlib.reload(owner)
+
+    # Por ruta de archivo: el comportamiento de siempre no se puede haber roto.
+    assert len(owner._leer_tabla("trials", ruta)) == 3
+
+    # Por URL de conexión: lo que hace falta con el backend desplegado.
+    assert not os.path.exists(f"sqlite:///{ruta}"), (
+        "si esto existiera como archivo, la prueba no estaría comprobando nada")
+    assert len(owner._leer_tabla("trials", f"sqlite:///{ruta}")) == 3, (
+        "el tablero no lee cuando PLANIA_USO_DB es una URL de conexión")
+
+    # Una base inalcanzable muestra vacío, no rompe la pantalla del dueño.
+    assert owner._leer_tabla(
+        "trials", "postgresql://nadie:nada@127.0.0.1:1/nada").empty
+
+
 def test_el_producto_no_usa_emojis_decorativos():
     """Un emoji colgado de cada título delata que lo escribió un modelo.
 
