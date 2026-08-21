@@ -15,7 +15,6 @@ operación real, no de lo que uno recuerda haber vendido.
 from __future__ import annotations
 
 import os
-import sqlite3
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -28,15 +27,31 @@ DB_USO = os.environ.get("PLANIA_USO_DB", os.path.join(ROOT, "data", "uso_licenci
 
 
 def _leer_tabla(tabla: str, db_path: str = DB_USO) -> pd.DataFrame:
-    if not os.path.exists(db_path):
+    """Una tabla del backend de venta, venga de un archivo o de un Postgres.
+
+    Antes esto abría `sqlite3.connect(db_path)` después de un
+    `os.path.exists(db_path)`. Las dos cosas fallan en silencio cuando el
+    backend está desplegado de verdad: ahí `PLANIA_USO_DB` es una URL
+    (`postgresql://…`), `os.path.exists` de una URL da False, y el tablero
+    devolvía DataFrames vacíos — o sea, el dueño veía CERO clientes, CERO
+    demos y CERO facturación mientras el negocio vendía. Un tablero que
+    miente hacia abajo es peor que no tener tablero.
+
+    Se usa el mismo motor que el backend (`backend_venta/db.py`), que ya
+    resuelve las dos formas y es el que creó estas tablas.
+    """
+    from backend_venta import db as bdb
+
+    if "://" not in db_path and not os.path.exists(db_path):
         return pd.DataFrame()
-    con = sqlite3.connect(db_path)
     try:
-        return pd.read_sql(f"SELECT * FROM {tabla}", con)
+        engine = bdb.obtener_engine(db_path)
+        with engine.connect() as con:
+            return pd.read_sql_table(tabla, con)
     except Exception:
+        # Tabla que todavía no existe (backend recién desplegado, nadie compró
+        # aún) o base inalcanzable: el tablero muestra vacío, no revienta.
         return pd.DataFrame()
-    finally:
-        con.close()
 
 
 def trials_entregados() -> pd.DataFrame:
