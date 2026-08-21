@@ -3002,6 +3002,35 @@ def test_el_panel_del_dueno_no_se_publica_en_el_repo_publico():
         "si alguien escribe otra cosa al lanzarlo a mano")
 
 
+def test_el_servidor_de_licencias_se_puede_configurar_desde_el_programa():
+    """Sin esto, NADIE puede activar una licencia — ni un cliente que pagó.
+
+    `licencia.activar_licencia()` consulta `GET {BACKEND_URL}/licencias/estado`
+    y ese valor sale de `PLANIA_BACKEND_URL` o de `config.leer_extra`. Estuvo
+    sólo como variable de entorno, y `BACKEND_URL` no estaba en `CLAVES`: la
+    pantalla Configuración no lo ofrecía, así que quien instalaba el .exe se
+    quedaba con la demo vencida y un token que no había forma de activar.
+
+    Se controla que esté en `CLAVES` —que es lo que dibuja las dos pantallas
+    de Configuración, la de Streamlit y la de la ventana— y que no se muestre
+    enmascarado, porque una URL escondida detrás de "htt…com" no deja ver lo
+    único que hace falta mirar cuando una activación falla: a dónde apunta.
+    """
+    from plania import config as pconfig
+    from plania import api
+
+    assert "BACKEND_URL" in pconfig.CLAVES, (
+        "BACKEND_URL no está en CLAVES: la pantalla Configuración no lo "
+        "ofrece y no hay forma de activar una licencia desde el programa "
+        "instalado")
+
+    assert not api._es_sensible("BACKEND_URL"), (
+        "BACKEND_URL se está tratando como secreto; es una URL pública y "
+        "esconderla sólo impide verificar a dónde apunta")
+    for credencial in ("ANTHROPIC_API_KEY", "MP_ACCESS_TOKEN", "SMTP_PASSWORD"):
+        assert api._es_sensible(credencial), f"{credencial} tiene que ocultarse"
+
+
 def test_el_producto_no_usa_emojis_decorativos():
     """Un emoji colgado de cada título delata que lo escribió un modelo.
 

@@ -113,6 +113,13 @@ KEYRING_SERVICE = "plania-ia"
 KEYRING_USER = "plania-config"
 
 CLAVES = {
+    # Servidor de licencias. Sin esto, "Ya tengo mi licencia" no puede
+    # activar NADA —ni una licencia paga— porque activar consulta
+    # GET {BACKEND_URL}/licencias/estado (ver plania/licencia.py). Estaba
+    # sólo como variable de entorno, así que quien instalaba el .exe no
+    # tenía forma de configurarlo y se quedaba con la demo vencida y un
+    # token que no servía. No es secreto: es una URL pública.
+    "BACKEND_URL": "Plania · servidor de licencias (para activar tu licencia)",
     "ANTHROPIC_API_KEY": "Anthropic · Copiloto IA (chat sobre tus datos reales)",
     "ERP_DB_URL": "ERP · URL de conexión a la base de datos (SQLAlchemy: postgresql://, mysql+pymysql://, mssql+pyodbc://, oracle://, sqlite:///…)",
     "ERP_API_URL": "ERP · URL del endpoint/webhook para sincronizar pedidos y ofertas",
