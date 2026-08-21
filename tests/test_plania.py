@@ -1228,6 +1228,42 @@ def test_descargar_token_invalido_403():
     assert c.get("/descargar/token-que-no-existe").status_code == 403
 
 
+def test_el_comprador_baja_el_instalador_publicado_en_releases(tmp_path, monkeypatch):
+    """En un PaaS el instalador no está en el disco del servidor, y sin esto
+    el circuito terminaba en 503 justo después de cobrar.
+
+    El .exe pesa ~200 MB: no viaja en el repositorio ni entra en el disco
+    efímero de un plan free, se publica en la página de Releases. El endpoint
+    sólo sabía servir un archivo local, así que el comprador pagaba, recibía
+    su token, hacía clic en descargar y no bajaba nada — el peor momento
+    posible para fallar.
+
+    Con PLANIA_INSTALADOR_URL redirige a donde el instalador sí está, y el
+    token se sigue gastando una sola vez.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend_venta import descargas
+    from backend_venta.app import app
+
+    url = ("https://github.com/ejemplo/repo/releases/download/"
+           "ultima-compilacion/Plania.Setup.1.0.0.exe")
+    monkeypatch.setenv("PLANIA_INSTALADOR_URL", url)
+    # Apunta a un archivo que NO existe: se comprueba que la URL alcanza sola,
+    # que es exactamente la situación del servidor desplegado.
+    monkeypatch.setenv("PLANIA_INSTALADOR_PATH", str(tmp_path / "no-esta.exe"))
+
+    token = descargas.crear_token_descarga("comprador-releases@plania.uy")
+    c = TestClient(app, client=("203.0.113.231", 51100))
+
+    r = c.get(f"/descargar/{token}", follow_redirects=False)
+    assert r.status_code == 302, f"no redirigió al instalador: {r.status_code}"
+    assert r.headers["location"] == url
+
+    # De un solo uso, igual que cuando sirve un archivo local.
+    assert c.get(f"/descargar/{token}", follow_redirects=False).status_code == 403
+
+
 def test_un_servidor_sin_instalador_no_le_quema_la_descarga_al_comprador(tmp_path):
     """El token de descarga es de un solo uso, así que el orden importa.
 
