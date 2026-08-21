@@ -3106,6 +3106,72 @@ def test_el_tablero_del_dueno_lee_la_base_del_backend_desplegado(tmp_path, monke
         "trials", "postgresql://nadie:nada@127.0.0.1:1/nada").empty
 
 
+def test_ningun_plan_pago_le_saca_algo_que_la_demo_ya_daba():
+    """Pagar nunca puede darte menos que probar gratis.
+
+    La demo traía `rutas` y Starter no: quien probaba 7 días y compraba el plan
+    más barato PERDÍA una función que ya estaba usando. Un downgrade en el
+    momento exacto de cobrar es la forma más cara de arrancar con un cliente —
+    el reclamo llega el primer día y el reembolso también.
+
+    Se controla como invariante y no como caso puntual de `rutas`: cualquier
+    función que se agregue mañana a la demo tiene que estar en todos los planes
+    pagos, o el mismo problema vuelve con otro nombre.
+    """
+    from backend_venta import licencias
+
+    demo = set(licencias.PLANES["trial"]["features"])
+    pagos = {p: d for p, d in licencias.PLANES.items()
+             if p != "trial" and d.get("dias")}
+
+    for plan, datos in pagos.items():
+        faltantes = demo - set(datos["features"])
+        assert not faltantes, (
+            f"el plan '{plan}' no tiene {sorted(faltantes)}, que la demo SÍ da: "
+            f"un cliente que prueba y compra pierde esa función justo al pagar")
+
+
+def test_lo_que_dice_cada_plan_es_lo_que_ese_plan_hace():
+    """Los textos de venta no pueden prometer lo que el plan no habilita.
+
+    Hay tres lugares que describen los planes —la pantalla de Streamlit, la de
+    la ventana y el sitio— y las funciones reales viven en un cuarto
+    (`backend_venta/licencias.py`). Cuando cambió qué incluye Starter, el sitio
+    siguió vendiendo las rutas como el diferencial de Pro: texto y producto
+    dejaron de coincidir sin que nada se pusiera rojo.
+    """
+    import json
+    import os
+
+    from backend_venta import licencias
+
+    starter = set(licencias.PLANES["starter"]["features"])
+    pro = set(licencias.PLANES["pro"]["features"])
+
+    # Si Starter ya trae rutas, ningún texto puede seguir vendiéndolas como lo
+    # que distingue a Pro.
+    if "rutas" in starter:
+        for idioma in ("es", "en", "pt"):
+            ruta = os.path.join(RAIZ, "sitio", "i18n", f"{idioma}.json")
+            with open(ruta, encoding="utf-8") as f:
+                textos = json.load(f)
+            bullets_pro = " ".join(textos.get(f"p2_{n}", "") for n in (1, 2, 3, 4)).lower()
+            for palabra in ("rutas de reparto", "delivery routes", "rotas de entrega"):
+                assert palabra not in bullets_pro, (
+                    f"{idioma}.json vende '{palabra}' como diferencial de Pro, "
+                    f"pero Starter ya las incluye")
+
+        for archivo in ("app/app.py", "plania/api.py"):
+            with open(os.path.join(RAIZ, archivo), encoding="utf-8") as f:
+                cuerpo = f.read()
+            assert "Copiloto + ERP + exportes ·" not in cuerpo, (
+                f"{archivo} describe Starter sin rutas, pero el plan las tiene")
+
+    # Y lo que sí distingue a Pro tiene que seguir siendo cierto.
+    assert "excedente" in pro and "excedente" not in starter, (
+        "si Starter y Pro habilitan lo mismo, no queda motivo para pagar Pro")
+
+
 def test_el_producto_no_usa_emojis_decorativos():
     """Un emoji colgado de cada título delata que lo escribió un modelo.
 

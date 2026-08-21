@@ -33,8 +33,17 @@ _CLAVE_SECRETO = "LICENSE_SECRET"
 PLANES = {
     "trial":      {"cupo_mensual": 300,  "precio": 0.0,   "dias": 7,
                    "features": ["copiloto", "erp", "exportes", "rutas"]},
+    # `rutas` está acá porque la demo ya las trae: sin esto, quien probaba 7
+    # días y pagaba el plan más barato PERDÍA una función que ya estaba
+    # usando. Un downgrade al momento de cobrar es la forma más cara de
+    # arrancar una relación con un cliente — el reclamo llega el primer día y
+    # el reembolso también.
+    #
+    # Pro sigue diferenciándose por lo que de verdad escala con el uso: cuatro
+    # veces el cupo de consultas (2000 contra 500) y `excedente`, que es poder
+    # pasarse de ese cupo en vez de quedar cortado.
     "starter":    {"cupo_mensual": 500,  "precio": 59.0,  "dias": 30,
-                   "features": ["copiloto", "erp", "exportes"]},
+                   "features": ["copiloto", "erp", "exportes", "rutas"]},
     "pro":        {"cupo_mensual": 2000, "precio": 129.0, "dias": 30,
                    "features": ["copiloto", "erp", "exportes", "rutas", "excedente"]},
     "enterprise": {"cupo_mensual": None, "precio": None,  "dias": 30,

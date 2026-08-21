@@ -728,9 +728,9 @@ elif pagina == "Planes y licencia":
     col1, col2, col3 = st.columns(3)
     for col, (plan, titulo, precio, detalle) in zip((col1, col2, col3), [
         ("starter", "Starter", "USD 59/mes",
-         "Copiloto + ERP + exportes · 500 consultas/mes"),
+         "Copiloto + ERP + rutas + exportes · 500 consultas/mes"),
         ("pro", "Pro — recomendado", "USD 129/mes",
-         "Todo Starter + rutas + excedente · 2.000 consultas/mes"),
+         "Todo Starter · 2.000 consultas/mes, y seguís aunque te pases"),
         ("enterprise", "Enterprise", "a medida",
          "Multi-sucursal, white label, SSO, SLA"),
     ]):
