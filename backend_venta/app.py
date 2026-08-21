@@ -24,7 +24,7 @@ import secrets
 import requests
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -460,24 +460,40 @@ async def descargar(request: Request, token: str):
     if not r["ok"]:
         raise HTTPException(403, r["error"])
 
+    # Dos formas de tener el instalador, y el orden importa.
+    #
+    # PLANIA_INSTALADOR_URL es la que funciona en un PaaS: el instalador pesa
+    # ~200 MB y se publica en la página de Releases, no viaja en el repo ni
+    # entra en el disco efímero de un plan free. Sin esto, el circuito
+    # terminaba en 503 justo después de cobrar — el comprador pagaba, recibía
+    # su token, hacía clic y no bajaba nada.
+    #
+    # Que el archivo de Releases sea público no debilita esto: el instalador
+    # ya se descarga sin pagar (la demo de 7 días es gratis y no necesita
+    # licencia). Lo que se paga es la licencia, y eso lo sigue gobernando la
+    # firma del JWT, no quién puede bajar el .exe.
+    url = os.environ.get("PLANIA_INSTALADOR_URL", "").strip()
     ruta = os.environ.get("PLANIA_INSTALADOR_PATH",
                           os.path.join(ROOT, "dist", "Plania_Setup.exe"))
-    if not os.path.exists(ruta):
+    if not url and not os.path.exists(ruta):
         # Quien llega hasta acá ya pagó y tiene un token válido de un solo uso
         # — este 503 es "pagaste bien y no hay nada que darte", el peor
         # momento posible para que quede sin rastro.
-        logger.error("Token de descarga válido pero no existe el instalador "
-                     "en PLANIA_INSTALADOR_PATH=%s", ruta)
+        logger.error("Token de descarga válido pero no hay instalador: "
+                     "PLANIA_INSTALADOR_URL vacía y no existe %s", ruta)
         raise HTTPException(503, "El instalador todavía no está publicado en este servidor "
-                                 "(configurá PLANIA_INSTALADOR_PATH).")
+                                 "(configurá PLANIA_INSTALADOR_URL o PLANIA_INSTALADOR_PATH).")
 
-    # Recién con el archivo en la mano se gasta el token. Entre este chequeo y
-    # el consumo hay una ventana en la que dos pedidos simultáneos podrían
-    # pasar los dos, pero el resultado de eso es que alguien que pagó baje dos
-    # veces el mismo instalador — mucho menos grave que no poder bajarlo.
+    # Recién con algo que entregar en la mano se gasta el token. Entre este
+    # chequeo y el consumo hay una ventana en la que dos pedidos simultáneos
+    # podrían pasar los dos, pero el resultado de eso es que alguien que pagó
+    # baje dos veces el mismo instalador — mucho menos grave que no poder
+    # bajarlo.
     consumido = descargas.validar_token_descarga(token)
     if not consumido["ok"]:
         raise HTTPException(403, consumido["error"])
+    if url:
+        return RedirectResponse(url, status_code=302)
     return FileResponse(ruta, filename=os.path.basename(ruta))
 
 

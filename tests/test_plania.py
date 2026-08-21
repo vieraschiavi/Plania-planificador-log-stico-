@@ -1228,6 +1228,42 @@ def test_descargar_token_invalido_403():
     assert c.get("/descargar/token-que-no-existe").status_code == 403
 
 
+def test_el_comprador_baja_el_instalador_publicado_en_releases(tmp_path, monkeypatch):
+    """En un PaaS el instalador no está en el disco del servidor, y sin esto
+    el circuito terminaba en 503 justo después de cobrar.
+
+    El .exe pesa ~200 MB: no viaja en el repositorio ni entra en el disco
+    efímero de un plan free, se publica en la página de Releases. El endpoint
+    sólo sabía servir un archivo local, así que el comprador pagaba, recibía
+    su token, hacía clic en descargar y no bajaba nada — el peor momento
+    posible para fallar.
+
+    Con PLANIA_INSTALADOR_URL redirige a donde el instalador sí está, y el
+    token se sigue gastando una sola vez.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend_venta import descargas
+    from backend_venta.app import app
+
+    url = ("https://github.com/ejemplo/repo/releases/download/"
+           "ultima-compilacion/Plania.Setup.1.0.0.exe")
+    monkeypatch.setenv("PLANIA_INSTALADOR_URL", url)
+    # Apunta a un archivo que NO existe: se comprueba que la URL alcanza sola,
+    # que es exactamente la situación del servidor desplegado.
+    monkeypatch.setenv("PLANIA_INSTALADOR_PATH", str(tmp_path / "no-esta.exe"))
+
+    token = descargas.crear_token_descarga("comprador-releases@plania.uy")
+    c = TestClient(app, client=("203.0.113.231", 51100))
+
+    r = c.get(f"/descargar/{token}", follow_redirects=False)
+    assert r.status_code == 302, f"no redirigió al instalador: {r.status_code}"
+    assert r.headers["location"] == url
+
+    # De un solo uso, igual que cuando sirve un archivo local.
+    assert c.get(f"/descargar/{token}", follow_redirects=False).status_code == 403
+
+
 def test_un_servidor_sin_instalador_no_le_quema_la_descarga_al_comprador(tmp_path):
     """El token de descarga es de un solo uso, así que el orden importa.
 
@@ -3000,6 +3036,35 @@ def test_el_panel_del_dueno_no_se_publica_en_el_repo_publico():
         "release-owner.yml tiene que comparar el destino contra el repositorio "
         "actual en tiempo de ejecución: el default correcto no sirve de nada "
         "si alguien escribe otra cosa al lanzarlo a mano")
+
+
+def test_el_servidor_de_licencias_se_puede_configurar_desde_el_programa():
+    """Sin esto, NADIE puede activar una licencia — ni un cliente que pagó.
+
+    `licencia.activar_licencia()` consulta `GET {BACKEND_URL}/licencias/estado`
+    y ese valor sale de `PLANIA_BACKEND_URL` o de `config.leer_extra`. Estuvo
+    sólo como variable de entorno, y `BACKEND_URL` no estaba en `CLAVES`: la
+    pantalla Configuración no lo ofrecía, así que quien instalaba el .exe se
+    quedaba con la demo vencida y un token que no había forma de activar.
+
+    Se controla que esté en `CLAVES` —que es lo que dibuja las dos pantallas
+    de Configuración, la de Streamlit y la de la ventana— y que no se muestre
+    enmascarado, porque una URL escondida detrás de "htt…com" no deja ver lo
+    único que hace falta mirar cuando una activación falla: a dónde apunta.
+    """
+    from plania import config as pconfig
+    from plania import api
+
+    assert "BACKEND_URL" in pconfig.CLAVES, (
+        "BACKEND_URL no está en CLAVES: la pantalla Configuración no lo "
+        "ofrece y no hay forma de activar una licencia desde el programa "
+        "instalado")
+
+    assert not api._es_sensible("BACKEND_URL"), (
+        "BACKEND_URL se está tratando como secreto; es una URL pública y "
+        "esconderla sólo impide verificar a dónde apunta")
+    for credencial in ("ANTHROPIC_API_KEY", "MP_ACCESS_TOKEN", "SMTP_PASSWORD"):
+        assert api._es_sensible(credencial), f"{credencial} tiene que ocultarse"
 
 
 def test_el_producto_no_usa_emojis_decorativos():

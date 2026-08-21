@@ -584,6 +584,16 @@ def checkout(c: Checkout) -> dict:
 
 
 @app.get("/config")
+def _es_sensible(clave: str) -> bool:
+    """¿El valor de esta clave hay que ocultarlo en pantalla?
+
+    Las credenciales sí; una URL de servidor no. Se decide por el nombre, que
+    es la convención que ya usaba `CLAVES`: las credenciales terminan en KEY,
+    TOKEN o PASSWORD.
+    """
+    return any(x in clave for x in ("KEY", "TOKEN", "PASSWORD"))
+
+
 def leer_config() -> dict:
     """Las claves configurables y si están puestas — nunca su valor.
 
@@ -597,8 +607,14 @@ def leer_config() -> dict:
         "claves": [
             {"clave": clave, "descripcion": desc,
              "configurada": bool(cfg.get(clave)),
-             "enmascarado": pconfig.enmascarar(cfg.get(clave, "")) if cfg.get(clave) else "",
-             "sensible": any(x in clave for x in ("KEY", "TOKEN", "PASSWORD"))}
+             # Enmascarar lo que no es secreto sólo confunde: una URL de
+             # servidor mostrada como "htt…com" no le dice a nadie si apunta
+             # a donde tiene que apuntar, que es justo lo que se necesita
+             # mirar cuando una activación falla.
+             "enmascarado": (pconfig.enmascarar(cfg.get(clave, ""))
+                             if cfg.get(clave) and _es_sensible(clave)
+                             else cfg.get(clave, "")),
+             "sensible": _es_sensible(clave)}
             for clave, desc in pconfig.CLAVES.items()
         ],
     }
