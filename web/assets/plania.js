@@ -209,4 +209,36 @@
       msg.textContent = t.contOk;
     });
   }
+
+  // -------------------------------------------------------------------------
+  // 5. Despertar el backend mientras el visitante lee
+  // -------------------------------------------------------------------------
+  // El plan gratuito de Render duerme el servicio a los 15 minutos sin
+  // tráfico, y despertarlo tarda cerca de un minuto. Ese minuto sólo duele en
+  // un lugar: cuando alguien hace clic en "Pagar" y se queda mirando una
+  // pantalla quieta. Para activar una licencia se espera una vez, y el webhook
+  // de MercadoPago reintenta solo.
+  //
+  // La alternativa habitual —un cron que pinguea cada 14 minutos— mantiene el
+  // servicio despierto 730 horas al mes contra un presupuesto de 750 POR
+  // WORKSPACE: deja 20 horas de margen y se lleva puesto cualquier segundo
+  // servicio gratuito que exista. Acá se hace al revés: se lo despierta cuando
+  // hay alguien mirando, que es cuando puede llegar a hacer falta. Sin
+  // visitantes duerme, y no se gasta cuota.
+  //
+  // `keepalive` para que el pedido sobreviva si la persona navega enseguida, y
+  // el error se traga a propósito: es una optimización, no una función. Si
+  // falla, lo único que pasa es que el primer clic tarda lo de siempre.
+  if (BACKEND) {
+    var despertar = function () {
+      try {
+        fetch(BACKEND + "/salud", { method: "GET", keepalive: true }).catch(function () {});
+      } catch (e) { /* navegador viejo sin fetch: no pasa nada */ }
+    };
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(despertar, { timeout: 3000 });
+    } else {
+      window.setTimeout(despertar, 1200);
+    }
+  }
 })();
