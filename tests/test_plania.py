@@ -752,7 +752,8 @@ def test_los_requisitos_del_backend_cubren_lo_que_el_backend_importa():
     estandar_o_propio = {"os", "sys", "json", "re", "time", "secrets", "sqlite3",
                          "hashlib", "getpass", "shutil", "contextlib", "datetime",
                          "typing", "__future__", "backend_venta", "plania", "keyring",
-                         "logging", "tempfile", "smtplib", "email"}
+                         "logging", "tempfile", "smtplib", "email", "ssl",
+                         "threading"}
 
     faltan = set()
     for ruta in fuentes:
@@ -5824,6 +5825,22 @@ def test_la_interfaz_de_escritorio_no_calcula_numeros_por_su_cuenta():
 # ---------------------------------------------------------------------------
 # Avisos por correo al dueño
 # ---------------------------------------------------------------------------
+def _esperar_avisos(timeout=5.0):
+    """Espera a que terminen los envíos en curso.
+
+    Los avisos salen en un hilo para no retener el pedido que los disparó, así
+    que un test que quiera mirar el resultado tiene que esperarlos. Y hay que
+    esperarlos también ANTES de empezar otro test: un hilo que quedó corriendo
+    escribe en el buzón del test siguiente, que es el que esté parcheado en
+    ese momento.
+    """
+    import threading
+
+    for h in threading.enumerate():
+        if h.name == "plania-aviso":
+            h.join(timeout)
+
+
 def _correo_de_prueba(monkeypatch, romper=False):
     """Deja el SMTP configurado y devuelve la lista de mails que se enviaron.
 
@@ -5831,6 +5848,8 @@ def _correo_de_prueba(monkeypatch, romper=False):
     porque ahí es donde un aviso mal hecho se lleva puesta una venta.
     """
     from backend_venta import avisos
+
+    _esperar_avisos()
 
     for clave, valor in (("SMTP_HOST", "smtp.prueba.uy"),
                          ("SMTP_PORT", "587"),
@@ -5853,8 +5872,10 @@ def _correo_de_prueba(monkeypatch, romper=False):
         def __exit__(self, *_):
             return False
 
-        def starttls(self):
-            pass
+        def starttls(self, context=None):
+            # Con la misma firma que el real: sin `context` el certificado del
+            # servidor no se valida, y este doble tiene que poder notarlo.
+            assert context is not None, "starttls sin contexto TLS"
 
         def login(self, usuario, clave):
             pass
@@ -5864,6 +5885,7 @@ def _correo_de_prueba(monkeypatch, romper=False):
 
     monkeypatch.setattr(avisos.smtplib, "SMTP", SmtpFalso)
     avisos._ultimos.clear()
+    avisos._enviados.clear()
     return enviados
 
 
@@ -5880,7 +5902,7 @@ def test_un_cliente_indeciso_no_manda_cinco_mails(monkeypatch):
     enviados = _correo_de_prueba(monkeypatch)
 
     for _ in range(5):
-        avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "pro", 590)
+        avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "pro", 590, bloqueante=True)
     assert len(enviados) == 1, \
         f"un solo cliente generó {len(enviados)} mails de intención"
 
@@ -5890,11 +5912,11 @@ def test_un_cliente_indeciso_no_manda_cinco_mails(monkeypatch):
     assert "indeciso@empresa.uy" in enviados[0].get_content()
 
     # Mismo interesado, otro plan: es información nueva.
-    avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "enterprise", 1490)
+    avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "enterprise", 1490, bloqueante=True)
     assert len(enviados) == 2, "cambiar de plan no avisó"
 
     # Otra persona: no se puede agrupar con la anterior.
-    avisos.aviso_intencion_de_compra("otro@empresa.uy", "pro", 590)
+    avisos.aviso_intencion_de_compra("otro@empresa.uy", "pro", 590, bloqueante=True)
     assert len(enviados) == 3, "agrupó a dos interesados distintos en uno"
 
     # Y pasada la ventana vuelve a avisar: es una intención nueva, no la
@@ -5902,7 +5924,7 @@ def test_un_cliente_indeciso_no_manda_cinco_mails(monkeypatch):
     from datetime import timedelta
     for clave in list(avisos._ultimos):
         avisos._ultimos[clave] -= avisos.VENTANA_REPETIDO + timedelta(minutes=1)
-    avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "pro", 590)
+    avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "pro", 590, bloqueante=True)
     assert len(enviados) == 4, "pasada la ventana siguió callado"
 
 
@@ -5916,7 +5938,7 @@ def test_un_correo_roto_no_puede_impedir_una_compra(monkeypatch):
     from backend_venta import avisos
 
     _correo_de_prueba(monkeypatch, romper=True)
-    assert avisos.aviso_venta("cliente@empresa.uy", "pro") is False
+    assert avisos.aviso_venta("cliente@empresa.uy", "pro", bloqueante=True) is False
 
     # Y tampoco si lo que falla es leer la configuración: `_configurado`
     # consulta el keyring del sistema, que puede no existir en el servidor.
@@ -5925,7 +5947,8 @@ def test_un_correo_roto_no_puede_impedir_una_compra(monkeypatch):
 
     monkeypatch.setattr(avisos, "_configurado", explota)
     avisos._ultimos.clear()
-    assert avisos.aviso_venta("cliente@empresa.uy", "pro") is False
+    avisos._enviados.clear()
+    assert avisos.aviso_venta("cliente@empresa.uy", "pro", bloqueante=True) is False
 
 
 def test_sin_smtp_configurado_el_aviso_se_calla_y_sigue(monkeypatch):
@@ -5935,11 +5958,12 @@ def test_sin_smtp_configurado_el_aviso_se_calla_y_sigue(monkeypatch):
     for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD",
                   "SMTP_FROM", "PLANIA_AVISOS_A"):
         monkeypatch.delenv(clave, raising=False)
-    monkeypatch.setattr(avisos.pconfig, "leer_extra", lambda c, d=None: d)
     avisos._ultimos.clear()
+    avisos._enviados.clear()
 
     assert avisos._configurado() is None
-    assert avisos.aviso_pedido_de_demo("x@y.uy", "X", "Y", "Uruguay") is False
+    assert avisos.aviso_pedido_de_demo("x@y.uy", "X", "Y", "Uruguay",
+                                       bloqueante=True) is False
 
 
 def test_una_venta_avisa_una_sola_vez_aunque_el_webhook_reintente(monkeypatch):
@@ -5962,6 +5986,7 @@ def test_una_venta_avisa_una_sola_vez_aunque_el_webhook_reintente(monkeypatch):
 
     primera = _emitir_por_pago(payment_id, pago)
     assert primera["licencia"], "no emitió la licencia"
+    _esperar_avisos()
     assert len(enviados) == 1, "la venta no avisó"
     assert "VENTA" in enviados[0]["Subject"]
 
@@ -5972,6 +5997,7 @@ def test_una_venta_avisa_una_sola_vez_aunque_el_webhook_reintente(monkeypatch):
     segunda = _emitir_por_pago(payment_id, pago)
     assert segunda["licencia"] == primera["licencia"], \
         "un reintento emitió una licencia distinta"
+    _esperar_avisos()
     assert len(enviados) == 1, \
         f"una sola venta mandó {len(enviados)} mails de venta"
 
@@ -6006,7 +6032,7 @@ def test_el_aviso_no_deja_la_clave_del_correo_en_el_log(monkeypatch, caplog):
 
     _correo_de_prueba(monkeypatch, romper=True)
     with caplog.at_level(logging.DEBUG):
-        avisos.aviso_venta("cliente@empresa.uy", "pro")
+        avisos.aviso_venta("cliente@empresa.uy", "pro", bloqueante=True)
     assert "clave-de-aplicacion" not in caplog.text
 
 
@@ -6043,3 +6069,249 @@ def test_registrar_un_pago_dice_quien_lo_registro_de_verdad(tmp_path):
         "el reintento se creyó la primera notificación del pago"
     assert segunda["licencia"] == primera["licencia"]
     assert pagos.total(db_path=db) == 1, "el reintento duplicó el pago"
+
+
+def test_el_aviso_no_bloquea_el_pedido_que_lo_dispara(monkeypatch):
+    """`smtplib` es bloqueante y los tres llamadores son `async def` sobre un
+    único proceso de uvicorn. Esperar al SMTP ahí adentro no frena sólo a quien
+    disparó el aviso: frena a todos, incluido el webhook que le tiene que
+    contestar 200 a MercadoPago antes de que reintente.
+
+    El caso real es un SMTP con el puerto de salida filtrado —lo habitual en
+    planes gratuitos—, donde cada operación se come el timeout entero.
+    """
+    import threading
+    import time
+
+    from backend_venta import avisos
+
+    _correo_de_prueba(monkeypatch)
+    colgado = threading.Event()
+
+    class SmtpColgado:
+        def __init__(self, host, puerto, timeout=None):
+            colgado.wait(30)      # el servidor que nunca contesta
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    monkeypatch.setattr(avisos.smtplib, "SMTP", SmtpColgado)
+    try:
+        arranque = time.monotonic()
+        avisos.aviso_venta("compro@empresa.uy", "pro", "MP-1")
+        demora = time.monotonic() - arranque
+        assert demora < 1.0, \
+            f"el aviso retuvo el pedido {demora:.1f}s esperando al SMTP"
+    finally:
+        colgado.set()
+
+
+def test_un_smtp_caido_un_rato_no_se_come_el_aviso_para_siempre(monkeypatch):
+    """La marca de repetido se pone antes de enviar para que dos clics no
+    larguen dos hilos, pero si el envío falla hay que poder reintentar.
+
+    Dándola por buena sin haber enviado nada, un SMTP caído veinte segundos se
+    comía el aviso de una venta para SIEMPRE: la guarda `nuevo` de
+    `_emitir_por_pago` es de una sola vez, así que el reintento del webhook ya
+    no vuelve a llamar al aviso.
+    """
+    from backend_venta import avisos
+
+    _correo_de_prueba(monkeypatch, romper=True)
+    assert avisos.aviso_venta("compro@empresa.uy", "pro", "MP-9",
+                              bloqueante=True) is False
+    assert not avisos._ultimos, \
+        "el envío falló y la clave quedó marcada: el aviso se perdió"
+
+    # Con el servidor sano de nuevo, el mismo aviso sale.
+    enviados = _correo_de_prueba(monkeypatch)
+    assert avisos.aviso_venta("compro@empresa.uy", "pro", "MP-9",
+                              bloqueante=True) is True
+    assert len(enviados) == 1
+
+
+def test_dos_compras_del_mismo_cliente_avisan_las_dos(monkeypatch):
+    """Un distribuidor que compra una licencia por sucursal hace dos compras
+    reales del mismo plan con el mismo email de facturación.
+
+    Agrupando sólo por email y plan, la segunda venta se descartaba como si
+    fuera un reintento. Esconder una venta es peor que mandar un mail de más,
+    que es justo lo que el antirrebote dice querer evitar.
+    """
+    from backend_venta import avisos
+
+    enviados = _correo_de_prueba(monkeypatch)
+    avisos.aviso_venta("central@distribuidora.uy", "pro", "MP-111",
+                       bloqueante=True)
+    avisos.aviso_venta("central@distribuidora.uy", "pro", "MP-222",
+                       bloqueante=True)
+    assert len(enviados) == 2, "la segunda sucursal no avisó"
+
+    # Y el reintento de la MISMA compra sigue agrupado.
+    avisos.aviso_venta("central@distribuidora.uy", "pro", "MP-222",
+                       bloqueante=True)
+    assert len(enviados) == 2, "un reintento del mismo pago avisó dos veces"
+
+
+def test_un_salto_de_linea_en_el_formulario_no_mata_el_aviso(monkeypatch):
+    """Pegar la razón social desde un PDF o una firma de mail trae saltos de
+    línea en el medio, y el módulo `email` los rechaza con ValueError.
+
+    Sin sanear, el pedido quedaba guardado y el aviso no salía nunca, en
+    silencio. De paso cierra la inyección de cabeceras.
+    """
+    from backend_venta import avisos
+
+    enviados = _correo_de_prueba(monkeypatch)
+    assert avisos.aviso_pedido_de_demo(
+        "juan@acme.uy", "Juan Pérez", "Distribuidora ACME\nS.R.L.",
+        "Uruguay\nSur", bloqueante=True) is True, \
+        "un salto de línea en el formulario dejó al dueño sin aviso"
+
+    asunto = enviados[0]["Subject"]
+    assert "\n" not in asunto and "\r" not in asunto
+    assert "ACME" in asunto and "S.R.L." in asunto
+
+    # Inyección de cabeceras: no puede aparecer un destinatario nuevo.
+    avisos._ultimos.clear()
+    avisos.aviso_pedido_de_demo(
+        "otro@acme.uy", "X", "ACME\nBcc: atacante@ajeno.com", "Uruguay",
+        bloqueante=True)
+    assert enviados[1].get_all("Bcc") is None, "se coló un Bcc por el asunto"
+    assert enviados[1]["To"] == "duenio@prueba.uy"
+
+
+def test_el_aviso_valida_el_certificado_del_servidor_de_correo(monkeypatch):
+    """`starttls()` sin contexto usa `ssl._create_stdlib_context()`, que cifra
+    pero NO valida el certificado (`check_hostname=False`, `verify_mode=0`).
+
+    Quien esté en el camino de red responde el STARTTLS con un certificado
+    propio y la línea siguiente le entrega la clave de aplicación de Gmail.
+    """
+    import ssl
+
+    from backend_venta import avisos
+
+    _correo_de_prueba(monkeypatch)
+    contextos = []
+
+    class SmtpQueMiraElContexto:
+        def __init__(self, host, puerto, timeout=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def starttls(self, context=None):
+            contextos.append(context)
+
+        def login(self, usuario, clave):
+            pass
+
+        def send_message(self, mensaje):
+            pass
+
+    monkeypatch.setattr(avisos.smtplib, "SMTP", SmtpQueMiraElContexto)
+    avisos.aviso_venta("x@y.uy", "pro", "MP-tls", bloqueante=True)
+
+    assert contextos and contextos[0] is not None, \
+        "starttls sin contexto: el certificado del servidor no se valida"
+    ctx = contextos[0]
+    assert ctx.check_hostname is True
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_sin_correo_configurado_no_van_los_datos_del_prospecto_al_log(monkeypatch, caplog):
+    """Hoy nadie tiene SMTP cargado, así que ESTA es la rama que corre siempre.
+
+    El log va al panel web de Render, con otra retención y otros accesos que
+    la base. Nombre, empresa, país, email y el mensaje libre ya quedaron
+    guardados donde corresponde; no tienen por qué estar además ahí.
+    """
+    import logging
+
+    from backend_venta import avisos
+
+    for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD",
+                  "SMTP_FROM", "PLANIA_AVISOS_A"):
+        monkeypatch.delenv(clave, raising=False)
+    avisos._ultimos.clear()
+    avisos._enviados.clear()
+
+    with caplog.at_level(logging.DEBUG):
+        avisos.aviso_pedido_de_demo(
+            "juan@distribuidora.uy", "Juan Pérez", "Distribuidora del Este",
+            "Uruguay", "Tenemos Zureo y 12 camiones.", bloqueante=True)
+
+    for dato in ("juan@distribuidora.uy", "Juan Pérez",
+                 "Distribuidora del Este", "Zureo"):
+        assert dato not in caplog.text, \
+            f"los datos del prospecto quedaron en el log de Render: {dato!r}"
+
+
+def test_el_aviso_no_lee_el_correo_corporativo_del_cliente(monkeypatch):
+    """Las claves SMTP_* de `plania/config.py` son OTRA cosa: las edita el
+    cliente desde la pestaña Configuración y describen su correo corporativo
+    ("ventas@tuempresa.com").
+
+    Cayendo a esa configuración, en una máquina donde corran la app y el
+    backend juntos —los dos comandos están documentados— los avisos de venta
+    de Plania saldrían por el servidor de correo del distribuidor, con el
+    email del prospecto adentro.
+    """
+    from backend_venta import avisos
+
+    for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD",
+                  "SMTP_FROM", "PLANIA_AVISOS_A"):
+        monkeypatch.delenv(clave, raising=False)
+
+    monkeypatch.setattr(
+        avisos, "_configurado",
+        lambda: (_ for _ in ()).throw(AssertionError("no debería llamarse")),
+        raising=False)
+    # Con el entorno vacío no hay configuración posible: si el módulo mirara
+    # el almacén del cliente, acá encontraría credenciales.
+    monkeypatch.undo()
+    for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"):
+        monkeypatch.delenv(clave, raising=False)
+    pconfig.guardar_extra("SMTP_HOST", "smtp.sudistribuidora.com")
+    pconfig.guardar_extra("SMTP_USER", "ventas@sudistribuidora.com")
+    pconfig.guardar_extra("SMTP_PASSWORD", "clave-del-cliente")
+    try:
+        assert avisos._configurado() is None, \
+            "el backend de venta tomó las credenciales de correo del cliente"
+    finally:
+        for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"):
+            pconfig.guardar_extra(clave, "")
+
+    # Y el módulo no importa la configuración del cliente en absoluto.
+    fuente = open(os.path.join(RAIZ, "backend_venta", "avisos.py"),
+                  encoding="utf-8").read()
+    importa = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", fuente, re.MULTILINE)
+    assert not [m for m in importa if m.split(".")[0] == "plania"], \
+        f"avisos.py volvió a depender de la configuración del cliente: {importa}"
+
+
+def test_un_script_contra_checkout_no_quema_la_cuota_diaria_de_gmail(monkeypatch):
+    """El antirrebote agrupa por clave, así que no frena a quien varía el dato:
+    cada email distinto es una clave distinta.
+
+    Sin tope, un script contra `/checkout` quema las 500 entregas diarias de
+    una app password en veinte minutos, y el aviso que se pierde después es el
+    de la venta de verdad.
+    """
+    from backend_venta import avisos
+
+    enviados = _correo_de_prueba(monkeypatch)
+    for i in range(avisos.LIMITE_POR_HORA + 25):
+        avisos.aviso_intencion_de_compra(f"bot{i}@ajeno.com", "pro", 590,
+                                         bloqueante=True)
+
+    assert len(enviados) == avisos.LIMITE_POR_HORA, \
+        f"se mandaron {len(enviados)} mails: el tope por hora no frenó nada"

@@ -375,7 +375,7 @@ def _emitir_por_pago(payment_id: str, pago: dict) -> dict:
         # hasta recibir un 200 y el comprador además pide su licencia desde la
         # página de gracias: sin esta guarda, una sola venta te manda varios
         # mails y el aviso deja de significar algo.
-        avisos.aviso_venta(cliente_id, plan)
+        avisos.aviso_venta(cliente_id, plan, str(payment_id))
     return guardado
 
 
