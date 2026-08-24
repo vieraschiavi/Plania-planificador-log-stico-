@@ -303,7 +303,12 @@ def test_pagos_registrar_no_duplica_licencia_en_reintento_de_webhook(tmp_path):
     segundo = pagos.registrar("pago-1", "cliente@plania.uy", "pro",
                               "licencia-DISTINTA", "token-DISTINTO", db_path=db)
 
-    assert primero == segundo
+    # Lo guardado es lo mismo las dos veces. `nuevo` es la única diferencia y
+    # es a propósito: dice cuál de las dos llamadas registró el pago, para que
+    # lo que cuelga de eso (auditoría, aviso al dueño) pase una vez por venta.
+    guardado = lambda d: {k: v for k, v in d.items() if k != "nuevo"}
+    assert guardado(primero) == guardado(segundo)
+    assert (primero["nuevo"], segundo["nuevo"]) == (True, False)
     assert segundo["licencia"] == "licencia-original"
     assert segundo["token_descarga"] == "token-original"
     assert pagos.total(db_path=db) == 1
@@ -747,7 +752,7 @@ def test_los_requisitos_del_backend_cubren_lo_que_el_backend_importa():
     estandar_o_propio = {"os", "sys", "json", "re", "time", "secrets", "sqlite3",
                          "hashlib", "getpass", "shutil", "contextlib", "datetime",
                          "typing", "__future__", "backend_venta", "plania", "keyring",
-                         "logging", "tempfile"}
+                         "logging", "tempfile", "smtplib", "email"}
 
     faltan = set()
     for ruta in fuentes:
@@ -5814,3 +5819,227 @@ def test_la_interfaz_de_escritorio_no_calcula_numeros_por_su_cuenta():
 
     assert not sospechosas, \
         f"la interfaz parece calcular en vez de mostrar: {sospechosas[:5]}"
+
+
+# ---------------------------------------------------------------------------
+# Avisos por correo al dueño
+# ---------------------------------------------------------------------------
+def _correo_de_prueba(monkeypatch, romper=False):
+    """Deja el SMTP configurado y devuelve la lista de mails que se enviaron.
+
+    `romper=True` simula el servidor caído: es el caso que de verdad importa,
+    porque ahí es donde un aviso mal hecho se lleva puesta una venta.
+    """
+    from backend_venta import avisos
+
+    for clave, valor in (("SMTP_HOST", "smtp.prueba.uy"),
+                         ("SMTP_PORT", "587"),
+                         ("SMTP_USER", "duenio@prueba.uy"),
+                         ("SMTP_PASSWORD", "clave-de-aplicacion"),
+                         ("SMTP_FROM", "duenio@prueba.uy"),
+                         ("PLANIA_AVISOS_A", "duenio@prueba.uy")):
+        monkeypatch.setenv(clave, valor)
+
+    enviados = []
+
+    class SmtpFalso:
+        def __init__(self, host, puerto, timeout=None):
+            if romper:
+                raise OSError("conexión rechazada")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def starttls(self):
+            pass
+
+        def login(self, usuario, clave):
+            pass
+
+        def send_message(self, mensaje):
+            enviados.append(mensaje)
+
+    monkeypatch.setattr(avisos.smtplib, "SMTP", SmtpFalso)
+    avisos._ultimos.clear()
+    return enviados
+
+
+def test_un_cliente_indeciso_no_manda_cinco_mails(monkeypatch):
+    """Cinco clics en comprar son UNA intención de compra.
+
+    Sin la ventana de repetidos el aviso se vuelve ruido en una semana, y un
+    aviso que no se lee es lo mismo que no tenerlo. Lo que sí tiene que
+    distinguir es a dos personas distintas, o a la misma cambiando de plan:
+    agrupar de más sería peor que no agrupar, porque escondería una venta.
+    """
+    from backend_venta import avisos
+
+    enviados = _correo_de_prueba(monkeypatch)
+
+    for _ in range(5):
+        avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "pro", 590)
+    assert len(enviados) == 1, \
+        f"un solo cliente generó {len(enviados)} mails de intención"
+
+    # El aviso tiene que servir para actuar: plan y monto, en el asunto.
+    assert "pro" in enviados[0]["Subject"].lower()
+    assert "590" in enviados[0]["Subject"]
+    assert "indeciso@empresa.uy" in enviados[0].get_content()
+
+    # Mismo interesado, otro plan: es información nueva.
+    avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "enterprise", 1490)
+    assert len(enviados) == 2, "cambiar de plan no avisó"
+
+    # Otra persona: no se puede agrupar con la anterior.
+    avisos.aviso_intencion_de_compra("otro@empresa.uy", "pro", 590)
+    assert len(enviados) == 3, "agrupó a dos interesados distintos en uno"
+
+    # Y pasada la ventana vuelve a avisar: es una intención nueva, no la
+    # misma. Se envejecen las marcas en vez de esperar media hora.
+    from datetime import timedelta
+    for clave in list(avisos._ultimos):
+        avisos._ultimos[clave] -= avisos.VENTANA_REPETIDO + timedelta(minutes=1)
+    avisos.aviso_intencion_de_compra("indeciso@empresa.uy", "pro", 590)
+    assert len(enviados) == 4, "pasada la ventana siguió callado"
+
+
+def test_un_correo_roto_no_puede_impedir_una_compra(monkeypatch):
+    """El aviso es para el dueño, no para el comprador.
+
+    Si el SMTP está caído, mal configurado o lento, el que paga tiene que
+    poder comprar igual. Un `raise` acá significa un cliente que pagó y se
+    quedó sin licencia por un problema del correo del dueño.
+    """
+    from backend_venta import avisos
+
+    _correo_de_prueba(monkeypatch, romper=True)
+    assert avisos.aviso_venta("cliente@empresa.uy", "pro") is False
+
+    # Y tampoco si lo que falla es leer la configuración: `_configurado`
+    # consulta el keyring del sistema, que puede no existir en el servidor.
+    def explota():
+        raise RuntimeError("keyring no disponible")
+
+    monkeypatch.setattr(avisos, "_configurado", explota)
+    avisos._ultimos.clear()
+    assert avisos.aviso_venta("cliente@empresa.uy", "pro") is False
+
+
+def test_sin_smtp_configurado_el_aviso_se_calla_y_sigue(monkeypatch):
+    """Una instalación sin correo configurado es lo normal, no un error."""
+    from backend_venta import avisos
+
+    for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD",
+                  "SMTP_FROM", "PLANIA_AVISOS_A"):
+        monkeypatch.delenv(clave, raising=False)
+    monkeypatch.setattr(avisos.pconfig, "leer_extra", lambda c, d=None: d)
+    avisos._ultimos.clear()
+
+    assert avisos._configurado() is None
+    assert avisos.aviso_pedido_de_demo("x@y.uy", "X", "Y", "Uruguay") is False
+
+
+def test_una_venta_avisa_una_sola_vez_aunque_el_webhook_reintente(monkeypatch):
+    """MercadoPago reintenta el webhook y el comprador además pide su licencia
+    desde la página de gracias. Los dos caminos pasan por `_emitir_por_pago`.
+
+    Sin la guarda, una sola venta manda varios mails y el aviso deja de
+    significar "vendiste": pasa a significar "algo pasó". Se comprueba contra
+    la función real, no contra el aviso suelto, porque el que decide si es la
+    primera vez es el registro del pago, no el correo.
+    """
+    from backend_venta import avisos
+    from backend_venta.app import _emitir_por_pago
+
+    enviados = _correo_de_prueba(monkeypatch)
+
+    payment_id = f"MP-{uuid.uuid4().hex[:12]}"
+    pago = {"status": "approved",
+            "metadata": {"plan": "pro", "email": "compro@distribuidora.uy"}}
+
+    primera = _emitir_por_pago(payment_id, pago)
+    assert primera["licencia"], "no emitió la licencia"
+    assert len(enviados) == 1, "la venta no avisó"
+    assert "VENTA" in enviados[0]["Subject"]
+
+    # El webhook reintenta y el comprador pregunta: misma licencia, sin
+    # mail nuevo. Se vacía la ventana de repetidos a propósito, para que lo
+    # que frene el segundo mail sea el registro del pago y no el antirrebote.
+    avisos._ultimos.clear()
+    segunda = _emitir_por_pago(payment_id, pago)
+    assert segunda["licencia"] == primera["licencia"], \
+        "un reintento emitió una licencia distinta"
+    assert len(enviados) == 1, \
+        f"una sola venta mandó {len(enviados)} mails de venta"
+
+
+def test_la_licencia_sale_aunque_el_aviso_falle(monkeypatch):
+    """El orden importa: primero se emite, después se avisa.
+
+    Si el correo se cuelga o revienta, el comprador ya tiene su licencia
+    guardada. Es la contracara del test de arriba, mirada desde la venta.
+    """
+    from backend_venta import pagos
+    from backend_venta.app import _emitir_por_pago
+
+    _correo_de_prueba(monkeypatch, romper=True)
+
+    payment_id = f"MP-{uuid.uuid4().hex[:12]}"
+    emitido = _emitir_por_pago(
+        payment_id, {"status": "approved",
+                     "metadata": {"plan": "starter",
+                                  "email": "paga@almacen.uy"}})
+    assert emitido["licencia"], "el correo roto se llevó puesta la licencia"
+    assert pagos.buscar(payment_id)["licencia"] == emitido["licencia"], \
+        "la venta no quedó registrada"
+
+
+def test_el_aviso_no_deja_la_clave_del_correo_en_el_log(monkeypatch, caplog):
+    """El fallo del SMTP se registra con traza, y la traza no puede llevarse
+    la contraseña de aplicación al log de Render, que es un panel web."""
+    import logging
+
+    from backend_venta import avisos
+
+    _correo_de_prueba(monkeypatch, romper=True)
+    with caplog.at_level(logging.DEBUG):
+        avisos.aviso_venta("cliente@empresa.uy", "pro")
+    assert "clave-de-aplicacion" not in caplog.text
+
+
+def test_registrar_un_pago_dice_quien_lo_registro_de_verdad(tmp_path):
+    """"¿Es la primera vez?" lo tiene que contestar la base, no una comparación.
+
+    El código comparaba la licencia recién emitida contra la guardada para
+    saber si el pago era nuevo. Falla justo cuando importa: el JWT se firma
+    sobre `iat` en SEGUNDOS, así que dos llamadas del mismo pago dentro del
+    mismo segundo —un reintento del webhook de MercadoPago, que llega
+    enseguida— generan el mismo token byte a byte y las dos se creen la
+    primera. Lo que cuelga de esa respuesta (el asiento en la auditoría, el
+    aviso de venta) se duplicaba.
+    """
+    from backend_venta import licencias as lic
+    from backend_venta import pagos
+
+    db = str(tmp_path / "pagos.db")
+    payment_id = f"MP-{uuid.uuid4().hex[:12]}"
+
+    # El escenario exacto que rompía: la MISMA licencia, emitida dos veces
+    # dentro del mismo segundo, para el mismo pago.
+    token = lic.emitir_licencia("compro@empresa.uy", "pro")
+    assert token == lic.emitir_licencia("compro@empresa.uy", "pro"), \
+        "el JWT dejó de ser determinista; este test ya no prueba el caso"
+
+    primera = pagos.registrar(payment_id, "compro@empresa.uy", "pro",
+                              token, "token-descarga", db_path=db)
+    assert primera["nuevo"] is True, "no reconoció el alta como nueva"
+
+    segunda = pagos.registrar(payment_id, "compro@empresa.uy", "pro",
+                              token, "token-descarga", db_path=db)
+    assert segunda["nuevo"] is False, \
+        "el reintento se creyó la primera notificación del pago"
+    assert segunda["licencia"] == primera["licencia"]
+    assert pagos.total(db_path=db) == 1, "el reintento duplicó el pago"
