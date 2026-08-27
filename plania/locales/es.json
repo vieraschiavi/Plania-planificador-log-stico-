@@ -289,5 +289,21 @@
   "copiloto.ventas_titulo": "Top ventas",
   "copiloto.ventas_resumen": "Últimos 30 días: ${venta} de venta, margen {margen}% (${margen_monto}), {n} clientes activos. El más vendido: {nombre} (${venta_top}).",
   "copiloto.fallback_titulo": "Resumen ejecutivo",
-  "copiloto.fallback_resumen": "Puedo responder sobre stock, precios, márgenes, ofertas, reposición, zonas, tipos de negocio y clientes. Mientras tanto, el resumen de hoy: ${capital} inmovilizados en sobrestock, ${riesgo} de venta en riesgo por quiebres, ${extra}/mes de margen recuperable con ajustes de precio. Preguntame, por ejemplo: «¿qué ofertas armo esta semana?», «¿qué repongo ya?», «¿qué zona está floja?»."
+  "copiloto.fallback_resumen": "Puedo responder sobre stock, precios, márgenes, ofertas, reposición, zonas, tipos de negocio y clientes. Mientras tanto, el resumen de hoy: ${capital} inmovilizados en sobrestock, ${riesgo} de venta en riesgo por quiebres, ${extra}/mes de margen recuperable con ajustes de precio. Preguntame, por ejemplo: «¿qué ofertas armo esta semana?», «¿qué repongo ya?», «¿qué zona está floja?».",
+  "exportes.titulo_ofertas": "Ofertas sugeridas por sobrestock",
+  "exportes.texto_ofertas": "Productos con stock excedente: el descuento sugerido apura la rotación sin perforar el piso de costo+8%.",
+  "exportes.titulo_reposicion": "Reposición urgente",
+  "exportes.texto_reposicion": "Productos cuyo stock no llega a cubrir el plazo del proveedor: cantidad sugerida para 30 días de venta.",
+  "exportes.titulo_precios": "Ajustes de precio",
+  "exportes.texto_precios": "Productos con margen por debajo de su categoría; la suba sugerida alinea el margen sin salirse de mercado.",
+  "exportes.titulo_zonas": "Oportunidades por zona",
+  "exportes.texto_zonas": "Venta cruzada detectada: categorías que negocios del mismo giro compran en otras zonas y acá todavía no.",
+  "exportes.titulo_recupero": "Clientes a recuperar",
+  "exportes.texto_recupero": "Clientes con historial de compra que dejaron de pedir, ordenados por lo que valían.",
+  "exportes.encabezado_generado": "Generado el {fecha} sobre los datos conectados del negocio",
+  "exportes.pie_marca": "Plania · planificación logística y comercial inteligente · www.plania.uy",
+  "exportes.pie_marca_word": "Plania · planificación logística y comercial inteligente",
+  "exportes.hoja_marca": "Plania · {subtitulo} · {fecha}",
+  "exportes.resumen_titulo": "Resumen ejecutivo",
+  "exportes.resumen_texto": "Capital liberable por ofertas: ${capital_liberable} · Venta en riesgo por quiebres: ${venta_en_riesgo}/mes · Margen extra por precios: ${margen_extra_mensual}/mes · Potencial por zonas: ${venta_potencial_zonas} · Venta recuperable: ${venta_recuperable}."
 }

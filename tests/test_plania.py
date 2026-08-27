@@ -6831,3 +6831,152 @@ def test_una_pregunta_sobre_compradores_no_cae_en_reposicion_en_ingles():
         r = copiloto.responder(pregunta, datos, idioma="en")
         assert r["titulo"] == "Suggested restocking", \
             f"{pregunta!r} dejó de activar reposición: título {r['titulo']!r}"
+
+
+# ---------------------------------------------------------------------------
+# i18n Fase 5 — plania/exportes.py: PDF/Word/Excel en el idioma elegido
+# ---------------------------------------------------------------------------
+def _texto_de_pdf(pdf_bytes: bytes) -> bytes:
+    """Extrae el texto crudo de un PDF de fpdf2, descomprimiendo los content
+    streams (`FlateDecode`). No hay parser de PDF entre las dependencias —
+    agregar uno sólo para este test no se justifica (CLAUDE.md) cuando
+    alcanza con deshacer la compresión a mano: fpdf2 comprime cada página
+    con zlib, así que buscar el texto en los bytes crudos del archivo
+    siempre da falso — hay que descomprimir primero."""
+    import re
+    import zlib
+
+    texto = b""
+    for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes, re.S):
+        try:
+            texto += zlib.decompress(m.group(1))
+        except zlib.error:
+            pass
+    return texto
+
+
+def test_titulo_seccion_da_las_cinco_secciones_en_los_tres_idiomas():
+    """No se exige que los tres idiomas den textos distintos entre sí: "zonas"
+    es "Oportunidades por zona" tanto en español como en portugués —mismas
+    palabras, cognados—, y eso es una traducción correcta, no un olvido. Lo
+    que sí tiene que ser cierto siempre es que el inglés difiera (no hay
+    cognados de esa frase completa) y que ningún idioma quede vacío."""
+    from plania import exportes, i18n
+
+    for clave in exportes._CLAVES_SECCION:
+        por_idioma = {}
+        for idioma in i18n.IDIOMAS:
+            titulo, texto = exportes.titulo_seccion(clave, idioma)
+            assert titulo and texto, f"{clave}/{idioma} vino vacío"
+            por_idioma[idioma] = titulo
+        assert por_idioma["en"] not in (por_idioma["es"], por_idioma["pt"]), \
+            f"{clave}: el inglés quedó igual al español o al portugués: {por_idioma}"
+
+
+def test_titulos_sigue_siendo_compatible_con_la_api_del_dueno():
+    """`plania/api.py` (la ventana Electron/React, todavía sin traducir —
+    es su propio cambio, aparte de éste) lee `exportes.TITULOS` como un
+    diccionario plano en español. No se le puede cambiar la forma sin
+    romper ese consumidor."""
+    from plania import exportes
+
+    assert set(exportes.TITULOS) == set(exportes._CLAVES_SECCION)
+    for clave, (titulo, texto) in exportes.TITULOS.items():
+        assert (titulo, texto) == exportes.titulo_seccion(clave, "es")
+
+
+def test_los_tres_formatos_de_exporte_salen_en_el_idioma_pedido():
+    """PDF, Word y Excel del mismo paquete de sugerencias, en los tres
+    idiomas — comprueba el documento real, no la plantilla: el PDF se
+    descomprime para leer el texto de verdad, el Word y el Excel se
+    reabren con las mismas librerías que los generan."""
+    import io
+
+    from docx import Document
+    from openpyxl import load_workbook
+
+    from plania import conectores, exportes, i18n, sugerencias
+
+    d = conectores.cargar_datos()
+    esperado_encabezado = {}
+    for idioma in i18n.IDIOMAS:
+        paq = sugerencias.generar_todas(d, idioma)
+        secciones = exportes.secciones_desde_paquete(paq, idioma=idioma)
+
+        pdf_texto = _texto_de_pdf(exportes.a_pdf("Informe", secciones, idioma))
+        # latin-1 (no el utf-8 por defecto de `.encode()`): ver el comentario
+        # de más abajo, junto al chequeo del pie de página.
+        encabezado = i18n.t("exportes.encabezado_generado", idioma,
+                            fecha="01/01/2026").split(" 01/01/2026")[0].encode("latin-1")
+        assert encabezado in pdf_texto, \
+            f"[{idioma}] el PDF no tiene el encabezado en su idioma"
+        # latin-1 y no el utf-8 por defecto de `.encode()`: `_lat()` en
+        # exportes.py vuelca el PDF en latin-1 (el único que entienden las
+        # fuentes core de fpdf2), así que "·" es un byte (\xb7), no dos.
+        pie = i18n.t("exportes.pie_marca", idioma).encode("latin-1")
+        assert pie in pdf_texto, f"[{idioma}] el PDF no tiene el pie de marca en su idioma"
+        esperado_encabezado[idioma] = encabezado
+
+        doc = Document(io.BytesIO(exportes.a_word("Informe", secciones, idioma)))
+        texto_word = "\n".join(p.text for p in doc.paragraphs)
+        assert i18n.t("exportes.pie_marca_word", idioma) in texto_word, \
+            f"[{idioma}] el Word no tiene el pie de marca en su idioma"
+
+        wb = load_workbook(io.BytesIO(exportes.a_excel(secciones, idioma)))
+        primera_hoja = wb[wb.sheetnames[0]]
+        marca_celda = str(primera_hoja["A1"].value or "")
+        assert "Plania" in marca_celda, f"[{idioma}] la hoja de Excel no tiene la marca esperada"
+
+    # Y que un idioma no se cuele en otro: el encabezado de inglés no puede
+    # aparecer en el PDF en portugués, y viceversa.
+    for idioma in i18n.IDIOMAS:
+        paq = sugerencias.generar_todas(d, idioma)
+        secciones = exportes.secciones_desde_paquete(paq, idioma=idioma)
+        pdf_texto = _texto_de_pdf(exportes.a_pdf("Informe", secciones, idioma))
+        for otro, encabezado_otro in esperado_encabezado.items():
+            if otro == idioma:
+                continue
+            assert encabezado_otro not in pdf_texto, \
+                f"el PDF en {idioma} tiene el encabezado de {otro}"
+
+
+def test_las_celdas_de_los_exportes_usan_el_separador_de_cada_idioma():
+    """Antes `_tabla_pdf`/`a_word` armaban cada celda con `f"{val:,.2f}"` —
+    el formato de Estados Unidos de Python, sin importar el idioma del
+    documento. Es el mismo bug que ya se había corregido en las tarjetas
+    de `app.py` y en las respuestas del copiloto, sólo que acá seguía sin
+    tocar."""
+    import io
+
+    from docx import Document
+
+    from plania import exportes
+
+    df = __import__("pandas").DataFrame({"col": [1430318.5]})
+    secciones = [("Sección", "texto", df)]
+
+    doc_es = Document(io.BytesIO(exportes.a_word("Informe", secciones, "es")))
+    celdas_es = [c.text for t in doc_es.tables for r in t.rows for c in r.cells]
+    assert "1.430.318,50" in celdas_es, f"celda en español sin el separador de acá: {celdas_es}"
+
+    doc_en = Document(io.BytesIO(exportes.a_word("Report", secciones, "en")))
+    celdas_en = [c.text for t in doc_en.tables for r in t.rows for c in r.cells]
+    assert "1,430,318.50" in celdas_en, f"celda en inglés con el separador de Uruguay: {celdas_en}"
+
+    pdf_pt = _texto_de_pdf(exportes.a_pdf("Relatório", secciones, "pt"))
+    assert "1.430.318,50".encode() in pdf_pt, "celda en portugués sin el separador esperado"
+
+
+def test_secciones_desde_paquete_interpola_los_montos_del_resumen():
+    from plania import conectores, exportes, i18n, sugerencias
+
+    d = conectores.cargar_datos()
+    for idioma in i18n.IDIOMAS:
+        paq = sugerencias.generar_todas(d, idioma)
+        secciones = exportes.secciones_desde_paquete(paq, idioma=idioma)
+        titulo_resumen, texto_resumen, _ = secciones[0]
+        assert titulo_resumen == i18n.t("exportes.resumen_titulo", idioma)
+        # El resumen tiene que llevar el monto de verdad, no un placeholder
+        # sin interpolar ("{capital_liberable}" suelto en el texto final).
+        assert "{" not in texto_resumen, f"[{idioma}] quedó un placeholder sin interpolar: {texto_resumen}"
+        assert i18n.miles(paq["resumen"]["capital_liberable"], 0, idioma) in texto_resumen

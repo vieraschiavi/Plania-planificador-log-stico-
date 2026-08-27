@@ -289,5 +289,21 @@
   "copiloto.ventas_titulo": "Top sales",
   "copiloto.ventas_resumen": "Last 30 days: ${venta} in sales, margin {margen}% (${margen_monto}), {n} active customers. Best seller: {nombre} (${venta_top}).",
   "copiloto.fallback_titulo": "Executive summary",
-  "copiloto.fallback_resumen": "I can answer about stock, prices, margins, offers, restocking, zones, business types and customers. Meanwhile, today's summary: ${capital} tied up in overstock, ${riesgo} in sales at risk from stockouts, ${extra}/month of recoverable margin from price adjustments. Ask me, for example: «what offers should I run this week?», «what should I restock now?», «which zone is underperforming?»."
+  "copiloto.fallback_resumen": "I can answer about stock, prices, margins, offers, restocking, zones, business types and customers. Meanwhile, today's summary: ${capital} tied up in overstock, ${riesgo} in sales at risk from stockouts, ${extra}/month of recoverable margin from price adjustments. Ask me, for example: «what offers should I run this week?», «what should I restock now?», «which zone is underperforming?».",
+  "exportes.titulo_ofertas": "Offers suggested by overstock",
+  "exportes.texto_ofertas": "Products with excess stock: the suggested discount speeds up turnover without breaking the cost+8% floor.",
+  "exportes.titulo_reposicion": "Urgent restocking",
+  "exportes.texto_reposicion": "Products whose stock won't cover the supplier's lead time: suggested quantity for 30 days of sales.",
+  "exportes.titulo_precios": "Price adjustments",
+  "exportes.texto_precios": "Products with margin below their category; the suggested increase aligns the margin without pricing out of the market.",
+  "exportes.titulo_zonas": "Opportunities by zone",
+  "exportes.texto_zonas": "Cross-selling detected: categories that businesses of the same type buy in other zones and not here yet.",
+  "exportes.titulo_recupero": "Customers to win back",
+  "exportes.texto_recupero": "Customers with a purchase history who stopped ordering, ranked by what they were worth.",
+  "exportes.encabezado_generado": "Generated on {fecha} from the business's connected data",
+  "exportes.pie_marca": "Plania · smart logistics and sales planning · www.plania.uy",
+  "exportes.pie_marca_word": "Plania · smart logistics and sales planning",
+  "exportes.hoja_marca": "Plania · {subtitulo} · {fecha}",
+  "exportes.resumen_titulo": "Executive summary",
+  "exportes.resumen_texto": "Capital freed up by offers: ${capital_liberable} · Sales at risk from stockouts: ${venta_en_riesgo}/month · Extra margin from prices: ${margen_extra_mensual}/month · Potential by zone: ${venta_potencial_zonas} · Recoverable sales: ${venta_recuperable}."
 }

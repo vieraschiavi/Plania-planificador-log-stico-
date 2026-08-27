@@ -424,14 +424,14 @@ def _botones_export(clave: str, secciones: list, etiqueta: str | None = None):
         return
     titulo = secciones[0][0] if secciones else t("comun.informe_default")
     c1, c2, c3, _ = st.columns([1, 1, 1, 3])
-    c1.download_button(t("comun.pdf"), exportes.a_pdf(titulo, secciones),
+    c1.download_button(t("comun.pdf"), exportes.a_pdf(titulo, secciones, IDIOMA),
                        file_name=f"plania_{clave}.pdf", key=f"pdf_{clave}",
                        mime="application/pdf")
-    c2.download_button(t("comun.word"), exportes.a_word(titulo, secciones),
+    c2.download_button(t("comun.word"), exportes.a_word(titulo, secciones, IDIOMA),
                        file_name=f"plania_{clave}.docx", key=f"docx_{clave}",
                        mime="application/vnd.openxmlformats-officedocument"
                             ".wordprocessingml.document")
-    c3.download_button(t("comun.excel"), exportes.a_excel(secciones),
+    c3.download_button(t("comun.excel"), exportes.a_excel(secciones, IDIOMA),
                        file_name=f"plania_{clave}.xlsx", key=f"xlsx_{clave}",
                        mime="application/vnd.openxmlformats-officedocument"
                             ".spreadsheetml.sheet")
@@ -504,7 +504,7 @@ elif pagina == "stock":
             if len(rep):
                 _tabla(rep)
                 _botones_export("reposicion", [(t("menu.stock"),
-                                                exportes.TITULOS["reposicion"][1], rep)])
+                                                exportes.titulo_seccion("reposicion", IDIOMA)[1], rep)])
             else:
                 st.success(t("stock.sin_riesgo"))
         with tab2:
@@ -537,7 +537,7 @@ elif pagina == "precios":
         if len(pr):
             _tabla(pr)
             _botones_export("precios", [(t("menu.precios"),
-                                         exportes.TITULOS["precios"][1], pr)])
+                                         exportes.titulo_seccion("precios", IDIOMA)[1], pr)])
         else:
             st.success(t("precios.alineados"))
 
@@ -565,7 +565,7 @@ elif pagina == "zonas":
         if len(op):
             _tabla(op)
             _botones_export("zonas", [(t("menu.zonas"),
-                                       exportes.TITULOS["zonas"][1], op)])
+                                       exportes.titulo_seccion("zonas", IDIOMA)[1], op)])
         else:
             st.info(t("zonas.sin_brechas"))
 
@@ -629,7 +629,7 @@ elif pagina == "ofertas":
         c3.metric(t("ofertas.kpi_margen_extra_mes"), _fmt(res["margen_extra_mensual"]))
         c4.metric(t("ofertas.kpi_potencial_zonas"), _fmt(res["venta_potencial_zonas"]))
         st.markdown("---")
-        secciones = exportes.secciones_desde_paquete(paq)
+        secciones = exportes.secciones_desde_paquete(paq, idioma=IDIOMA)
         _botones_export("paquete_completo", secciones,
                         etiqueta=t("ofertas.exportar_completo"))
         tabs_claves = ["ofertas", "reposicion", "precios", "zonas", "recupero"]
@@ -638,7 +638,7 @@ elif pagina == "ofertas":
             with tab:
                 df = paq[clave]
                 if df is not None and len(df):
-                    st.caption(exportes.TITULOS[clave][1])
+                    st.caption(exportes.titulo_seccion(clave, IDIOMA)[1])
                     _tabla(df)
                 else:
                     st.success(t("ofertas.nada_para_accionar"))
