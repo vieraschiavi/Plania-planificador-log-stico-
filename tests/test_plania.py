@@ -5522,11 +5522,17 @@ def test_el_copiloto_usa_el_formato_de_numeros_de_aca():
 
 
 def test_el_formateador_del_copiloto_da_vuelta_los_separadores():
+    """`_m` delega en `plania.i18n.miles` desde que el copiloto se tradujo —
+    la firma pasó a `(n, idioma="es", decimales=0)`, con `idioma` como
+    segundo parámetro en vez de `decimales`."""
     from plania import copiloto
+
     assert copiloto._m(1430318) == "1.430.318"
-    assert copiloto._m(1430318.5, 2) == "1.430.318,50"
-    assert copiloto._m(24.5, 1) == "24,5"
+    assert copiloto._m(1430318.5, "es", 2) == "1.430.318,50"
+    assert copiloto._m(24.5, "es", 1) == "24,5"
     assert copiloto._m(0) == "0"
+    # Y el motivo real de que exista: en inglés no se da vuelta.
+    assert copiloto._m(1430318.5, "en", 2) == "1,430,318.50"
 
 
 def test_la_api_cubre_las_doce_pantallas():
@@ -6655,3 +6661,173 @@ def test_las_zonas_categorias_y_tipos_de_negocio_no_se_traducen():
         assert str(fila["zona"]) in fila["motivo"]
         assert str(fila["categoria"]) in fila["motivo"]
         assert str(fila["tipo_negocio"]) in fila["motivo"]
+
+
+# ---------------------------------------------------------------------------
+# i18n Fase 4 — plania/copiloto.py: entendimiento y redacción en 3 idiomas
+# ---------------------------------------------------------------------------
+def test_las_cinco_preguntas_de_ejemplo_de_la_ui_andan_en_los_tres_idiomas():
+    """`copiloto.ejemplos` (el texto de ayuda arriba del chat, en app.py)
+    promete cinco preguntas concretas por idioma — este test las corre de
+    verdad contra el motor local, en los tres idiomas, y comprueba que cada
+    una dispara la intención que promete el título traducido. Si algún
+    idioma quedara con las palabras clave mal puestas, el título delataría
+    que cayó en el fallback ("Resumen ejecutivo") en vez de en la intención
+    real.
+    """
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    # (pregunta, título esperado — el de la intención específica, no el
+    # fallback). Las preguntas son las mismas que ofrece `copiloto.ejemplos`
+    # en cada idioma del catálogo.
+    casos = {
+        "es": [
+            ("¿qué ofertas armo esta semana?", "Ofertas sugeridas por sobrestock"),
+            # "bebidas" matchea de verdad la categoría "Bebidas" del ERP
+            # demo, así que cae en la rama "productos encontrados" (título
+            # "Stock"), no en la de "sin producto puntual" ("Stock general").
+            ("¿cuánto stock hay de bebidas?", "Stock"),
+            ("¿qué zona está floja?", None),   # título trae el nombre real de la dimensión
+            ("¿qué repongo ya?", "Reposición sugerida"),
+            ("¿qué clientes perdí?", "Clientes a recuperar"),
+        ],
+        "en": [
+            ("what offers should I run this week?", "Offers suggested by overstock"),
+            ("how much beverage stock is there?", "Overall stock"),
+            ("which zone is underperforming?", None),
+            ("what should I restock now?", "Suggested restocking"),
+            ("which customers did I lose?", "Customers to win back"),
+        ],
+        "pt": [
+            ("quais ofertas eu monto esta semana?", "Ofertas sugeridas por excesso de estoque"),
+            # Mismo caso que en español: "bebidas" existe tal cual en la
+            # categoría del ERP demo.
+            ("quanto estoque de bebidas tem?", "Estoque"),
+            ("qual zona está fraca?", None),
+            ("o que eu reponho já?", "Reposição sugerida"),
+            ("quais clientes eu perdi?", "Clientes a recuperar"),
+        ],
+    }
+    fallbacks = {"es": "Resumen ejecutivo", "en": "Executive summary", "pt": "Resumo executivo"}
+
+    for idioma, preguntas in casos.items():
+        for pregunta, titulo_esperado in preguntas:
+            r = copiloto.responder(pregunta, datos, idioma=idioma)
+            assert r["respuesta"], f"[{idioma}] {pregunta!r} no devolvió texto"
+            assert r["titulo"] != fallbacks[idioma], \
+                f"[{idioma}] {pregunta!r} cayó en el fallback — el matching de esa intención se rompió"
+            if titulo_esperado:
+                assert r["titulo"] == titulo_esperado, \
+                    f"[{idioma}] {pregunta!r} dio título {r['titulo']!r}, se esperaba {titulo_esperado!r}"
+
+
+def test_el_copiloto_en_ingles_no_deja_texto_en_espanol():
+    """Mismo espíritu que `test_el_copiloto_usa_el_formato_de_numeros_de_aca`
+    (que ya cubre español), llevado a inglés: cada rama arma su propio texto
+    por separado, así que alcanza con que UNA se haya olvidado de traducir
+    para que la respuesta salga mitad y mitad."""
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    preguntas = [
+        "what offers should I run this week?", "what should I restock now?",
+        "which prices are leaving low margin?", "how is the stock?",
+        "which zone sells the most?", "who are my best customers?",
+        "which customers did I lose?", "which supplier should I prioritize?",
+        "how are sales going?", "which business type buys the most?",
+    ]
+    # Palabras que sólo aparecen en las plantillas en español — si una se
+    # cuela en una respuesta en inglés, alguna rama se quedó sin traducir.
+    delatoras_es = ["días", "dias de estoque", "días de stock", "quedan",
+                    "vencé", "está en", "que", "más", "días"]
+    problemas = []
+    for pregunta in preguntas:
+        texto = copiloto.responder(pregunta, datos, idioma="en")["respuesta"]
+        for palabra in delatoras_es:
+            if palabra in texto.lower():
+                problemas.append((pregunta, palabra, texto[:120]))
+    assert not problemas, f"respuestas en inglés con texto en español: {problemas}"
+
+
+def test_el_copiloto_respeta_el_formato_numerico_de_cada_idioma():
+    """Extiende `test_el_copiloto_usa_el_formato_de_numeros_de_aca` (que ya
+    cubre español) a inglés y portugués: los montos de la respuesta tienen
+    que llevar el separador de ESE idioma, no el de otro."""
+    import re
+
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    miles_es_pt = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?")   # 1.430.318
+    miles_en = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?")      # 1,430,318
+
+    for idioma, pregunta, patron_ajeno in [
+        ("en", "what offers should I run this week?", miles_es_pt),
+        ("pt", "quais ofertas eu monto esta semana?", miles_en),
+    ]:
+        texto = copiloto.responder(pregunta, datos, idioma=idioma)["respuesta"]
+        ajenos = patron_ajeno.findall(texto)
+        assert not ajenos, f"[{idioma}] {pregunta!r} usa el separador de otro idioma: {ajenos}"
+
+
+def test_la_busqueda_de_producto_encuentra_el_nombre_espanol_en_cualquier_idioma():
+    """`_buscar_producto` matchea substrings del nombre/categoría — el
+    nombre del producto viene del ERP del cliente y NO se traduce (es dato,
+    no texto de producto), así que preguntar en inglés o portugués sobre un
+    producto puntual tiene que seguir encontrándolo por su nombre real."""
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    nombre_real = datos["productos"].iloc[0]["nombre"]   # p.ej. "Congelados Clásico 184"
+    palabra_producto = nombre_real.split()[0]             # "Congelados"
+
+    for idioma, plantilla in [("es", "cuanto stock tiene {p}"),
+                              ("en", "how much stock does {p} have"),
+                              ("pt", "quanto estoque tem {p}")]:
+        prods = copiloto._buscar_producto(plantilla.format(p=palabra_producto),
+                                          datos["productos"], idioma)
+        assert len(prods), f"[{idioma}] no encontró ningún producto con {palabra_producto!r}"
+
+
+def test_el_prompt_de_claude_pide_la_respuesta_en_el_idioma_elegido():
+    """La capa Claude (cuando hay ANTHROPIC_API_KEY) redacta sobre los
+    mismos datos ya calculados — pero el prompt tenía "Español rioplatense"
+    fijo. Sin esto, activar el copiloto con IA hacía que la respuesta
+    volviera a español aunque el resto de la pantalla estuviera en otro
+    idioma."""
+    from plania import copiloto
+
+    assert set(copiloto._PROMPT_IA) == {"es", "en", "pt"}
+    assert "espanol" in copiloto._sin_tildes(copiloto._PROMPT_IA["es"])
+    assert "english" in copiloto._PROMPT_IA["en"].lower()
+    assert "portugues" in copiloto._sin_tildes(copiloto._PROMPT_IA["pt"])
+    # Ningún prompt puede pedir un idioma que no es el suyo.
+    assert "english" not in copiloto._PROMPT_IA["es"].lower()
+    assert "english" not in copiloto._PROMPT_IA["pt"].lower()
+
+
+def test_una_pregunta_sobre_compradores_no_cae_en_reposicion_en_ingles():
+    """Encontrado corriendo una batería amplia de preguntas en los tres
+    idiomas (no estaba en las cinco de ejemplo de la UI): "buy" como palabra
+    clave de reposición en inglés matcheaba "buys"/"buying" en cualquier
+    pregunta sobre qué tipo de negocio COMPRA más, y la mandaba a
+    "Reposición sugerida" en vez de "Ventas por tipo de negocio".
+
+    El español nunca tuvo este choque: "comprar" (infinitivo) no es
+    substring de "compra" (él/ella compra), así que "¿qué tipo de negocio
+    compra más?" nunca activó reposición. La traducción a "buy" sí lo era,
+    porque en inglés el mismo verbo cubre las dos formas."""
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    r = copiloto.responder("which business type buys the most?", datos, idioma="en")
+    assert r["titulo"] == "Sales by business type", \
+        f"'buys' volvió a activar reposición: título {r['titulo']!r}"
+
+    # Y las preguntas reales de reponer stock tienen que seguir andando.
+    for pregunta in ("what should I restock now?", "what do I need to buy?",
+                     "which products are running out?"):
+        r = copiloto.responder(pregunta, datos, idioma="en")
+        assert r["titulo"] == "Suggested restocking", \
+            f"{pregunta!r} dejó de activar reposición: título {r['titulo']!r}"
