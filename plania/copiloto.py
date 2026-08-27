@@ -79,27 +79,28 @@ def responder(pregunta: str, datos: dict, idioma: str = "es") -> dict:
     Devuelve {"respuesta": str, "tabla": DataFrame|None, "titulo": str}.
     La tabla es la evidencia de la respuesta — exportable tal cual.
 
-    `idioma` está aceptado pero todavía no cambia nada: el entendimiento de
-    la pregunta y la redacción de la respuesta siguen siendo español
-    únicamente. Traducirlos es un cambio propio (reescribir el matching de
-    palabras clave y las plantillas de respuesta para inglés/portugués, no
-    sólo pasar un parámetro) — éste sólo deja el enganche listo para cuando
-    se haga, sin romper a quien ya llama a `responder()` sin ese argumento.
+    `idioma` hoy sólo llega hasta la TABLA de evidencia: la columna "motivo"
+    que arma `sugerencias.py` ya sale en el idioma pedido (ver
+    `plania/sugerencias.py`). El entendimiento de la pregunta y el texto del
+    chat siguen siendo español únicamente — traducirlos es un cambio propio
+    (reescribir el matching de palabras clave y las plantillas de respuesta
+    para inglés/portugués, no sólo pasar un parámetro).
     """
     productos, clientes = datos["productos"], datos["clientes"]
     v = analitica.enriquecer_ventas(datos["ventas"], productos, clientes)
     t = _sin_tildes(pregunta)
 
-    r = _responder_local(pregunta, t, productos, clientes, v)
+    r = _responder_local(pregunta, t, productos, clientes, v, idioma)
     r["respuesta"] = _redactar_con_ia(pregunta, r) or r["respuesta"]
     return r
 
 
-def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
+def _responder_local(pregunta: str, t: str, productos, clientes, v,
+                     idioma: str = "es") -> dict:
     # --- ofertas / sobrestock -------------------------------------------------
     if any(k in t for k in ["oferta", "sobrestock", "sobre stock", "liquidar",
                             "no rota", "no se vende", "inmovilizado"]):
-        of = sugerencias.ofertas_por_sobrestock(productos, v)
+        of = sugerencias.ofertas_por_sobrestock(productos, v, idioma)
         if not len(of):
             return _r("No hay productos con sobrestock relevante: el stock está sano.", None,
                       "Ofertas sugeridas")
@@ -115,7 +116,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
     # --- reposición / quiebres ------------------------------------------------
     if any(k in t for k in ["repo", "quiebre", "falta", "comprar", "pedir",
                             "reponer", "sin stock", "agotad"]):
-        rep = sugerencias.reposicion(productos, v)
+        rep = sugerencias.reposicion(productos, v, idioma=idioma)
         if not len(rep):
             return _r("No hay riesgo de quiebre con la rotación actual.", None, "Reposición")
         return _r(f"Hay {len(rep)} productos en riesgo de quiebre "
@@ -141,7 +142,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
                       f"unidades con margen real {_m(x['margen_pct'] if pd.notna(x['margen_pct']) else 0, 1)}%.",
                       m, "Precio y margen")
         if any(k in t for k in ["mejorar", "subir", "suger", "bajo", "oportunidad"]):
-            pr = sugerencias.precios(productos, v)
+            pr = sugerencias.precios(productos, v, idioma=idioma)
             if not len(pr):
                 return _r("Los márgenes están alineados con su categoría; no hay subas obvias.",
                           None, "Precios")
@@ -186,7 +187,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
     if any(k in t for k in ["zona", "departamento", "barrio", "region", "donde"]):
         dim = "departamento" if "departamento" in t else "zona"
         g = analitica.por_dimension(v, dim)
-        op = sugerencias.oportunidades_zona(v)
+        op = sugerencias.oportunidades_zona(v, idioma)
         extra = (f" Detecté {len(op)} oportunidades de venta cruzada por zona "
                  f"(${_m(op['venta_potencial'].sum())} potenciales)." if len(op) else "")
         if not len(g):
@@ -215,7 +216,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
         g = analitica.por_dimension(v, "proveedor")
         if not len(g):
             return _r("Los datos conectados no traen proveedor.", None, "Proveedores")
-        rep = sugerencias.reposicion(productos, v)
+        rep = sugerencias.reposicion(productos, v, idioma=idioma)
         urgente = ""
         if len(rep):
             top_prov = rep.groupby("proveedor")["venta_en_riesgo"].sum().idxmax()
@@ -248,7 +249,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
     # --- clientes ----------------------------------------------------------------
     if any(k in t for k in ["cliente", "inactivo", "recuperar", "dejo de comprar", "perdi"]):
         if any(k in t for k in ["inactivo", "recuperar", "dejo", "perdi"]):
-            rec = sugerencias.recupero_clientes(v, clientes)
+            rec = sugerencias.recupero_clientes(v, clientes, idioma)
             if not len(rec):
                 return _r("No hay clientes inactivos relevantes.", None, "Clientes")
             return _r(f"Hay {len(rec)} clientes que dejaron de comprar; valían "
@@ -281,7 +282,7 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v) -> dict:
 
     # --- fallback: resumen ejecutivo -------------------------------------------------
     paq = sugerencias.generar_todas({"productos": productos, "clientes": clientes,
-                                     "ventas": v})
+                                     "ventas": v}, idioma)
     res = paq["resumen"]
     return _r("Puedo responder sobre stock, precios, márgenes, ofertas, reposición, "
               "zonas, tipos de negocio y clientes. Mientras tanto, el resumen de hoy: "

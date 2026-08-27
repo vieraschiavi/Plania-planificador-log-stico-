@@ -452,7 +452,7 @@ if pagina == "inicio":
     if datos:
         v = _ventas_enriquecidas(datos)
         k = analitica.kpis(datos["productos"], v)
-        paq = sugerencias.generar_todas(datos)
+        paq = sugerencias.generar_todas(datos, idioma=IDIOMA)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(t("inicio.kpi_venta30"), _fmt(k["venta_periodo"]))
         c2.metric(t("inicio.kpi_margen"), f"{k['margen_pct']:.1f}%")
@@ -500,7 +500,7 @@ elif pagina == "stock":
         c3.metric(t("stock.kpi_sobrestock"), int((r["dias_stock"] > 90).sum()))
         tab1, tab2 = st.tabs([t("stock.tab_reposicion"), t("stock.tab_completo")])
         with tab1:
-            rep = sugerencias.reposicion(datos["productos"], v)
+            rep = sugerencias.reposicion(datos["productos"], v, idioma=IDIOMA)
             if len(rep):
                 _tabla(rep)
                 _botones_export("reposicion", [(t("menu.stock"),
@@ -524,7 +524,7 @@ elif pagina == "precios":
         c1, c2 = st.columns(2)
         c1.metric(t("precios.kpi_margen_prom"),
                   f"{v['margen'].sum() / v['venta'].sum() * 100:.1f}%")
-        pr = sugerencias.precios(datos["productos"], v)
+        pr = sugerencias.precios(datos["productos"], v, idioma=IDIOMA)
         c2.metric(t("precios.kpi_margen_extra"),
                   _fmt(pr["margen_extra_mensual"].sum() if len(pr) else 0) + t("comun.sufijo_mes"))
         fig = px.scatter(mp, x="venta", y="margen_pct", color="categoria",
@@ -561,7 +561,7 @@ elif pagina == "zonas":
             col1.plotly_chart(_ejes(fig), width="stretch")
             col2.dataframe(g.rename(columns=ETIQUETAS), width="stretch", hide_index=True)
         st.markdown(t("zonas.oportunidades_titulo"))
-        op = sugerencias.oportunidades_zona(v)
+        op = sugerencias.oportunidades_zona(v, idioma=IDIOMA)
         if len(op):
             _tabla(op)
             _botones_export("zonas", [(t("menu.zonas"),
@@ -621,7 +621,7 @@ elif pagina == "ofertas":
     st.title(t("menu.ofertas"))
     _aviso_filtros()
     if datos:
-        paq = sugerencias.generar_todas(datos)
+        paq = sugerencias.generar_todas(datos, idioma=IDIOMA)
         res = paq["resumen"]
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(t("ofertas.kpi_capital_liberable"), _fmt(res["capital_liberable"]))

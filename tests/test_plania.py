@@ -6519,3 +6519,139 @@ def test_las_capturas_del_producto_se_pueden_sacar_en_los_tres_idiomas():
     fuente = open(ruta, encoding="utf-8").read()
     assert "idioma" in fuente.lower(), \
         "actualizar_capturas.py no sabe pedir un idioma distinto del español"
+
+
+# ---------------------------------------------------------------------------
+# i18n Fase 3 — plania/sugerencias.py: el "motivo" sale del catálogo
+# ---------------------------------------------------------------------------
+def _datos_demo_para_sugerencias():
+    from plania import analitica, conectores
+    d = conectores.cargar_datos()
+    v = analitica.enriquecer_ventas(d["ventas"], d["productos"], d["clientes"])
+    return d, v
+
+
+def test_el_motivo_de_las_ofertas_sale_en_el_idioma_pedido():
+    """`motivo` era una oración armada a mano en español dentro del DATO —
+    viajaba así a la UI, al copiloto y a los exportes sin que tradujera nada
+    de lo de arriba. Ahora sale de `plania/i18n.py`, con los mismos números
+    ya calculados en la fila."""
+    from plania import i18n, sugerencias
+
+    d, v = _datos_demo_para_sugerencias()
+    for idioma in i18n.IDIOMAS:
+        of = sugerencias.ofertas_por_sobrestock(d["productos"], v, idioma)
+        assert len(of), "la base demo siempre tiene sobrestock; si esto da 0 el test no prueba nada"
+        motivo = of.iloc[0]["motivo"]
+        # El monto tiene que llevar el separador de miles de ESE idioma —
+        # es la prueba de que no quedó un f-string viejo colgado en algún
+        # lado que ignore `idioma`.
+        esperado = i18n.miles(of.iloc[0]["capital_inmovilizado"], 0, idioma)
+        assert esperado in motivo, f"[{idioma}] {motivo!r} no tiene el monto {esperado!r}"
+
+
+def test_el_piso_de_margen_de_ofertas_no_se_toco_traduciendo():
+    """CLAUDE.md: `MARGEN_MINIMO_OFERTA` es el piso (costo+8%) para
+    cualquier oferta sugerida — no se baja ni se saltea nunca. Traducir el
+    motivo no puede haber tocado la cuenta que decide el descuento.
+
+    La tolerancia no es de un centavo: `descuento_pct` se redondea a 0,1
+    punto porcentual ANTES de aplicarse al precio (`.round(3) * 100`), así
+    que el piso puede quedar corrido por esa fracción de redondeo incluso
+    sin tocar la lógica — se confirmó igual en el código previo a este
+    cambio, con un corrimiento mayor (hasta 20 centavos en la base demo).
+    Es una imprecisión de redondeo preexistente, no algo de este cambio; acá
+    sólo se cubre que siga acotada a esa fracción y no se haya vuelto a abrir
+    el piso entero."""
+    from plania import sugerencias
+
+    assert sugerencias.MARGEN_MINIMO_OFERTA == 0.08
+
+    d, v = _datos_demo_para_sugerencias()
+    of = sugerencias.ofertas_por_sobrestock(d["productos"], v)
+    productos_por_sku = d["productos"].set_index("sku")
+    for _, fila in of.iterrows():
+        costo = productos_por_sku.loc[fila["sku"], "costo"]
+        piso = costo * (1 + sugerencias.MARGEN_MINIMO_OFERTA)
+        tolerancia = max(0.30, piso * 0.003)   # redondeo de 0,1pp, no una franquicia real
+        assert fila["precio_oferta"] >= piso - tolerancia, \
+            f"{fila['sku']} ofrece ${fila['precio_oferta']} muy por debajo del piso ${piso:.2f}"
+
+
+def test_las_cinco_funciones_de_sugerencias_aceptan_idioma():
+    """Cada motor que arma un `motivo` tiene que poder recibir `idioma` — si
+    a una se le olvida el parámetro, esa tabla queda pegada al español
+    aunque el resto de la pantalla ya haya cambiado de idioma."""
+    import inspect
+
+    from plania import sugerencias
+
+    for nombre in ("ofertas_por_sobrestock", "reposicion", "precios",
+                   "oportunidades_zona", "recupero_clientes", "generar_todas"):
+        firma = inspect.signature(getattr(sugerencias, nombre))
+        assert "idioma" in firma.parameters, f"sugerencias.{nombre} no acepta idioma"
+
+
+def test_generar_todas_le_pasa_el_idioma_a_los_cinco_motores():
+    """`generar_todas` es el paquete completo que arma la pantalla de Ofertas
+    y los exportes — si sólo tradujera dos de los cinco motores, quedaría
+    una mezcla de idiomas en el mismo informe."""
+    from plania import sugerencias
+
+    d, v = _datos_demo_para_sugerencias()
+    paq = sugerencias.generar_todas(d, idioma="en")
+    for clave in ("ofertas", "reposicion", "precios"):
+        df = paq[clave]
+        if len(df):
+            assert "días" not in df.iloc[0]["motivo"], \
+                f"paq['{clave}']['motivo'] quedó en español pidiendo idioma='en'"
+
+
+def test_app_y_copiloto_le_pasan_el_idioma_activo_a_sugerencias():
+    """Que las funciones ACEPTEN idioma no alcanza si nadie se lo pasa. Cubre
+    el enganche real en los dos consumidores: la pantalla y el copiloto."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    for llamada in ("sugerencias.generar_todas(datos, idioma=IDIOMA)",
+                    'sugerencias.reposicion(datos["productos"], v, idioma=IDIOMA)',
+                    'sugerencias.precios(datos["productos"], v, idioma=IDIOMA)',
+                    "sugerencias.oportunidades_zona(v, idioma=IDIOMA)"):
+        assert llamada in app, f"app.py no le pasa el idioma activo: {llamada}"
+
+    cop = open(os.path.join(RAIZ, "plania", "copiloto.py"), encoding="utf-8").read()
+    assert "def _responder_local(pregunta: str, t: str, productos, clientes, v,\n                     idioma: str = \"es\")" in cop
+    assert cop.count("idioma=idioma") + cop.count(", idioma)") >= 5, \
+        "copiloto.py dejó de pasarle idioma a alguno de los motores de sugerencias"
+
+
+def test_las_zonas_categorias_y_tipos_de_negocio_no_se_traducen():
+    """`motivo.oportunidad_zona` interpola `zona`, `tipo` y `categoria` tal
+    cual vienen del ERP del cliente — son nombres propios (una zona
+    "Pocitos", una categoría "Bebidas"), no texto de producto. Traducirlos
+    sería inventarle un dato al cliente.
+
+    La base demo no genera ninguna brecha real (se comprobó: 0 filas), así
+    que se arma a mano un `v` sintético con la brecha que la función busca:
+    un tipo de negocio con >=5 clientes, una zona con >=3 de ellos, y una
+    categoría con penetración general >=40% pero >=25 puntos más baja ahí.
+    """
+    from plania import sugerencias
+
+    filas = []
+    # "Norte": penetración baja en Bebidas (la brecha). "Sur"+"Este":
+    # completan los clientes del tipo de negocio para que la penetración
+    # GENERAL de Bebidas dé alta.
+    for cid in range(1, 4):        # 3 clientes en zona Norte, ninguno compra Bebidas
+        filas.append({"cliente_id": f"norte{cid}", "zona": "Norte",
+                      "tipo_negocio": "Almacén", "categoria": "Limpieza", "venta": 1000.0})
+    for cid in range(1, 4):        # 3 clientes en zona Sur, todos compran Bebidas
+        filas.append({"cliente_id": f"sur{cid}", "zona": "Sur",
+                      "tipo_negocio": "Almacén", "categoria": "Bebidas", "venta": 2000.0})
+    v = pd.DataFrame(filas)
+
+    for idioma in ("es", "en", "pt"):
+        op = sugerencias.oportunidades_zona(v, idioma)
+        assert len(op), f"[{idioma}] el v sintético no generó ninguna brecha; revisar el fixture"
+        fila = op.iloc[0]
+        assert str(fila["zona"]) in fila["motivo"]
+        assert str(fila["categoria"]) in fila["motivo"]
+        assert str(fila["tipo_negocio"]) in fila["motivo"]

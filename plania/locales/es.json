@@ -225,5 +225,10 @@
   "claves.SMTP_PASSWORD": "Email · contraseña / app password SMTP",
   "claves.SMTP_FROM": "Email · dirección remitente (ej. ventas@tuempresa.com)",
   "ayuda.titulo": "Ayuda",
-  "ayuda.cuerpo": "**¿Qué hace Plania?** Se conecta a tu ERP o base de datos (sin migrar nada), analiza stock, precios, márgenes, zonas y clientes, y te devuelve decisiones accionables: ofertas, reposición, ajustes de precio, rutas de reparto y clientes a recuperar — todo exportable a **PDF, Word y Excel** y consultable por chat con el **Copiloto**.\n\n**Primeros pasos**\n1.  *Conectar ERP / Base*: apuntá a tu base (o probá con la demo incluida).\n2.  *Ofertas & Sugerencias*: exportá el informe completo del día.\n3.  *Copiloto*: preguntá en criollo — «¿qué repongo ya?».\n\n**Demo de 7 días** — todo habilitado, sin tarjeta. Al vencer, tus datos no se tocan: activás la licencia y seguís donde estabas.\n\n**Soporte** — soporte@plania.uy · WhatsApp +598 99 000 000"
+  "ayuda.cuerpo": "**¿Qué hace Plania?** Se conecta a tu ERP o base de datos (sin migrar nada), analiza stock, precios, márgenes, zonas y clientes, y te devuelve decisiones accionables: ofertas, reposición, ajustes de precio, rutas de reparto y clientes a recuperar — todo exportable a **PDF, Word y Excel** y consultable por chat con el **Copiloto**.\n\n**Primeros pasos**\n1.  *Conectar ERP / Base*: apuntá a tu base (o probá con la demo incluida).\n2.  *Ofertas & Sugerencias*: exportá el informe completo del día.\n3.  *Copiloto*: preguntá en criollo — «¿qué repongo ya?».\n\n**Demo de 7 días** — todo habilitado, sin tarjeta. Al vencer, tus datos no se tocan: activás la licencia y seguís donde estabas.\n\n**Soporte** — soporte@plania.uy · WhatsApp +598 99 000 000",
+  "motivo.ofertas_sobrestock": "{dias_stock} días de stock ({stock} un., venta diaria {venta_diaria}) — ${capital} inmovilizados",
+  "motivo.reposicion": "Quedan {dias_stock} días de stock y el proveedor demora {lead_time_dias} — riesgo de perder ${venta_riesgo}/mes de venta",
+  "motivo.precios": "Margen actual {margen_pct}% vs {margen_obj}% de su categoría — subir {suba_pct}% suma ${margen_extra}/mes",
+  "motivo.oportunidad_zona": "En {zona}, solo {pz}% de los negocios tipo {tipo} compra {categoria} vs {pg}% en general",
+  "motivo.recupero_cliente": "Compraba ${venta_historica} y lleva {dias_sin_comprar} días sin pedir"
 }
