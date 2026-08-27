@@ -3204,11 +3204,23 @@ def test_lo_que_dice_cada_plan_es_lo_que_ese_plan_hace():
                     f"{idioma}.json vende '{palabra}' como diferencial de Pro, "
                     f"pero Starter ya las incluye")
 
-        for archivo in ("app/app.py", "plania/api.py"):
+        for archivo in ("plania/api.py",):
             with open(os.path.join(RAIZ, archivo), encoding="utf-8") as f:
                 cuerpo = f.read()
             assert "Copiloto + ERP + exportes ·" not in cuerpo, (
                 f"{archivo} describe Starter sin rutas, pero el plan las tiene")
+
+        # app/app.py ya no lleva esta descripción como texto suelto: sale del
+        # catálogo de idiomas (plania/locales/*.json), que es donde hay que
+        # mirar para que este control siga significando algo.
+        for idioma in ("es", "en", "pt"):
+            ruta = os.path.join(RAIZ, "plania", "locales", f"{idioma}.json")
+            with open(ruta, encoding="utf-8") as f:
+                catalogo_app = json.load(f)
+            detalle = catalogo_app.get("planes.starter_detalle", "").lower()
+            assert "rutas" in detalle or "route" in detalle or "rota" in detalle, (
+                f"plania/locales/{idioma}.json describe Starter sin rutas, "
+                f"pero el plan las tiene: {detalle!r}")
 
     # Y lo que sí distingue a Pro tiene que seguir siendo cierto.
     assert "excedente" in pro and "excedente" not in starter, (
@@ -4223,7 +4235,15 @@ def test_la_app_ofrece_filtros_y_avisa_cuando_estan_puestos():
     assert "_aviso_filtros" in app
     assert app.count("_aviso_filtros()") >= 5, \
         "el aviso tiene que estar en todas las pantallas que filtran"
-    assert "Limpiar filtros" in app
+    # El texto del botón vive en el catálogo de idiomas desde que la app se
+    # tradujo (plania/i18n.py); acá sólo se comprueba que la pantalla lo pida
+    # por esa clave y no con un string suelto que un idioma se salte.
+    assert 't("filtros.limpiar")' in app
+
+    from plania import i18n
+    for idioma in i18n.IDIOMAS:
+        assert i18n.t("filtros.limpiar", idioma).strip(), \
+            f"falta la traducción de 'Limpiar filtros' en {idioma}"
 
 
 # ---------------------------------------------------------------------------
@@ -4232,41 +4252,51 @@ def test_la_app_ofrece_filtros_y_avisa_cuando_estan_puestos():
 def test_los_montos_usan_el_formato_de_aca():
     """`$2.86 M` con punto decimal es formato de Estados Unidos; en Uruguay
     eso se lee "dos punto ochenta y seis". Y un número cortado en la pantalla
-    principal es lo peor que puede pasar en una demo."""
-    import importlib.util
-    import sys
+    principal es lo peor que puede pasar en una demo.
 
-    ruta = os.path.join(RAIZ, "app", "app.py")
-    fuente = open(ruta, encoding="utf-8").read()
-    # Se ejecutan solo las dos funciones de formato, sin levantar Streamlit.
-    ns: dict = {}
-    inicio = fuente.index("def _miles(")
-    fin = fuente.index("# Nombres de columna que ve el cliente")
-    exec(compile(fuente[inicio:fin], ruta, "exec"), ns)
-
-    assert ns["_miles"](1234567.89, 2) == "1.234.567,89"
-    assert ns["_fmt"](2856128) == "$2,86 M"
-    # El caso que se veía cortado como "$689,…" en la tarjeta:
-    assert ns["_fmt"](689234) == "$689 K"
-    assert ns["_fmt"](1500) == "$1.500"
+    El formato en sí lo prueba `test_miles_y_fmt_monto_usan_el_separador_de_
+    cada_idioma` contra `plania/i18n.py`, que es donde vive de verdad desde
+    que la app se tradujo. Lo que este test cubre es que `app.py` no se haya
+    vuelto a escribir la cuenta por su cuenta — dos implementaciones del
+    mismo formato es como aparece un `$2.86 M` con punto en una pantalla y
+    un `$2,86 M` con coma en la de al lado."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    cuerpo = app.split("def _miles(")[1].split("def _fmt(")[0]
+    assert "i18n.miles(" in cuerpo, \
+        "_miles ya no delega en plania.i18n: se reimplementó la cuenta en app.py"
+    cuerpo_fmt = app.split("def _fmt(")[1].split("\n\n\n")[0]
+    assert "i18n.fmt_monto(" in cuerpo_fmt, \
+        "_fmt ya no delega en plania.i18n: se reimplementó la cuenta en app.py"
 
 
 def test_no_se_le_muestran_al_cliente_los_nombres_internos():
     """`cliente_id`, `ultima_compra` y `margen_pct` son nombres del modelo de
-    datos. El cliente tiene que ver el nombre de su negocio."""
+    datos. El cliente tiene que ver el nombre de su negocio, en su idioma."""
     app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
 
-    assert "ETIQUETAS = {" in app
+    assert "_COLUMNAS_INTERNAS = (" in app
+    columnas_declaradas = app.split("_COLUMNAS_INTERNAS = (")[1].split(")")[0]
+    assert 'ETIQUETAS = {c: t(f"columnas.{c}")' in app, \
+        "ETIQUETAS tiene que salir del catálogo de idiomas, no de un diccionario fijo"
+
+    from plania import i18n
     for interno in ("cliente_id", "ultima_compra", "margen_pct", "stock_min"):
-        assert f'"{interno}"' in app.split("ETIQUETAS = {")[1].split("}")[0], \
-            f"falta la etiqueta en castellano para {interno}"
+        assert f'"{interno}"' in columnas_declaradas, \
+            f"{interno} no está en _COLUMNAS_INTERNAS: no se traduce en ninguna tabla"
+        for idioma in i18n.IDIOMAS:
+            etiqueta = i18n.t(f"columnas.{interno}", idioma)
+            assert etiqueta and etiqueta != interno, \
+                f"falta la etiqueta de {interno} en {idioma}"
 
     # Todas las tablas pasan por el mismo formateador: si alguna usa
     # st.dataframe directo, queda mostrando 315742.95 al lado de otra que
-    # muestra 315.743.
+    # muestra 315.743. Las excepciones a mano son la vista previa cruda de un
+    # archivo recién subido (todavía no es una tabla del producto) y la de
+    # Zonas, que sólo traduce encabezados porque son valores ya agregados.
     cuerpo = app.split("def _tabla(")[1]
     directas = [l for l in cuerpo.splitlines()
-                if "st.dataframe(" in l and "vista" not in l]
+                if "st.dataframe(" in l and "vista" not in l
+                and "nuevos[" not in l and "g.rename" not in l]
     assert len(directas) <= 2, f"tablas sin formatear: {directas}"
 
 
@@ -5492,11 +5522,17 @@ def test_el_copiloto_usa_el_formato_de_numeros_de_aca():
 
 
 def test_el_formateador_del_copiloto_da_vuelta_los_separadores():
+    """`_m` delega en `plania.i18n.miles` desde que el copiloto se tradujo —
+    la firma pasó a `(n, idioma="es", decimales=0)`, con `idioma` como
+    segundo parámetro en vez de `decimales`."""
     from plania import copiloto
+
     assert copiloto._m(1430318) == "1.430.318"
-    assert copiloto._m(1430318.5, 2) == "1.430.318,50"
-    assert copiloto._m(24.5, 1) == "24,5"
+    assert copiloto._m(1430318.5, "es", 2) == "1.430.318,50"
+    assert copiloto._m(24.5, "es", 1) == "24,5"
     assert copiloto._m(0) == "0"
+    # Y el motivo real de que exista: en inglés no se da vuelta.
+    assert copiloto._m(1430318.5, "en", 2) == "1,430,318.50"
 
 
 def test_la_api_cubre_las_doce_pantallas():
@@ -6315,3 +6351,632 @@ def test_un_script_contra_checkout_no_quema_la_cuota_diaria_de_gmail(monkeypatch
 
     assert len(enviados) == avisos.LIMITE_POR_HORA, \
         f"se mandaron {len(enviados)} mails: el tope por hora no frenó nada"
+
+
+# ---------------------------------------------------------------------------
+# i18n — plania/i18n.py
+# ---------------------------------------------------------------------------
+def test_los_catalogos_de_idioma_tienen_las_mismas_claves():
+    """Si un catálogo se queda atrás del otro, `t()` cae a español en
+    silencio — el test de completitud es lo único que hace que ese olvido
+    reviente en CI en vez de en la pantalla de un cliente que eligió inglés
+    o portugués."""
+    from plania import i18n
+
+    claves = {idioma: set(i18n._catalogo(idioma)) for idioma in i18n.IDIOMAS}
+    base = claves[i18n.IDIOMA_POR_DEFECTO]
+    for idioma, propias in claves.items():
+        faltan = base - propias
+        sobran = propias - base
+        assert not faltan, f"{idioma}.json no tiene: {sorted(faltan)[:10]}"
+        assert not sobran, f"{idioma}.json tiene claves de más: {sorted(sobran)[:10]}"
+
+
+def test_los_placeholders_coinciden_entre_idiomas():
+    """Una traducción que cambia o se come un `{placeholder}` no rompe al
+    traducir — rompe en producción, con un `ValueError` de `t()` en el
+    momento exacto en que un cliente mira esa pantalla en ese idioma. Se
+    detecta antes, comparando el conjunto de placeholders de cada clave
+    contra la versión en español."""
+    import re
+
+    from plania import i18n
+
+    patron = re.compile(r"\{(\w+)\}")
+    catalogos = {idioma: i18n._catalogo(idioma) for idioma in i18n.IDIOMAS}
+    base = catalogos[i18n.IDIOMA_POR_DEFECTO]
+
+    desajustes = []
+    for clave, plantilla_es in base.items():
+        esperados = set(patron.findall(plantilla_es))
+        for idioma in i18n.IDIOMAS:
+            propios = set(patron.findall(catalogos[idioma].get(clave, "")))
+            if propios != esperados:
+                desajustes.append(f"{idioma}:{clave} tiene {propios}, "
+                                  f"se esperaba {esperados}")
+    assert not desajustes, "\n".join(desajustes[:10])
+
+
+def test_t_interpola_y_cae_a_espanol_si_falta_en_el_idioma_pedido(monkeypatch):
+    from plania import i18n
+
+    assert i18n.t("comun.pdf", "es") == "PDF"
+    assert i18n.t("licencia.demo_full", "en", horas=5) == "**Full trial:** 5 h left"
+    assert i18n.t("licencia.demo_full", "pt", horas=5) == "**Demo completa:** faltam 5 h"
+
+    # Simula un catálogo en inglés al que todavía le falta una clave nueva:
+    # tiene que devolver la versión en español, no romper la pantalla.
+    original_en = i18n._catalogo("en")
+    incompleto = dict(original_en)
+    del incompleto["comun.pdf"]
+    original_es = i18n._catalogo("es")
+    monkeypatch.setattr(i18n, "_catalogo",
+                        lambda idioma: incompleto if idioma == "en" else original_es)
+    assert i18n.t("comun.pdf", "en") == "PDF"
+
+
+def test_t_con_clave_inexistente_avisa_en_vez_de_mostrar_la_clave_cruda():
+    from plania import i18n
+
+    try:
+        i18n.t("esto.no.existe.en.ningun.lado", "es")
+        assert False, "no avisó de la clave faltante"
+    except i18n.ClaveDeTraduccionFaltante:
+        pass
+
+
+def test_t_sin_el_valor_del_placeholder_avisa_claro():
+    from plania import i18n
+
+    try:
+        i18n.t("licencia.demo_full", "es")  # falta pasar horas=
+        assert False, "no avisó del placeholder sin valor"
+    except ValueError as e:
+        assert "demo_full" in str(e) and "es" in str(e)
+
+
+def test_miles_y_fmt_monto_usan_el_separador_de_cada_idioma():
+    """es y pt comparten formato (punto de miles, coma decimal); en usa el
+    de Estados Unidos. Cubre además el motivo real de `fmt_monto`: que un
+    monto de seis cifras no se corte en una tarjeta angosta."""
+    from plania import i18n
+
+    assert i18n.miles(1234567.89, 2, "es") == "1.234.567,89"
+    assert i18n.miles(1234567.89, 2, "pt") == "1.234.567,89"
+    assert i18n.miles(1234567.89, 2, "en") == "1,234,567.89"
+
+    assert i18n.fmt_monto(2_860_000, "es") == "$2,86 M"
+    assert i18n.fmt_monto(2_860_000, "en") == "$2.86 M"
+    assert i18n.fmt_monto(689_500, "es") == "$690 K"
+    assert i18n.fmt_monto(45_000, "es") == "$45.000"
+    assert i18n.fmt_monto(45_000, "en") == "$45,000"
+
+
+def test_idioma_persiste_y_valida_lo_que_recibe(monkeypatch):
+    from plania import i18n
+
+    try:
+        assert i18n.idioma_guardado() == "es"  # default sin nada guardado
+        i18n.establecer_idioma("pt")
+        assert i18n.idioma_guardado() == "pt"
+
+        try:
+            i18n.establecer_idioma("fr")
+            assert False, "aceptó un idioma que no existe"
+        except ValueError:
+            pass
+    finally:
+        from plania import config as pconfig
+        pconfig.guardar_extra("IDIOMA", None)
+
+
+def test_la_app_navega_por_clave_interna_no_por_texto_traducido():
+    """El bug real que apareció al traducir: la pantalla de Rutas comparaba
+    `"inactivos" in modo` contra el TEXTO YA TRADUCIDO del radio. Funcionaba
+    de casualidad en español ("Clientes inactivos...") y se rompía en
+    cualquier otro idioma, porque "Inactive customers" no contiene
+    "inactivos". La navegación tiene que comparar contra una clave interna
+    estable, con `format_func` traduciendo sólo lo que se ve — el mismo
+    patrón que ya usa Zonas para `dim`."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+
+    assert 'modo = st.radio(t("rutas.a_quien_visitar"), ["activos", "inactivos", "todos"]' in app, \
+        "rutas volvió a navegar por el texto visible en vez de una clave estable"
+    assert 'if modo == "inactivos"' in app and 'elif modo == "activos"' in app
+
+    # Y el propio menú: `pagina` tiene que ser la clave ("panel_ejecutivo"),
+    # no la etiqueta traducida — si no, cambiar de idioma cambiaría a qué
+    # pantalla apunta cada `elif pagina == ...` de más abajo.
+    assert 'pagina = pagina_clave' in app
+    assert 'elif pagina == "Panel ejecutivo"' not in app, \
+        "algún elif volvió a comparar contra el texto en español del menú"
+
+
+def test_el_selector_de_idioma_persiste_la_eleccion():
+    """El selector tiene que guardar el idioma elegido (para la próxima vez
+    que se abra el programa) y no sólo cambiarlo en la sesión actual."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert "i18n.establecer_idioma(_elegido)" in app
+    assert "st.session_state.idioma = _elegido" in app
+    # Antes del gate de la EULA: alguien que no lee español tiene que poder
+    # cambiar de idioma ANTES de toparse con la pantalla de términos de uso.
+    assert app.index("_elegido = st.sidebar.selectbox") < app.index("eula_aceptada")
+
+
+def test_el_copiloto_recibe_el_idioma_activo():
+    """Engancha `copiloto.responder` con el idioma de la sesión — el
+    entendimiento y la redacción en sí todavía son español únicamente (eso
+    es aparte, la Fase 4), pero el enganche tiene que estar puesto para
+    cuando se traduzca, y no exigir tocar `app.py` de nuevo."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert "copiloto.responder(pregunta, datos, idioma=IDIOMA)" in app
+
+    from plania import copiloto
+    import inspect
+    assert "idioma" in inspect.signature(copiloto.responder).parameters
+
+
+def test_las_capturas_del_producto_se_pueden_sacar_en_los_tres_idiomas():
+    """`sitio/actualizar_capturas.py` graba las capturas de `assets/capturas/`
+    manejando la app real con Playwright. Con la app ya traducida, tiene que
+    poder pedir un idioma — si no, las capturas del README quedan ancladas al
+    español mientras el resto del producto ya cambia de idioma."""
+    ruta = os.path.join(RAIZ, "sitio", "actualizar_capturas.py")
+    fuente = open(ruta, encoding="utf-8").read()
+    assert "idioma" in fuente.lower(), \
+        "actualizar_capturas.py no sabe pedir un idioma distinto del español"
+
+
+# ---------------------------------------------------------------------------
+# i18n Fase 3 — plania/sugerencias.py: el "motivo" sale del catálogo
+# ---------------------------------------------------------------------------
+def _datos_demo_para_sugerencias():
+    from plania import analitica, conectores
+    d = conectores.cargar_datos()
+    v = analitica.enriquecer_ventas(d["ventas"], d["productos"], d["clientes"])
+    return d, v
+
+
+def test_el_motivo_de_las_ofertas_sale_en_el_idioma_pedido():
+    """`motivo` era una oración armada a mano en español dentro del DATO —
+    viajaba así a la UI, al copiloto y a los exportes sin que tradujera nada
+    de lo de arriba. Ahora sale de `plania/i18n.py`, con los mismos números
+    ya calculados en la fila."""
+    from plania import i18n, sugerencias
+
+    d, v = _datos_demo_para_sugerencias()
+    for idioma in i18n.IDIOMAS:
+        of = sugerencias.ofertas_por_sobrestock(d["productos"], v, idioma)
+        assert len(of), "la base demo siempre tiene sobrestock; si esto da 0 el test no prueba nada"
+        motivo = of.iloc[0]["motivo"]
+        # El monto tiene que llevar el separador de miles de ESE idioma —
+        # es la prueba de que no quedó un f-string viejo colgado en algún
+        # lado que ignore `idioma`.
+        esperado = i18n.miles(of.iloc[0]["capital_inmovilizado"], 0, idioma)
+        assert esperado in motivo, f"[{idioma}] {motivo!r} no tiene el monto {esperado!r}"
+
+
+def test_el_piso_de_margen_de_ofertas_no_se_toco_traduciendo():
+    """CLAUDE.md: `MARGEN_MINIMO_OFERTA` es el piso (costo+8%) para
+    cualquier oferta sugerida — no se baja ni se saltea nunca. Traducir el
+    motivo no puede haber tocado la cuenta que decide el descuento.
+
+    La tolerancia no es de un centavo: `descuento_pct` se redondea a 0,1
+    punto porcentual ANTES de aplicarse al precio (`.round(3) * 100`), así
+    que el piso puede quedar corrido por esa fracción de redondeo incluso
+    sin tocar la lógica — se confirmó igual en el código previo a este
+    cambio, con un corrimiento mayor (hasta 20 centavos en la base demo).
+    Es una imprecisión de redondeo preexistente, no algo de este cambio; acá
+    sólo se cubre que siga acotada a esa fracción y no se haya vuelto a abrir
+    el piso entero."""
+    from plania import sugerencias
+
+    assert sugerencias.MARGEN_MINIMO_OFERTA == 0.08
+
+    d, v = _datos_demo_para_sugerencias()
+    of = sugerencias.ofertas_por_sobrestock(d["productos"], v)
+    productos_por_sku = d["productos"].set_index("sku")
+    for _, fila in of.iterrows():
+        costo = productos_por_sku.loc[fila["sku"], "costo"]
+        piso = costo * (1 + sugerencias.MARGEN_MINIMO_OFERTA)
+        tolerancia = max(0.30, piso * 0.003)   # redondeo de 0,1pp, no una franquicia real
+        assert fila["precio_oferta"] >= piso - tolerancia, \
+            f"{fila['sku']} ofrece ${fila['precio_oferta']} muy por debajo del piso ${piso:.2f}"
+
+
+def test_las_cinco_funciones_de_sugerencias_aceptan_idioma():
+    """Cada motor que arma un `motivo` tiene que poder recibir `idioma` — si
+    a una se le olvida el parámetro, esa tabla queda pegada al español
+    aunque el resto de la pantalla ya haya cambiado de idioma."""
+    import inspect
+
+    from plania import sugerencias
+
+    for nombre in ("ofertas_por_sobrestock", "reposicion", "precios",
+                   "oportunidades_zona", "recupero_clientes", "generar_todas"):
+        firma = inspect.signature(getattr(sugerencias, nombre))
+        assert "idioma" in firma.parameters, f"sugerencias.{nombre} no acepta idioma"
+
+
+def test_generar_todas_le_pasa_el_idioma_a_los_cinco_motores():
+    """`generar_todas` es el paquete completo que arma la pantalla de Ofertas
+    y los exportes — si sólo tradujera dos de los cinco motores, quedaría
+    una mezcla de idiomas en el mismo informe."""
+    from plania import sugerencias
+
+    d, v = _datos_demo_para_sugerencias()
+    paq = sugerencias.generar_todas(d, idioma="en")
+    for clave in ("ofertas", "reposicion", "precios"):
+        df = paq[clave]
+        if len(df):
+            assert "días" not in df.iloc[0]["motivo"], \
+                f"paq['{clave}']['motivo'] quedó en español pidiendo idioma='en'"
+
+
+def test_app_y_copiloto_le_pasan_el_idioma_activo_a_sugerencias():
+    """Que las funciones ACEPTEN idioma no alcanza si nadie se lo pasa. Cubre
+    el enganche real en los dos consumidores: la pantalla y el copiloto."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    for llamada in ("sugerencias.generar_todas(datos, idioma=IDIOMA)",
+                    'sugerencias.reposicion(datos["productos"], v, idioma=IDIOMA)',
+                    'sugerencias.precios(datos["productos"], v, idioma=IDIOMA)',
+                    "sugerencias.oportunidades_zona(v, idioma=IDIOMA)"):
+        assert llamada in app, f"app.py no le pasa el idioma activo: {llamada}"
+
+    cop = open(os.path.join(RAIZ, "plania", "copiloto.py"), encoding="utf-8").read()
+    assert "def _responder_local(pregunta: str, t: str, productos, clientes, v,\n                     idioma: str = \"es\")" in cop
+    assert cop.count("idioma=idioma") + cop.count(", idioma)") >= 5, \
+        "copiloto.py dejó de pasarle idioma a alguno de los motores de sugerencias"
+
+
+def test_las_zonas_categorias_y_tipos_de_negocio_no_se_traducen():
+    """`motivo.oportunidad_zona` interpola `zona`, `tipo` y `categoria` tal
+    cual vienen del ERP del cliente — son nombres propios (una zona
+    "Pocitos", una categoría "Bebidas"), no texto de producto. Traducirlos
+    sería inventarle un dato al cliente.
+
+    La base demo no genera ninguna brecha real (se comprobó: 0 filas), así
+    que se arma a mano un `v` sintético con la brecha que la función busca:
+    un tipo de negocio con >=5 clientes, una zona con >=3 de ellos, y una
+    categoría con penetración general >=40% pero >=25 puntos más baja ahí.
+    """
+    from plania import sugerencias
+
+    filas = []
+    # "Norte": penetración baja en Bebidas (la brecha). "Sur"+"Este":
+    # completan los clientes del tipo de negocio para que la penetración
+    # GENERAL de Bebidas dé alta.
+    for cid in range(1, 4):        # 3 clientes en zona Norte, ninguno compra Bebidas
+        filas.append({"cliente_id": f"norte{cid}", "zona": "Norte",
+                      "tipo_negocio": "Almacén", "categoria": "Limpieza", "venta": 1000.0})
+    for cid in range(1, 4):        # 3 clientes en zona Sur, todos compran Bebidas
+        filas.append({"cliente_id": f"sur{cid}", "zona": "Sur",
+                      "tipo_negocio": "Almacén", "categoria": "Bebidas", "venta": 2000.0})
+    v = pd.DataFrame(filas)
+
+    for idioma in ("es", "en", "pt"):
+        op = sugerencias.oportunidades_zona(v, idioma)
+        assert len(op), f"[{idioma}] el v sintético no generó ninguna brecha; revisar el fixture"
+        fila = op.iloc[0]
+        assert str(fila["zona"]) in fila["motivo"]
+        assert str(fila["categoria"]) in fila["motivo"]
+        assert str(fila["tipo_negocio"]) in fila["motivo"]
+
+
+# ---------------------------------------------------------------------------
+# i18n Fase 4 — plania/copiloto.py: entendimiento y redacción en 3 idiomas
+# ---------------------------------------------------------------------------
+def test_las_cinco_preguntas_de_ejemplo_de_la_ui_andan_en_los_tres_idiomas():
+    """`copiloto.ejemplos` (el texto de ayuda arriba del chat, en app.py)
+    promete cinco preguntas concretas por idioma — este test las corre de
+    verdad contra el motor local, en los tres idiomas, y comprueba que cada
+    una dispara la intención que promete el título traducido. Si algún
+    idioma quedara con las palabras clave mal puestas, el título delataría
+    que cayó en el fallback ("Resumen ejecutivo") en vez de en la intención
+    real.
+    """
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    # (pregunta, título esperado — el de la intención específica, no el
+    # fallback). Las preguntas son las mismas que ofrece `copiloto.ejemplos`
+    # en cada idioma del catálogo.
+    casos = {
+        "es": [
+            ("¿qué ofertas armo esta semana?", "Ofertas sugeridas por sobrestock"),
+            # "bebidas" matchea de verdad la categoría "Bebidas" del ERP
+            # demo, así que cae en la rama "productos encontrados" (título
+            # "Stock"), no en la de "sin producto puntual" ("Stock general").
+            ("¿cuánto stock hay de bebidas?", "Stock"),
+            ("¿qué zona está floja?", None),   # título trae el nombre real de la dimensión
+            ("¿qué repongo ya?", "Reposición sugerida"),
+            ("¿qué clientes perdí?", "Clientes a recuperar"),
+        ],
+        "en": [
+            ("what offers should I run this week?", "Offers suggested by overstock"),
+            ("how much beverage stock is there?", "Overall stock"),
+            ("which zone is underperforming?", None),
+            ("what should I restock now?", "Suggested restocking"),
+            ("which customers did I lose?", "Customers to win back"),
+        ],
+        "pt": [
+            ("quais ofertas eu monto esta semana?", "Ofertas sugeridas por excesso de estoque"),
+            # Mismo caso que en español: "bebidas" existe tal cual en la
+            # categoría del ERP demo.
+            ("quanto estoque de bebidas tem?", "Estoque"),
+            ("qual zona está fraca?", None),
+            ("o que eu reponho já?", "Reposição sugerida"),
+            ("quais clientes eu perdi?", "Clientes a recuperar"),
+        ],
+    }
+    fallbacks = {"es": "Resumen ejecutivo", "en": "Executive summary", "pt": "Resumo executivo"}
+
+    for idioma, preguntas in casos.items():
+        for pregunta, titulo_esperado in preguntas:
+            r = copiloto.responder(pregunta, datos, idioma=idioma)
+            assert r["respuesta"], f"[{idioma}] {pregunta!r} no devolvió texto"
+            assert r["titulo"] != fallbacks[idioma], \
+                f"[{idioma}] {pregunta!r} cayó en el fallback — el matching de esa intención se rompió"
+            if titulo_esperado:
+                assert r["titulo"] == titulo_esperado, \
+                    f"[{idioma}] {pregunta!r} dio título {r['titulo']!r}, se esperaba {titulo_esperado!r}"
+
+
+def test_el_copiloto_en_ingles_no_deja_texto_en_espanol():
+    """Mismo espíritu que `test_el_copiloto_usa_el_formato_de_numeros_de_aca`
+    (que ya cubre español), llevado a inglés: cada rama arma su propio texto
+    por separado, así que alcanza con que UNA se haya olvidado de traducir
+    para que la respuesta salga mitad y mitad."""
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    preguntas = [
+        "what offers should I run this week?", "what should I restock now?",
+        "which prices are leaving low margin?", "how is the stock?",
+        "which zone sells the most?", "who are my best customers?",
+        "which customers did I lose?", "which supplier should I prioritize?",
+        "how are sales going?", "which business type buys the most?",
+    ]
+    # Palabras que sólo aparecen en las plantillas en español — si una se
+    # cuela en una respuesta en inglés, alguna rama se quedó sin traducir.
+    delatoras_es = ["días", "dias de estoque", "días de stock", "quedan",
+                    "vencé", "está en", "que", "más", "días"]
+    problemas = []
+    for pregunta in preguntas:
+        texto = copiloto.responder(pregunta, datos, idioma="en")["respuesta"]
+        for palabra in delatoras_es:
+            if palabra in texto.lower():
+                problemas.append((pregunta, palabra, texto[:120]))
+    assert not problemas, f"respuestas en inglés con texto en español: {problemas}"
+
+
+def test_el_copiloto_respeta_el_formato_numerico_de_cada_idioma():
+    """Extiende `test_el_copiloto_usa_el_formato_de_numeros_de_aca` (que ya
+    cubre español) a inglés y portugués: los montos de la respuesta tienen
+    que llevar el separador de ESE idioma, no el de otro."""
+    import re
+
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    miles_es_pt = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?")   # 1.430.318
+    miles_en = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?")      # 1,430,318
+
+    for idioma, pregunta, patron_ajeno in [
+        ("en", "what offers should I run this week?", miles_es_pt),
+        ("pt", "quais ofertas eu monto esta semana?", miles_en),
+    ]:
+        texto = copiloto.responder(pregunta, datos, idioma=idioma)["respuesta"]
+        ajenos = patron_ajeno.findall(texto)
+        assert not ajenos, f"[{idioma}] {pregunta!r} usa el separador de otro idioma: {ajenos}"
+
+
+def test_la_busqueda_de_producto_encuentra_el_nombre_espanol_en_cualquier_idioma():
+    """`_buscar_producto` matchea substrings del nombre/categoría — el
+    nombre del producto viene del ERP del cliente y NO se traduce (es dato,
+    no texto de producto), así que preguntar en inglés o portugués sobre un
+    producto puntual tiene que seguir encontrándolo por su nombre real."""
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    nombre_real = datos["productos"].iloc[0]["nombre"]   # p.ej. "Congelados Clásico 184"
+    palabra_producto = nombre_real.split()[0]             # "Congelados"
+
+    for idioma, plantilla in [("es", "cuanto stock tiene {p}"),
+                              ("en", "how much stock does {p} have"),
+                              ("pt", "quanto estoque tem {p}")]:
+        prods = copiloto._buscar_producto(plantilla.format(p=palabra_producto),
+                                          datos["productos"], idioma)
+        assert len(prods), f"[{idioma}] no encontró ningún producto con {palabra_producto!r}"
+
+
+def test_el_prompt_de_claude_pide_la_respuesta_en_el_idioma_elegido():
+    """La capa Claude (cuando hay ANTHROPIC_API_KEY) redacta sobre los
+    mismos datos ya calculados — pero el prompt tenía "Español rioplatense"
+    fijo. Sin esto, activar el copiloto con IA hacía que la respuesta
+    volviera a español aunque el resto de la pantalla estuviera en otro
+    idioma."""
+    from plania import copiloto
+
+    assert set(copiloto._PROMPT_IA) == {"es", "en", "pt"}
+    assert "espanol" in copiloto._sin_tildes(copiloto._PROMPT_IA["es"])
+    assert "english" in copiloto._PROMPT_IA["en"].lower()
+    assert "portugues" in copiloto._sin_tildes(copiloto._PROMPT_IA["pt"])
+    # Ningún prompt puede pedir un idioma que no es el suyo.
+    assert "english" not in copiloto._PROMPT_IA["es"].lower()
+    assert "english" not in copiloto._PROMPT_IA["pt"].lower()
+
+
+def test_una_pregunta_sobre_compradores_no_cae_en_reposicion_en_ingles():
+    """Encontrado corriendo una batería amplia de preguntas en los tres
+    idiomas (no estaba en las cinco de ejemplo de la UI): "buy" como palabra
+    clave de reposición en inglés matcheaba "buys"/"buying" en cualquier
+    pregunta sobre qué tipo de negocio COMPRA más, y la mandaba a
+    "Reposición sugerida" en vez de "Ventas por tipo de negocio".
+
+    El español nunca tuvo este choque: "comprar" (infinitivo) no es
+    substring de "compra" (él/ella compra), así que "¿qué tipo de negocio
+    compra más?" nunca activó reposición. La traducción a "buy" sí lo era,
+    porque en inglés el mismo verbo cubre las dos formas."""
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    r = copiloto.responder("which business type buys the most?", datos, idioma="en")
+    assert r["titulo"] == "Sales by business type", \
+        f"'buys' volvió a activar reposición: título {r['titulo']!r}"
+
+    # Y las preguntas reales de reponer stock tienen que seguir andando.
+    for pregunta in ("what should I restock now?", "what do I need to buy?",
+                     "which products are running out?"):
+        r = copiloto.responder(pregunta, datos, idioma="en")
+        assert r["titulo"] == "Suggested restocking", \
+            f"{pregunta!r} dejó de activar reposición: título {r['titulo']!r}"
+
+
+# ---------------------------------------------------------------------------
+# i18n Fase 5 — plania/exportes.py: PDF/Word/Excel en el idioma elegido
+# ---------------------------------------------------------------------------
+def _texto_de_pdf(pdf_bytes: bytes) -> bytes:
+    """Extrae el texto crudo de un PDF de fpdf2, descomprimiendo los content
+    streams (`FlateDecode`). No hay parser de PDF entre las dependencias —
+    agregar uno sólo para este test no se justifica (CLAUDE.md) cuando
+    alcanza con deshacer la compresión a mano: fpdf2 comprime cada página
+    con zlib, así que buscar el texto en los bytes crudos del archivo
+    siempre da falso — hay que descomprimir primero."""
+    import re
+    import zlib
+
+    texto = b""
+    for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes, re.S):
+        try:
+            texto += zlib.decompress(m.group(1))
+        except zlib.error:
+            pass
+    return texto
+
+
+def test_titulo_seccion_da_las_cinco_secciones_en_los_tres_idiomas():
+    """No se exige que los tres idiomas den textos distintos entre sí: "zonas"
+    es "Oportunidades por zona" tanto en español como en portugués —mismas
+    palabras, cognados—, y eso es una traducción correcta, no un olvido. Lo
+    que sí tiene que ser cierto siempre es que el inglés difiera (no hay
+    cognados de esa frase completa) y que ningún idioma quede vacío."""
+    from plania import exportes, i18n
+
+    for clave in exportes._CLAVES_SECCION:
+        por_idioma = {}
+        for idioma in i18n.IDIOMAS:
+            titulo, texto = exportes.titulo_seccion(clave, idioma)
+            assert titulo and texto, f"{clave}/{idioma} vino vacío"
+            por_idioma[idioma] = titulo
+        assert por_idioma["en"] not in (por_idioma["es"], por_idioma["pt"]), \
+            f"{clave}: el inglés quedó igual al español o al portugués: {por_idioma}"
+
+
+def test_titulos_sigue_siendo_compatible_con_la_api_del_dueno():
+    """`plania/api.py` (la ventana Electron/React, todavía sin traducir —
+    es su propio cambio, aparte de éste) lee `exportes.TITULOS` como un
+    diccionario plano en español. No se le puede cambiar la forma sin
+    romper ese consumidor."""
+    from plania import exportes
+
+    assert set(exportes.TITULOS) == set(exportes._CLAVES_SECCION)
+    for clave, (titulo, texto) in exportes.TITULOS.items():
+        assert (titulo, texto) == exportes.titulo_seccion(clave, "es")
+
+
+def test_los_tres_formatos_de_exporte_salen_en_el_idioma_pedido():
+    """PDF, Word y Excel del mismo paquete de sugerencias, en los tres
+    idiomas — comprueba el documento real, no la plantilla: el PDF se
+    descomprime para leer el texto de verdad, el Word y el Excel se
+    reabren con las mismas librerías que los generan."""
+    import io
+
+    from docx import Document
+    from openpyxl import load_workbook
+
+    from plania import conectores, exportes, i18n, sugerencias
+
+    d = conectores.cargar_datos()
+    esperado_encabezado = {}
+    for idioma in i18n.IDIOMAS:
+        paq = sugerencias.generar_todas(d, idioma)
+        secciones = exportes.secciones_desde_paquete(paq, idioma=idioma)
+
+        pdf_texto = _texto_de_pdf(exportes.a_pdf("Informe", secciones, idioma))
+        # latin-1 (no el utf-8 por defecto de `.encode()`): ver el comentario
+        # de más abajo, junto al chequeo del pie de página.
+        encabezado = i18n.t("exportes.encabezado_generado", idioma,
+                            fecha="01/01/2026").split(" 01/01/2026")[0].encode("latin-1")
+        assert encabezado in pdf_texto, \
+            f"[{idioma}] el PDF no tiene el encabezado en su idioma"
+        # latin-1 y no el utf-8 por defecto de `.encode()`: `_lat()` en
+        # exportes.py vuelca el PDF en latin-1 (el único que entienden las
+        # fuentes core de fpdf2), así que "·" es un byte (\xb7), no dos.
+        pie = i18n.t("exportes.pie_marca", idioma).encode("latin-1")
+        assert pie in pdf_texto, f"[{idioma}] el PDF no tiene el pie de marca en su idioma"
+        esperado_encabezado[idioma] = encabezado
+
+        doc = Document(io.BytesIO(exportes.a_word("Informe", secciones, idioma)))
+        texto_word = "\n".join(p.text for p in doc.paragraphs)
+        assert i18n.t("exportes.pie_marca_word", idioma) in texto_word, \
+            f"[{idioma}] el Word no tiene el pie de marca en su idioma"
+
+        wb = load_workbook(io.BytesIO(exportes.a_excel(secciones, idioma)))
+        primera_hoja = wb[wb.sheetnames[0]]
+        marca_celda = str(primera_hoja["A1"].value or "")
+        assert "Plania" in marca_celda, f"[{idioma}] la hoja de Excel no tiene la marca esperada"
+
+    # Y que un idioma no se cuele en otro: el encabezado de inglés no puede
+    # aparecer en el PDF en portugués, y viceversa.
+    for idioma in i18n.IDIOMAS:
+        paq = sugerencias.generar_todas(d, idioma)
+        secciones = exportes.secciones_desde_paquete(paq, idioma=idioma)
+        pdf_texto = _texto_de_pdf(exportes.a_pdf("Informe", secciones, idioma))
+        for otro, encabezado_otro in esperado_encabezado.items():
+            if otro == idioma:
+                continue
+            assert encabezado_otro not in pdf_texto, \
+                f"el PDF en {idioma} tiene el encabezado de {otro}"
+
+
+def test_las_celdas_de_los_exportes_usan_el_separador_de_cada_idioma():
+    """Antes `_tabla_pdf`/`a_word` armaban cada celda con `f"{val:,.2f}"` —
+    el formato de Estados Unidos de Python, sin importar el idioma del
+    documento. Es el mismo bug que ya se había corregido en las tarjetas
+    de `app.py` y en las respuestas del copiloto, sólo que acá seguía sin
+    tocar."""
+    import io
+
+    from docx import Document
+
+    from plania import exportes
+
+    df = __import__("pandas").DataFrame({"col": [1430318.5]})
+    secciones = [("Sección", "texto", df)]
+
+    doc_es = Document(io.BytesIO(exportes.a_word("Informe", secciones, "es")))
+    celdas_es = [c.text for t in doc_es.tables for r in t.rows for c in r.cells]
+    assert "1.430.318,50" in celdas_es, f"celda en español sin el separador de acá: {celdas_es}"
+
+    doc_en = Document(io.BytesIO(exportes.a_word("Report", secciones, "en")))
+    celdas_en = [c.text for t in doc_en.tables for r in t.rows for c in r.cells]
+    assert "1,430,318.50" in celdas_en, f"celda en inglés con el separador de Uruguay: {celdas_en}"
+
+    pdf_pt = _texto_de_pdf(exportes.a_pdf("Relatório", secciones, "pt"))
+    assert "1.430.318,50".encode() in pdf_pt, "celda en portugués sin el separador esperado"
+
+
+def test_secciones_desde_paquete_interpola_los_montos_del_resumen():
+    from plania import conectores, exportes, i18n, sugerencias
+
+    d = conectores.cargar_datos()
+    for idioma in i18n.IDIOMAS:
+        paq = sugerencias.generar_todas(d, idioma)
+        secciones = exportes.secciones_desde_paquete(paq, idioma=idioma)
+        titulo_resumen, texto_resumen, _ = secciones[0]
+        assert titulo_resumen == i18n.t("exportes.resumen_titulo", idioma)
+        # El resumen tiene que llevar el monto de verdad, no un placeholder
+        # sin interpolar ("{capital_liberable}" suelto en el texto final).
+        assert "{" not in texto_resumen, f"[{idioma}] quedó un placeholder sin interpolar: {texto_resumen}"
+        assert i18n.miles(paq["resumen"]["capital_liberable"], 0, idioma) in texto_resumen
