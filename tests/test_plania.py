@@ -3204,11 +3204,23 @@ def test_lo_que_dice_cada_plan_es_lo_que_ese_plan_hace():
                     f"{idioma}.json vende '{palabra}' como diferencial de Pro, "
                     f"pero Starter ya las incluye")
 
-        for archivo in ("app/app.py", "plania/api.py"):
+        for archivo in ("plania/api.py",):
             with open(os.path.join(RAIZ, archivo), encoding="utf-8") as f:
                 cuerpo = f.read()
             assert "Copiloto + ERP + exportes ·" not in cuerpo, (
                 f"{archivo} describe Starter sin rutas, pero el plan las tiene")
+
+        # app/app.py ya no lleva esta descripción como texto suelto: sale del
+        # catálogo de idiomas (plania/locales/*.json), que es donde hay que
+        # mirar para que este control siga significando algo.
+        for idioma in ("es", "en", "pt"):
+            ruta = os.path.join(RAIZ, "plania", "locales", f"{idioma}.json")
+            with open(ruta, encoding="utf-8") as f:
+                catalogo_app = json.load(f)
+            detalle = catalogo_app.get("planes.starter_detalle", "").lower()
+            assert "rutas" in detalle or "route" in detalle or "rota" in detalle, (
+                f"plania/locales/{idioma}.json describe Starter sin rutas, "
+                f"pero el plan las tiene: {detalle!r}")
 
     # Y lo que sí distingue a Pro tiene que seguir siendo cierto.
     assert "excedente" in pro and "excedente" not in starter, (
@@ -4223,7 +4235,15 @@ def test_la_app_ofrece_filtros_y_avisa_cuando_estan_puestos():
     assert "_aviso_filtros" in app
     assert app.count("_aviso_filtros()") >= 5, \
         "el aviso tiene que estar en todas las pantallas que filtran"
-    assert "Limpiar filtros" in app
+    # El texto del botón vive en el catálogo de idiomas desde que la app se
+    # tradujo (plania/i18n.py); acá sólo se comprueba que la pantalla lo pida
+    # por esa clave y no con un string suelto que un idioma se salte.
+    assert 't("filtros.limpiar")' in app
+
+    from plania import i18n
+    for idioma in i18n.IDIOMAS:
+        assert i18n.t("filtros.limpiar", idioma).strip(), \
+            f"falta la traducción de 'Limpiar filtros' en {idioma}"
 
 
 # ---------------------------------------------------------------------------
@@ -4232,41 +4252,51 @@ def test_la_app_ofrece_filtros_y_avisa_cuando_estan_puestos():
 def test_los_montos_usan_el_formato_de_aca():
     """`$2.86 M` con punto decimal es formato de Estados Unidos; en Uruguay
     eso se lee "dos punto ochenta y seis". Y un número cortado en la pantalla
-    principal es lo peor que puede pasar en una demo."""
-    import importlib.util
-    import sys
+    principal es lo peor que puede pasar en una demo.
 
-    ruta = os.path.join(RAIZ, "app", "app.py")
-    fuente = open(ruta, encoding="utf-8").read()
-    # Se ejecutan solo las dos funciones de formato, sin levantar Streamlit.
-    ns: dict = {}
-    inicio = fuente.index("def _miles(")
-    fin = fuente.index("# Nombres de columna que ve el cliente")
-    exec(compile(fuente[inicio:fin], ruta, "exec"), ns)
-
-    assert ns["_miles"](1234567.89, 2) == "1.234.567,89"
-    assert ns["_fmt"](2856128) == "$2,86 M"
-    # El caso que se veía cortado como "$689,…" en la tarjeta:
-    assert ns["_fmt"](689234) == "$689 K"
-    assert ns["_fmt"](1500) == "$1.500"
+    El formato en sí lo prueba `test_miles_y_fmt_monto_usan_el_separador_de_
+    cada_idioma` contra `plania/i18n.py`, que es donde vive de verdad desde
+    que la app se tradujo. Lo que este test cubre es que `app.py` no se haya
+    vuelto a escribir la cuenta por su cuenta — dos implementaciones del
+    mismo formato es como aparece un `$2.86 M` con punto en una pantalla y
+    un `$2,86 M` con coma en la de al lado."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    cuerpo = app.split("def _miles(")[1].split("def _fmt(")[0]
+    assert "i18n.miles(" in cuerpo, \
+        "_miles ya no delega en plania.i18n: se reimplementó la cuenta en app.py"
+    cuerpo_fmt = app.split("def _fmt(")[1].split("\n\n\n")[0]
+    assert "i18n.fmt_monto(" in cuerpo_fmt, \
+        "_fmt ya no delega en plania.i18n: se reimplementó la cuenta en app.py"
 
 
 def test_no_se_le_muestran_al_cliente_los_nombres_internos():
     """`cliente_id`, `ultima_compra` y `margen_pct` son nombres del modelo de
-    datos. El cliente tiene que ver el nombre de su negocio."""
+    datos. El cliente tiene que ver el nombre de su negocio, en su idioma."""
     app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
 
-    assert "ETIQUETAS = {" in app
+    assert "_COLUMNAS_INTERNAS = (" in app
+    columnas_declaradas = app.split("_COLUMNAS_INTERNAS = (")[1].split(")")[0]
+    assert 'ETIQUETAS = {c: t(f"columnas.{c}")' in app, \
+        "ETIQUETAS tiene que salir del catálogo de idiomas, no de un diccionario fijo"
+
+    from plania import i18n
     for interno in ("cliente_id", "ultima_compra", "margen_pct", "stock_min"):
-        assert f'"{interno}"' in app.split("ETIQUETAS = {")[1].split("}")[0], \
-            f"falta la etiqueta en castellano para {interno}"
+        assert f'"{interno}"' in columnas_declaradas, \
+            f"{interno} no está en _COLUMNAS_INTERNAS: no se traduce en ninguna tabla"
+        for idioma in i18n.IDIOMAS:
+            etiqueta = i18n.t(f"columnas.{interno}", idioma)
+            assert etiqueta and etiqueta != interno, \
+                f"falta la etiqueta de {interno} en {idioma}"
 
     # Todas las tablas pasan por el mismo formateador: si alguna usa
     # st.dataframe directo, queda mostrando 315742.95 al lado de otra que
-    # muestra 315.743.
+    # muestra 315.743. Las excepciones a mano son la vista previa cruda de un
+    # archivo recién subido (todavía no es una tabla del producto) y la de
+    # Zonas, que sólo traduce encabezados porque son valores ya agregados.
     cuerpo = app.split("def _tabla(")[1]
     directas = [l for l in cuerpo.splitlines()
-                if "st.dataframe(" in l and "vista" not in l]
+                if "st.dataframe(" in l and "vista" not in l
+                and "nuevos[" not in l and "g.rename" not in l]
     assert len(directas) <= 2, f"tablas sin formatear: {directas}"
 
 
@@ -6315,3 +6345,177 @@ def test_un_script_contra_checkout_no_quema_la_cuota_diaria_de_gmail(monkeypatch
 
     assert len(enviados) == avisos.LIMITE_POR_HORA, \
         f"se mandaron {len(enviados)} mails: el tope por hora no frenó nada"
+
+
+# ---------------------------------------------------------------------------
+# i18n — plania/i18n.py
+# ---------------------------------------------------------------------------
+def test_los_catalogos_de_idioma_tienen_las_mismas_claves():
+    """Si un catálogo se queda atrás del otro, `t()` cae a español en
+    silencio — el test de completitud es lo único que hace que ese olvido
+    reviente en CI en vez de en la pantalla de un cliente que eligió inglés
+    o portugués."""
+    from plania import i18n
+
+    claves = {idioma: set(i18n._catalogo(idioma)) for idioma in i18n.IDIOMAS}
+    base = claves[i18n.IDIOMA_POR_DEFECTO]
+    for idioma, propias in claves.items():
+        faltan = base - propias
+        sobran = propias - base
+        assert not faltan, f"{idioma}.json no tiene: {sorted(faltan)[:10]}"
+        assert not sobran, f"{idioma}.json tiene claves de más: {sorted(sobran)[:10]}"
+
+
+def test_los_placeholders_coinciden_entre_idiomas():
+    """Una traducción que cambia o se come un `{placeholder}` no rompe al
+    traducir — rompe en producción, con un `ValueError` de `t()` en el
+    momento exacto en que un cliente mira esa pantalla en ese idioma. Se
+    detecta antes, comparando el conjunto de placeholders de cada clave
+    contra la versión en español."""
+    import re
+
+    from plania import i18n
+
+    patron = re.compile(r"\{(\w+)\}")
+    catalogos = {idioma: i18n._catalogo(idioma) for idioma in i18n.IDIOMAS}
+    base = catalogos[i18n.IDIOMA_POR_DEFECTO]
+
+    desajustes = []
+    for clave, plantilla_es in base.items():
+        esperados = set(patron.findall(plantilla_es))
+        for idioma in i18n.IDIOMAS:
+            propios = set(patron.findall(catalogos[idioma].get(clave, "")))
+            if propios != esperados:
+                desajustes.append(f"{idioma}:{clave} tiene {propios}, "
+                                  f"se esperaba {esperados}")
+    assert not desajustes, "\n".join(desajustes[:10])
+
+
+def test_t_interpola_y_cae_a_espanol_si_falta_en_el_idioma_pedido(monkeypatch):
+    from plania import i18n
+
+    assert i18n.t("comun.pdf", "es") == "PDF"
+    assert i18n.t("licencia.demo_full", "en", horas=5) == "**Full trial:** 5 h left"
+    assert i18n.t("licencia.demo_full", "pt", horas=5) == "**Demo completa:** faltam 5 h"
+
+    # Simula un catálogo en inglés al que todavía le falta una clave nueva:
+    # tiene que devolver la versión en español, no romper la pantalla.
+    original_en = i18n._catalogo("en")
+    incompleto = dict(original_en)
+    del incompleto["comun.pdf"]
+    original_es = i18n._catalogo("es")
+    monkeypatch.setattr(i18n, "_catalogo",
+                        lambda idioma: incompleto if idioma == "en" else original_es)
+    assert i18n.t("comun.pdf", "en") == "PDF"
+
+
+def test_t_con_clave_inexistente_avisa_en_vez_de_mostrar_la_clave_cruda():
+    from plania import i18n
+
+    try:
+        i18n.t("esto.no.existe.en.ningun.lado", "es")
+        assert False, "no avisó de la clave faltante"
+    except i18n.ClaveDeTraduccionFaltante:
+        pass
+
+
+def test_t_sin_el_valor_del_placeholder_avisa_claro():
+    from plania import i18n
+
+    try:
+        i18n.t("licencia.demo_full", "es")  # falta pasar horas=
+        assert False, "no avisó del placeholder sin valor"
+    except ValueError as e:
+        assert "demo_full" in str(e) and "es" in str(e)
+
+
+def test_miles_y_fmt_monto_usan_el_separador_de_cada_idioma():
+    """es y pt comparten formato (punto de miles, coma decimal); en usa el
+    de Estados Unidos. Cubre además el motivo real de `fmt_monto`: que un
+    monto de seis cifras no se corte en una tarjeta angosta."""
+    from plania import i18n
+
+    assert i18n.miles(1234567.89, 2, "es") == "1.234.567,89"
+    assert i18n.miles(1234567.89, 2, "pt") == "1.234.567,89"
+    assert i18n.miles(1234567.89, 2, "en") == "1,234,567.89"
+
+    assert i18n.fmt_monto(2_860_000, "es") == "$2,86 M"
+    assert i18n.fmt_monto(2_860_000, "en") == "$2.86 M"
+    assert i18n.fmt_monto(689_500, "es") == "$690 K"
+    assert i18n.fmt_monto(45_000, "es") == "$45.000"
+    assert i18n.fmt_monto(45_000, "en") == "$45,000"
+
+
+def test_idioma_persiste_y_valida_lo_que_recibe(monkeypatch):
+    from plania import i18n
+
+    try:
+        assert i18n.idioma_guardado() == "es"  # default sin nada guardado
+        i18n.establecer_idioma("pt")
+        assert i18n.idioma_guardado() == "pt"
+
+        try:
+            i18n.establecer_idioma("fr")
+            assert False, "aceptó un idioma que no existe"
+        except ValueError:
+            pass
+    finally:
+        from plania import config as pconfig
+        pconfig.guardar_extra("IDIOMA", None)
+
+
+def test_la_app_navega_por_clave_interna_no_por_texto_traducido():
+    """El bug real que apareció al traducir: la pantalla de Rutas comparaba
+    `"inactivos" in modo` contra el TEXTO YA TRADUCIDO del radio. Funcionaba
+    de casualidad en español ("Clientes inactivos...") y se rompía en
+    cualquier otro idioma, porque "Inactive customers" no contiene
+    "inactivos". La navegación tiene que comparar contra una clave interna
+    estable, con `format_func` traduciendo sólo lo que se ve — el mismo
+    patrón que ya usa Zonas para `dim`."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+
+    assert 'modo = st.radio(t("rutas.a_quien_visitar"), ["activos", "inactivos", "todos"]' in app, \
+        "rutas volvió a navegar por el texto visible en vez de una clave estable"
+    assert 'if modo == "inactivos"' in app and 'elif modo == "activos"' in app
+
+    # Y el propio menú: `pagina` tiene que ser la clave ("panel_ejecutivo"),
+    # no la etiqueta traducida — si no, cambiar de idioma cambiaría a qué
+    # pantalla apunta cada `elif pagina == ...` de más abajo.
+    assert 'pagina = pagina_clave' in app
+    assert 'elif pagina == "Panel ejecutivo"' not in app, \
+        "algún elif volvió a comparar contra el texto en español del menú"
+
+
+def test_el_selector_de_idioma_persiste_la_eleccion():
+    """El selector tiene que guardar el idioma elegido (para la próxima vez
+    que se abra el programa) y no sólo cambiarlo en la sesión actual."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert "i18n.establecer_idioma(_elegido)" in app
+    assert "st.session_state.idioma = _elegido" in app
+    # Antes del gate de la EULA: alguien que no lee español tiene que poder
+    # cambiar de idioma ANTES de toparse con la pantalla de términos de uso.
+    assert app.index("_elegido = st.sidebar.selectbox") < app.index("eula_aceptada")
+
+
+def test_el_copiloto_recibe_el_idioma_activo():
+    """Engancha `copiloto.responder` con el idioma de la sesión — el
+    entendimiento y la redacción en sí todavía son español únicamente (eso
+    es aparte, la Fase 4), pero el enganche tiene que estar puesto para
+    cuando se traduzca, y no exigir tocar `app.py` de nuevo."""
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert "copiloto.responder(pregunta, datos, idioma=IDIOMA)" in app
+
+    from plania import copiloto
+    import inspect
+    assert "idioma" in inspect.signature(copiloto.responder).parameters
+
+
+def test_las_capturas_del_producto_se_pueden_sacar_en_los_tres_idiomas():
+    """`sitio/actualizar_capturas.py` graba las capturas de `assets/capturas/`
+    manejando la app real con Playwright. Con la app ya traducida, tiene que
+    poder pedir un idioma — si no, las capturas del README quedan ancladas al
+    español mientras el resto del producto ya cambia de idioma."""
+    ruta = os.path.join(RAIZ, "sitio", "actualizar_capturas.py")
+    fuente = open(ruta, encoding="utf-8").read()
+    assert "idioma" in fuente.lower(), \
+        "actualizar_capturas.py no sabe pedir un idioma distinto del español"

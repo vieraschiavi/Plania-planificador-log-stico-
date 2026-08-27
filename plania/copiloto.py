@@ -74,10 +74,17 @@ def _n(texto: str, default: int = 10) -> int:
     return int(m.group(1)) if m else default
 
 
-def responder(pregunta: str, datos: dict) -> dict:
+def responder(pregunta: str, datos: dict, idioma: str = "es") -> dict:
     """
     Devuelve {"respuesta": str, "tabla": DataFrame|None, "titulo": str}.
     La tabla es la evidencia de la respuesta — exportable tal cual.
+
+    `idioma` está aceptado pero todavía no cambia nada: el entendimiento de
+    la pregunta y la redacción de la respuesta siguen siendo español
+    únicamente. Traducirlos es un cambio propio (reescribir el matching de
+    palabras clave y las plantillas de respuesta para inglés/portugués, no
+    sólo pasar un parámetro) — éste sólo deja el enganche listo para cuando
+    se haga, sin romper a quien ya llama a `responder()` sin ese argumento.
     """
     productos, clientes = datos["productos"], datos["clientes"]
     v = analitica.enriquecer_ventas(datos["ventas"], productos, clientes)
