@@ -108,6 +108,12 @@ uvicorn backend_venta.app:app --port 8100   # backend de venta (licencias + Merc
 python3 -m plania.verificacion       # verificación end-to-end del producto
 ```
 
+Para probar la **versión FULL** (las 8 features, sin cupo, sin vencer) en vez
+de la demo de 7 días: [`INSTALADOR_OWNER/`](INSTALADOR_OWNER/) — doble clic en
+`ACTIVAR-OWNER.bat` (Windows) o `./INSTALADOR_OWNER/activar-owner.sh`
+(Linux/macOS). No baja nada ni trae ninguna clave adentro: emite la licencia
+en tu máquina. Ver el LEEME de esa carpeta para el detalle.
+
 ## Correr los tests
 
 En una máquina limpia, sin nada instalado más que Python 3.11+ — no hace

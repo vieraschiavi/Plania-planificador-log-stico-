@@ -3081,6 +3081,135 @@ def test_el_panel_del_dueno_no_se_publica_en_el_repo_publico():
         "si alguien escribe otra cosa al lanzarlo a mano")
 
 
+# ---------------------------------------------------------------------------
+# INSTALADOR_OWNER/: probar la versión full en la máquina del dueño
+# ---------------------------------------------------------------------------
+CARPETA_OWNER = os.path.join(RAIZ, "INSTALADOR_OWNER")
+
+
+def test_el_activador_owner_deja_la_version_full_y_se_puede_revertir():
+    """El activador tiene que dejar el MISMO plan que compra un cliente.
+
+    No alcanza con que "no falle": si emitiera un plan más chico, o le
+    faltara una feature, la versión que se prueba acá no sería la que se
+    vende — que es justamente el punto de la carpeta.
+    """
+    import importlib.util
+
+    from plania import config as pconfig
+    from plania import licencia as plicencia
+
+    spec = importlib.util.spec_from_file_location(
+        "activar_owner", os.path.join(CARPETA_OWNER, "activar_owner.py"))
+    activador = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(activador)
+
+    # La licencia vive en la config real (~/.plania), igual que para los otros
+    # tests que la tocan: se guarda lo que había y se repone al final.
+    previo = {c: pconfig.leer_extra(c) for c in
+              (plicencia._CLAVE_LICENCIA, plicencia._CLAVE_CLAIMS,
+               plicencia._CLAVE_VERIFICADA_EL)}
+    try:
+        r = activador._emitir_y_verificar("test-owner@plania.uy")
+        assert r["ok"], f"la activación falló: {r.get('error')}"
+        assert r["claims"]["plan"] == "owner"
+        assert r["claims"]["cupo_mensual"] is None, "el plan owner no lleva cupo"
+
+        # Las ocho: las cuatro de la demo más las cuatro que sólo trae el plan
+        # más alto. Es lo que la tabla del LEEME.md le promete al que lo lee.
+        assert set(r["claims"]["features"]) == {
+            "copiloto", "erp", "exportes", "rutas",
+            "excedente", "white_label", "sso", "multi_sucursal"}
+
+        e = plicencia.estado()
+        assert e["modo"] == "licencia" and e["plan"] == "owner"
+        assert e["dias_restantes"] > 36000, "tenía que durar 100 años"
+
+        assert activador.desactivar() == 0
+        assert plicencia.estado()["modo"] != "licencia"
+    finally:
+        for clave, valor in previo.items():
+            pconfig.guardar_extra(clave, valor)
+
+
+def test_el_activador_owner_no_trae_ninguna_licencia_adentro():
+    """Este repositorio es público: una licencia commiteada acá es acceso
+    total, gratis, para siempre, para cualquiera que la copie.
+
+    Es exactamente el agujero que se cerró cuando `plania/licencia.py` dejó de
+    aceptar tokens sin verificar la firma. El activador emite la licencia en
+    la máquina del dueño justamente para no tener que guardarla; este control
+    es lo que evita que alguien "simplifique" pegando un token ya emitido.
+    """
+    import re
+
+    # Un JWT arranca siempre con el header en base64url, y `{"` codificado da
+    # `eyJ`. Es el marcador que no se puede evitar aunque se cambie el nombre
+    # de la variable o del archivo.
+    jwt_a_la_vista = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
+
+    for nombre in sorted(os.listdir(CARPETA_OWNER)):
+        ruta = os.path.join(CARPETA_OWNER, nombre)
+        if not os.path.isfile(ruta):
+            continue
+        texto = open(ruta, encoding="utf-8", errors="replace").read()
+        assert not jwt_a_la_vista.search(texto), (
+            f"{nombre} tiene un JWT escrito adentro: si es una licencia, "
+            f"publicarla acá la regala")
+        assert "PLANIA_LICENSE_SECRET=" not in texto, (
+            f"{nombre} tiene el secreto de firma escrito adentro")
+
+
+def test_la_carpeta_del_activador_no_se_llena_de_binarios():
+    """Los instaladores de Plania pesan entre 99,7 y 190,8 MB y GitHub rechaza
+    cualquier archivo de más de 100 MB — ya lo rechazó una vez en este repo.
+
+    Aun por debajo del límite, cada binario commiteado suma su peso al
+    historial de git para siempre. Los instaladores van a Releases; acá va
+    sólo el activador, que pesa kilobytes.
+    """
+    for nombre in sorted(os.listdir(CARPETA_OWNER)):
+        ruta = os.path.join(CARPETA_OWNER, nombre)
+        if not os.path.isfile(ruta):
+            continue
+        mb = os.path.getsize(ruta) / (1024 * 1024)
+        assert mb < 1, (
+            f"{nombre} pesa {mb:.1f} MB. Los binarios van a la página de "
+            f"Releases, no a esta carpeta (ver LEEME.md).")
+        assert not nombre.lower().endswith((".exe", ".zip", ".msi")), (
+            f"{nombre} es un instalador: va a Releases, no acá")
+
+
+def test_el_activador_owner_no_es_el_panel_del_dueno():
+    """La carpeta prueba el PRODUCTO desbloqueado, no el panel del negocio.
+
+    Son dos cosas distintas y mezclarlas sería publicar en un repositorio
+    público la facturación, los clientes y los márgenes. El activador no tiene
+    por qué importar nada de eso.
+    """
+    import ast
+
+    codigo = open(os.path.join(CARPETA_OWNER, "activar_owner.py"),
+                  encoding="utf-8").read()
+
+    # Se miran los imports de verdad, no el texto: el archivo NOMBRA
+    # `app/owner.py` en su docstring, a propósito, para explicar que eso es
+    # otra cosa. Un `in codigo` daría rojo por esa explicación — que es
+    # justamente lo que hay que conservar.
+    importados = set()
+    for nodo in ast.walk(ast.parse(codigo)):
+        if isinstance(nodo, ast.Import):
+            importados.update(a.name for a in nodo.names)
+        elif isinstance(nodo, ast.ImportFrom) and nodo.module:
+            importados.add(nodo.module)
+            importados.update(f"{nodo.module}.{a.name}" for a in nodo.names)
+
+    for prohibido in ("plania.negocio", "plania.owner", "app.owner"):
+        assert prohibido not in importados, (
+            f"activar_owner.py importa {prohibido}, que es del panel del dueño "
+            f"y no puede viajar en este repositorio público")
+
+
 def test_el_servidor_de_licencias_se_puede_configurar_desde_el_programa():
     """Sin esto, NADIE puede activar una licencia — ni un cliente que pagó.
 
