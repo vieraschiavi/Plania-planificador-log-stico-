@@ -29,7 +29,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from backend_venta import descargas, licencias, pagos, uso
+from backend_venta import avisos, descargas, licencias, pagos, uso
 from plania import auditoria as pauditoria
 from plania import config as pconfig
 
@@ -168,6 +168,7 @@ async def solicitar_demo(request: Request, payload: dict):
                                  _campo("mensaje", 600))
     pauditoria.registrar("demo_solicitada",
                          {"cliente": email, "empresa": empresa, "pais": pais})
+    avisos.aviso_pedido_de_demo(email, nombre, empresa, pais, _campo("mensaje", 600))
     return {"ok": True,
             "mensaje": "Recibimos tu pedido. Te escribimos para coordinar una "
                        "demo en vivo con tus propios datos."}
@@ -278,6 +279,9 @@ async def checkout(request: Request, payload: dict):
     data = r.json()
     pauditoria.registrar("checkout_creado", {"plan": plan, "email": email,
                                              "preference_id": data.get("id")})
+    avisos.aviso_intencion_de_compra(
+        email, plan, float(p["precio"]),
+        os.environ.get("PLANIA_MONEDA", "USD"))
     return {"ok": True, "init_point": data.get("init_point"),
             "preference_id": data.get("id")}
 
@@ -352,11 +356,26 @@ def _emitir_por_pago(payment_id: str, pago: dict) -> dict:
     token_descarga = descargas.crear_token_descarga(cliente_id)
     guardado = pagos.registrar(payment_id, cliente_id, plan, lic, token_descarga)
     # `registrar` devuelve lo que quedó en la base: si otra llamada ganó la
-    # carrera, se usa la suya y la nuestra se descarta.
-    if guardado["licencia"] == lic:
+    # carrera, se usa la suya y la nuestra se descarta. `nuevo` dice si el
+    # pago lo registró ESTA llamada.
+    #
+    # Antes acá se comparaba `guardado["licencia"] == lic`, y estaba mal: el
+    # JWT se firma sobre `iat` en segundos, así que dos llamadas del mismo
+    # pago dentro del mismo segundo producen el MISMO token byte a byte y la
+    # comparación daba verdadera en las dos. Un reintento del webhook —que
+    # MercadoPago manda enseguida— asentaba la venta dos veces en la
+    # auditoría. No era visible porque el efecto duplicado era sólo un
+    # renglón de log; con el aviso por correo colgado del mismo lugar pasaba
+    # a ser un mail repetido por cada reintento.
+    if guardado["nuevo"]:
         pauditoria.registrar("licencia_emitida_pago",
                              {"cliente": cliente_id, "plan": plan,
                               "payment_id": payment_id})
+        # Sólo avisa el que ganó la carrera. MercadoPago reintenta el webhook
+        # hasta recibir un 200 y el comprador además pide su licencia desde la
+        # página de gracias: sin esta guarda, una sola venta te manda varios
+        # mails y el aviso deja de significar algo.
+        avisos.aviso_venta(cliente_id, plan, str(payment_id))
     return guardado
 
 

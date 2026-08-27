@@ -45,7 +45,7 @@ def obtener_engine(db_path: str) -> sa.engine.Engine:
     return engine
 
 
-def insertar_ignorando_duplicados(engine: sa.engine.Engine, tabla: sa.Table, **valores) -> None:
+def insertar_ignorando_duplicados(engine: sa.engine.Engine, tabla: sa.Table, **valores) -> bool:
     """`INSERT ... ON CONFLICT DO NOTHING`, portable entre SQLite y Postgres.
 
     Reemplaza al `INSERT OR IGNORE` de SQLite (no existe en Postgres) sin
@@ -53,6 +53,12 @@ def insertar_ignorando_duplicados(engine: sa.engine.Engine, tabla: sa.Table, **v
     transacción de Postgres la deja abortada para cualquier sentencia
     posterior, así que atrapar la excepción ahí es una trampa. Con
     `on_conflict_do_nothing()` nunca llega a fallar.
+
+    Devuelve si la fila la insertó ESTA llamada. Es la única respuesta
+    confiable a "¿es la primera vez?": la da el motor al resolver la clave
+    primaria, así que dos notificaciones simultáneas del mismo pago no pueden
+    creerse las dos primeras. Compararlo después, releyendo la fila, no
+    alcanza — la fila releída es idéntica gane quien gane.
     """
     if engine.dialect.name == "postgresql":
         from sqlalchemy.dialects.postgresql import insert as _insert
@@ -60,4 +66,4 @@ def insertar_ignorando_duplicados(engine: sa.engine.Engine, tabla: sa.Table, **v
         from sqlalchemy.dialects.sqlite import insert as _insert
     stmt = _insert(tabla).values(**valores).on_conflict_do_nothing()
     with engine.begin() as conn:
-        conn.execute(stmt)
+        return conn.execute(stmt).rowcount > 0

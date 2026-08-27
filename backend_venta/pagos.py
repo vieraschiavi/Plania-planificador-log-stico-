@@ -76,16 +76,20 @@ def registrar(payment_id: str, cliente_id: str, plan: str, licencia: str,
     comprador teniendo UNA licencia, no dos. La condición de carrera la
     resuelve la clave primaria (vía `ON CONFLICT DO NOTHING`), no un chequeo
     previo — entre un `SELECT` y un `INSERT` entra la otra notificación.
+
+    En el resultado agrega `nuevo`: si esta llamada fue la que registró el
+    pago. Lo que cuelga de esa respuesta —el asiento en la auditoría, el aviso
+    al dueño— tiene que pasar una vez por venta y no una por reintento.
     """
     engine = _engine(db_path)
-    insertar_ignorando_duplicados(
+    inserto = insertar_ignorando_duplicados(
         engine, pagos_tabla,
         payment_id=str(payment_id), cliente_id=cliente_id, plan=plan,
         licencia=licencia, token_descarga=token_descarga,
         creado=datetime.now(timezone.utc).isoformat())
     # Se relee en vez de devolver lo recién armado: si otra notificación ganó
     # la carrera, lo válido es lo suyo, no lo nuestro.
-    return buscar(payment_id, db_path)
+    return dict(buscar(payment_id, db_path), nuevo=inserto)
 
 
 def total(db_path: str = DB_PATH) -> int:
