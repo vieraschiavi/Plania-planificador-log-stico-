@@ -569,13 +569,29 @@ def controles() -> list[tuple[bool, str, str]]:
     # las comillas, "stToolbar" lo daba por presente el selector de al lado
     # (stToolbarActions), y el control pasaba aunque la barra del botón
     # Deploy hubiera quedado a la vista.
-    for testid, que in (("stToolbar", "la barra con el botón Deploy"),
+    #
+    # OJO: el contenedor stToolbar entero NO está en esta lista, a propósito.
+    # Estuvo, y ocultarlo entero se llevaba también el botón que reabre el
+    # menú lateral (stExpandSidebarButton vive ahí adentro): con el menú
+    # colapsado el programa quedaba sin navegación y sin forma de
+    # recuperarla — pasó en una instalación real. Lo que sobra de la
+    # toolbar se oculta pieza por pieza (el botón Deploy y las acciones).
+    for testid, que in (("stAppDeployButton", "el botón Deploy"),
+                        ("stToolbarActions", "las acciones de la barra de Streamlit"),
                         ("stStatusWidget", "el cartelito 'Running...'"),
                         ("stMainMenu", "el menú de hamburguesa"),
                         ("stDecoration", "la barra de colores de arriba")):
         selector = f'[data-testid="{testid}"]'
         ok(selector in apariencia, f"La ventana no muestra {que}",
            f"falta ocultar {selector} en plania/apariencia.py")
+    ok('[data-testid="stToolbar"]' not in apariencia,
+       "El menú lateral colapsado siempre se puede reabrir",
+       "apariencia.py vuelve a ocultar stToolbar entera: ahí adentro vive el "
+       "botón que reabre el menú lateral, y sin él, colapsar el menú deja el "
+       "programa sin navegación")
+    ok("stExpandSidebarButton" in apariencia,
+       "El botón de reabrir el menú queda visible y con estilo propio",
+       "falta la regla de stExpandSidebarButton en plania/apariencia.py")
     ok("footer" in apariencia,
        "La ventana no muestra el pie 'Made with Streamlit'",
        "falta ocultar footer en plania/apariencia.py")

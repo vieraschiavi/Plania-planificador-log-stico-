@@ -25,7 +25,7 @@ from __future__ import annotations
 # cliente cuesta más que estas líneas de más.
 CROMO_STREAMLIT = """
   #MainMenu, header [data-testid="stMainMenu"],
-  [data-testid="stToolbar"], [data-testid="stActionButtonIcon"],
+  [data-testid="stActionButtonIcon"],
   [data-testid="stAppDeployButton"], [data-testid="stDecoration"],
   [data-testid="stStatusWidget"], [data-testid="stToolbarActions"],
   footer, .viewerBadge_container__1QSob, .stDeployButton {
@@ -33,6 +33,22 @@ CROMO_STREAMLIT = """
       visibility: hidden !important;
   }
   header[data-testid="stHeader"] { height: 0; background: transparent; }
+
+  /* La toolbar NO se oculta entera, aunque sería una línea menos: adentro
+     vive el botón que REABRE el menú lateral cuando está colapsado
+     (stExpandSidebarButton, Streamlit >= 1.30). Con la toolbar en
+     display:none, colapsar el menú —un clic en «, o una ventana angosta—
+     dejaba el programa sin navegación y SIN NINGUNA forma de recuperarla:
+     solo la pantalla activa y un margen blanco, para siempre. Pasó en una
+     instalación real. Las piezas de Streamlit que sí sobran (Deploy, menú,
+     "Running...") se ocultan una por una acá arriba, y el botón de reabrir
+     se pinta como parte del producto para que no sea un ícono gris perdido
+     en fondo blanco. */
+  [data-testid="stExpandSidebarButton"] {
+      display: flex !important; visibility: visible !important;
+      background: #1F3D7A; border-radius: 8px; margin: 6px 0 0 6px;
+  }
+  [data-testid="stExpandSidebarButton"] span { color: #FFFFFF !important; }
 """
 
 # La tipografía NO se trae de Google Fonts: el programa tiene que verse igual
