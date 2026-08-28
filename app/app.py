@@ -455,7 +455,10 @@ if pagina == "inicio":
         paq = sugerencias.generar_todas(datos, idioma=IDIOMA)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(t("inicio.kpi_venta30"), _fmt(k["venta_periodo"]))
-        c2.metric(t("inicio.kpi_margen"), f"{k['margen_pct']:.1f}%")
+        # _miles y no f"{...:.1f}%": el punto decimal de Python es el de
+        # EE.UU. — al lado de "$2,86 M" quedaba "24.1%", mezclando los dos
+        # formatos en la misma fila de tarjetas.
+        c2.metric(t("inicio.kpi_margen"), f"{_miles(k['margen_pct'], 1)}%")
         c3.metric(t("inicio.kpi_capital_liberable"), _fmt(paq["resumen"]["capital_liberable"]))
         c4.metric(t("inicio.kpi_venta_riesgo"), _fmt(paq["resumen"]["venta_en_riesgo"]))
         st.info(t("inicio.ayuda_inicio"))
@@ -468,7 +471,8 @@ elif pagina == "panel_ejecutivo":
         k = analitica.kpis(datos["productos"], v)
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric(t("panel.kpi_venta30"), _fmt(k["venta_periodo"]))
-        c2.metric(t("panel.kpi_margen30"), _fmt(k["margen_periodo"]), f"{k['margen_pct']:.1f}%")
+        c2.metric(t("panel.kpi_margen30"), _fmt(k["margen_periodo"]),
+                  f"{_miles(k['margen_pct'], 1)}%")
         c3.metric(t("panel.kpi_valor_stock"), _fmt(k["valor_stock"]))
         c4.metric(t("panel.kpi_quiebres"), f"{k['quiebres']} / {k['bajo_minimo']}")
         c5.metric(t("panel.kpi_clientes_activos"), k["clientes_activos"])
@@ -523,7 +527,7 @@ elif pagina == "precios":
         mp = analitica.margen_por_producto(v)
         c1, c2 = st.columns(2)
         c1.metric(t("precios.kpi_margen_prom"),
-                  f"{v['margen'].sum() / v['venta'].sum() * 100:.1f}%")
+                  f"{_miles(v['margen'].sum() / v['venta'].sum() * 100, 1)}%")
         pr = sugerencias.precios(datos["productos"], v, idioma=IDIOMA)
         c2.metric(t("precios.kpi_margen_extra"),
                   _fmt(pr["margen_extra_mensual"].sum() if len(pr) else 0) + t("comun.sufijo_mes"))

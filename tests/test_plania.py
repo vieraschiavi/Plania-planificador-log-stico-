@@ -3180,6 +3180,47 @@ def test_la_carpeta_del_activador_no_se_llena_de_binarios():
             f"{nombre} es un instalador: va a Releases, no acá")
 
 
+def test_el_menu_lateral_siempre_se_puede_reabrir():
+    """El CSS de "apariencia de programa" no puede llevarse el botón que
+    reabre el menú lateral.
+
+    El botón (stExpandSidebarButton) vive ADENTRO de la toolbar de Streamlit.
+    Cuando `apariencia.py` ocultaba `[data-testid="stToolbar"]` entera para
+    sacar el cromo (Deploy, menú, "Running..."), colapsar el menú —un clic
+    en «, o una ventana angosta— dejaba el programa sin navegación y sin
+    ninguna forma de recuperarla: solo la pantalla activa y un margen blanco.
+    Pasó en una instalación real de Windows; se reprodujo y verificó con la
+    ventana en 1847×881, el botón quedaba con visibility:hidden heredada.
+
+    Se controla el texto del CSS y no un browser en vivo porque lo que se
+    rompió fue exactamente esto: una línea de CSS bien intencionada.
+    """
+    from plania import apariencia
+
+    css = apariencia.css_programa()
+
+    # 1) La toolbar entera no puede volver a la lista de ocultos.
+    for linea in css.splitlines():
+        if '[data-testid="stToolbar"]' in linea:
+            assert False, (
+                "css_programa() vuelve a tocar stToolbar entera; ahí adentro "
+                "vive el botón que reabre el menú lateral. Ocultá sus piezas "
+                "una por una (stToolbarActions, stMainMenu...), no el "
+                "contenedor.")
+
+    # 2) El botón de reabrir tiene que estar explícitamente visible.
+    assert "stExpandSidebarButton" in css, (
+        "css_programa() perdió la regla que mantiene visible el botón de "
+        "reabrir el menú lateral")
+    bloque = css[css.index("stExpandSidebarButton"):]
+    assert "display: flex !important" in bloque and "visible !important" in bloque
+
+    # 3) Y las piezas del cromo que sí sobran siguen ocultas.
+    for pieza in ("stToolbarActions", "stAppDeployButton", "stStatusWidget",
+                  "stMainMenu"):
+        assert pieza in css, f"css_programa() dejó de ocultar {pieza}"
+
+
 def test_el_activador_owner_no_es_el_panel_del_dueno():
     """La carpeta prueba el PRODUCTO desbloqueado, no el panel del negocio.
 
