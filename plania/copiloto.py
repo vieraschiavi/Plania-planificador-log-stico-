@@ -142,22 +142,37 @@ PALABRAS_CLAVE = {
 # `_buscar_producto`: palabras que no aportan al nombre del producto que se
 # busca — mismo criterio que las de arriba, sin tildes.
 _STOP = {
+    # El segundo grupo de cada idioma es el relleno típico de las preguntas
+    # de ofertas/reposición/precios ("¿qué ofertas armo esta semana en X?"):
+    # desde que esas ramas filtran por lo que nombra la pregunta
+    # (`_filtro_de_productos`), una palabra de relleno que matcheara un
+    # nombre de producto por casualidad recortaría la tabla sin que nadie
+    # lo pidiera.
     "es": {"cuanto", "cuanta", "stock", "hay", "de", "del", "la", "el", "los",
           "las", "que", "cual", "precio", "margen", "tengo", "queda",
           "quedan", "producto", "productos", "en", "y", "con", "para",
           "cuales", "mas", "menos", "top", "mejor", "peor", "este", "mes",
-          "sobre", "bajo", "vendi", "vende", "venta", "ventas", "como"},
+          "sobre", "bajo", "vendi", "vende", "venta", "ventas", "como",
+          "esta", "semana", "hoy", "ahora", "categoria", "categorias",
+          "rubro", "oferta", "ofertas", "armo", "urgente", "reponer",
+          "repongo", "liquidar"},
     "en": {"how", "much", "many", "stock", "is", "there", "the", "of", "a",
           "an", "that", "which", "price", "margin", "have", "left",
           "product", "products", "in", "and", "with", "for", "more", "less",
           "top", "best", "worst", "this", "month", "about", "under", "sold",
-          "sell", "sale", "sales", "does", "do", "did"},
+          "sell", "sale", "sales", "does", "do", "did",
+          "week", "today", "now", "category", "categories", "offer",
+          "offers", "deal", "deals", "urgent", "restock", "reorder",
+          "what", "should", "run", "clearance"},
     "pt": {"quanto", "quanta", "estoque", "tem", "de", "do", "da", "os",
           "as", "o", "a", "que", "qual", "preco", "margem", "tenho",
           "resta", "restam", "produto", "produtos", "em", "e", "com",
           "para", "quais", "mais", "menos", "top", "melhor", "pior", "este",
           "mes", "sobre", "abaixo", "vendi", "vende", "venda", "vendas",
-          "como"},
+          "como",
+          "esta", "semana", "hoje", "agora", "categoria", "categorias",
+          "oferta", "ofertas", "monto", "urgente", "repor", "reponho",
+          "liquidar"},
 }
 
 
@@ -188,6 +203,35 @@ def _buscar_producto(texto: str, productos: pd.DataFrame, idioma: str = "es") ->
     for w in palabras:
         mask |= idx.str.contains(w, regex=False) | cat.str.contains(w, regex=False)
     return productos[mask]
+
+
+def _filtro_de_productos(pregunta: str, productos: pd.DataFrame,
+                         idioma: str = "es") -> pd.DataFrame | None:
+    """El subconjunto de productos que la pregunta nombra (categoría, nombre
+    o SKU), o None si no nombra ninguno.
+
+    Existe porque "¿qué ofertas armo esta semana en perfumería?" devolvía
+    las MISMAS 78 filas que la pregunta sin "perfumería": la rama de ofertas
+    (y la de reposición, y la de precios) armaba su tabla completa sin mirar
+    si la pregunta acotaba sobre qué. La búsqueda es la misma que ya usa
+    stock/venta puntual (`_buscar_producto`); acá sólo se decide si lo que
+    matcheó es un recorte real — matchear TODO el catálogo o nada significa
+    que la pregunta no estaba filtrando.
+    """
+    prods = _buscar_producto(pregunta, productos, idioma)
+    if 0 < len(prods) < len(productos):
+        return prods
+    return None
+
+
+def _nombre_del_filtro(prods: pd.DataFrame) -> str:
+    """Cómo llamar al recorte en la respuesta: sus categorías si son pocas,
+    el nombre del producto si es uno solo. Valores del ERP del cliente,
+    nunca traducidos."""
+    if len(prods) == 1:
+        return str(prods.iloc[0]["nombre"])
+    cats = sorted(prods["categoria"].dropna().astype(str).unique())
+    return ", ".join(cats[:3])
 
 
 def _m(n, idioma: str = "es", decimales: int = 0) -> str:
@@ -223,6 +267,14 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v,
         of = sugerencias.ofertas_por_sobrestock(productos, v, idioma)
         if not len(of):
             return _r(tr("copiloto.ofertas_sin_datos"), None, tr("copiloto.ofertas_titulo"))
+        filtro = _filtro_de_productos(pregunta, productos, idioma)
+        if filtro is not None:
+            dentro = of[of["sku"].isin(filtro["sku"])]
+            if not len(dentro):
+                return _r(tr("copiloto.ofertas_sin_datos_filtro",
+                             filtro=_nombre_del_filtro(filtro)),
+                          None, tr("copiloto.ofertas_titulo"))
+            of = dentro.reset_index(drop=True)
         cap = of["capital_inmovilizado"].sum()
         lista = "; ".join(tr("copiloto.ofertas_item", nombre=x["nombre"],
                              descuento=_m(x["descuento_pct"], idioma))
@@ -237,6 +289,14 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v,
         rep = sugerencias.reposicion(productos, v, idioma=idioma)
         if not len(rep):
             return _r(tr("copiloto.reposicion_sin_datos"), None, tr("copiloto.reposicion_titulo"))
+        filtro = _filtro_de_productos(pregunta, productos, idioma)
+        if filtro is not None:
+            dentro = rep[rep["sku"].isin(filtro["sku"])]
+            if not len(dentro):
+                return _r(tr("copiloto.reposicion_sin_datos_filtro",
+                             filtro=_nombre_del_filtro(filtro)),
+                          None, tr("copiloto.reposicion_titulo"))
+            rep = dentro.reset_index(drop=True)
         p0 = rep.iloc[0]
         return _r(tr("copiloto.reposicion_resumen", n=len(rep),
                      venta_riesgo=_m(rep["venta_en_riesgo"].sum(), idioma),
@@ -263,6 +323,14 @@ def _responder_local(pregunta: str, t: str, productos, clientes, v,
             pr = sugerencias.precios(productos, v, idioma=idioma)
             if not len(pr):
                 return _r(tr("copiloto.precios_sin_subas"), None, tr("copiloto.precios_titulo"))
+            filtro = _filtro_de_productos(pregunta, productos, idioma)
+            if filtro is not None:
+                dentro = pr[pr["sku"].isin(filtro["sku"])]
+                if not len(dentro):
+                    return _r(tr("copiloto.precios_sin_subas_filtro",
+                                 filtro=_nombre_del_filtro(filtro)),
+                              None, tr("copiloto.precios_titulo"))
+                pr = dentro.reset_index(drop=True)
             p0 = pr.iloc[0]
             return _r(tr("copiloto.precios_resumen", n=len(pr),
                          extra=_m(pr["margen_extra_mensual"].sum(), idioma), nombre=p0["nombre"],

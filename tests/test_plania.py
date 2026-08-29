@@ -7003,6 +7003,76 @@ def test_una_pregunta_sobre_compradores_no_cae_en_reposicion_en_ingles():
             f"{pregunta!r} dejó de activar reposición: título {r['titulo']!r}"
 
 
+def test_el_copiloto_filtra_las_ofertas_por_lo_que_nombra_la_pregunta():
+    """Reportado con captura: "ofertas esta semana categoria perfumeria"
+    devolvía las MISMAS 78 filas de todas las categorías que la pregunta sin
+    "perfumería" — con Lácteos y Ferretería como más urgentes. La rama de
+    ofertas armaba su tabla completa sin mirar si la pregunta acotaba sobre
+    qué; lo mismo pasaba en reposición y en ajustes de precio.
+    """
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+
+    # La pregunta del reporte, textual (sin signos, sin tildes).
+    r = copiloto.responder("ofertas esta semana categoria perfumeria", datos)
+    assert r["tabla"] is not None and len(r["tabla"]), \
+        "la pregunta filtrada tiene que devolver tabla"
+    assert set(r["tabla"]["categoria"]) == {"Perfumería"}, (
+        f"pidió perfumería y la tabla trae {sorted(set(r['tabla']['categoria']))}")
+
+    # En los tres idiomas — la categoría es un valor del ERP, no se traduce.
+    for idioma, pregunta in (
+            ("en", "which offers should I run this week for perfumeria?"),
+            ("pt", "que ofertas monto esta semana em perfumeria?")):
+        r = copiloto.responder(pregunta, datos, idioma=idioma)
+        assert set(r["tabla"]["categoria"]) == {"Perfumería"}, \
+            f"[{idioma}] {pregunta!r} no filtró: {sorted(set(r['tabla']['categoria']))}"
+
+    # También reposición y precios, que tenían el mismo agujero.
+    r = copiloto.responder("¿qué repongo ya de perfumería?", datos)
+    assert set(r["tabla"]["categoria"]) == {"Perfumería"}
+    r = copiloto.responder("¿qué precios puedo subir en ferretería?", datos)
+    assert set(r["tabla"]["categoria"]) == {"Ferretería"}
+
+
+def test_la_pregunta_de_ofertas_sin_categoria_no_se_recorta_sola():
+    """La otra mitad del arreglo: "¿qué ofertas armo esta semana?" — la
+    pregunta de ejemplo de la propia UI — tiene que seguir trayendo TODAS
+    las categorías. Si el relleno de la pregunta ("esta", "semana", "armo")
+    matcheara un producto por casualidad, la tabla se recortaría sin que
+    nadie lo pidiera; por eso esas palabras están en las stop-words."""
+    from plania import conectores, copiloto
+
+    datos = conectores.cargar_datos()
+    r = copiloto.responder("¿qué ofertas armo esta semana?", datos)
+    assert len(set(r["tabla"]["categoria"])) > 1, (
+        "la pregunta sin categoría quedó recortada a "
+        f"{sorted(set(r['tabla']['categoria']))}")
+
+
+def test_el_copiloto_avisa_cuando_lo_pedido_no_tiene_ofertas():
+    """Pedir ofertas de un producto concreto que NO está en sobrestock tiene
+    que decir "no hay ofertas para eso", no mostrar las ofertas de todo lo
+    demás como si nada (ni mentir con el mensaje genérico de "el stock está
+    sano", que sugeriría que no hay ofertas de nada)."""
+    from plania import conectores, copiloto, sugerencias, analitica
+
+    datos = conectores.cargar_datos()
+    v = analitica.enriquecer_ventas(datos["ventas"], datos["productos"],
+                                    datos["clientes"])
+    of = sugerencias.ofertas_por_sobrestock(datos["productos"], v)
+    fuera = datos["productos"][~datos["productos"]["sku"].isin(of["sku"])]
+    assert len(fuera), "la base demo siempre deja productos sin sobrestock"
+    sku = fuera.iloc[0]["sku"]
+
+    r = copiloto.responder(f"¿qué ofertas armo para el {sku}?", datos)
+    assert r["tabla"] is None, \
+        f"pidió ofertas de {sku} (sin sobrestock) y devolvió una tabla igual"
+    assert fuera.iloc[0]["nombre"] in r["respuesta"], \
+        "la respuesta tiene que nombrar QUÉ es lo que no tiene ofertas"
+
+
 # ---------------------------------------------------------------------------
 # i18n Fase 5 — plania/exportes.py: PDF/Word/Excel en el idioma elegido
 # ---------------------------------------------------------------------------
