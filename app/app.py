@@ -729,7 +729,12 @@ elif pagina == "conectar_erp":
                         nuevos[e] = pd.DataFrame(
                             columns=list(conectores.SINONIMOS["clientes"]))
                         continue
-                    crudo = conectores.leer_archivo(f)
+                    # Con la entidad, un libro de varias hojas elige la que
+                    # tiene las columnas de ESTA entidad. El mismo archivo
+                    # puede traer productos y ventas en hojas distintas, y
+                    # se sube dos veces: sin esto las dos veces leían la
+                    # primera hoja y una de las dos fallaba siempre.
+                    crudo = conectores.leer_archivo(f, entidad=e)
                     mapeo = conectores.autodetectar_mapeo(crudo, e)
                     st.caption(t("conectar.mapeo_detectado",
                                 entidad=t(f"conectar.entidad_{e}"), mapeo=mapeo))

@@ -240,7 +240,22 @@ def autodescubrir_tabla(engine, entidad: str) -> str | None:
     return None
 
 
-def leer_archivo(ruta, **forzado) -> pd.DataFrame:
+def sirve_para(entidad: str):
+    """Un predicado: ¿esta hoja tiene las columnas obligatorias de `entidad`?
+
+    Es el MISMO `autodetectar_mapeo` que después va a usar `normalizar`, a
+    propósito: si la hoja se eligiera con una regla y se validara con otra,
+    habría libros donde la elegida es justo la que después se rechaza, y el
+    usuario vería un error sobre una hoja que él nunca nombró.
+    """
+    def _sirve(df: pd.DataFrame) -> bool:
+        renombradas = set(autodetectar_mapeo(df, entidad).values())
+        return all(c in renombradas for c in OBLIGATORIAS[entidad])
+
+    return _sirve
+
+
+def leer_archivo(ruta, entidad: str | None = None, **forzado) -> pd.DataFrame:
     """CSV o Excel exportado del ERP (acepta ruta o file-like de Streamlit).
 
     Delega en `plania.archivos`, que detecta codificación, separador, filas de
@@ -248,9 +263,18 @@ def leer_archivo(ruta, **forzado) -> pd.DataFrame:
     y fallaba con los tres formatos más comunes de un ERP de acá: latin-1 con
     punto y coma, separado por tabulaciones, y con el encabezado del reporte
     arriba del encabezado real.
+
+    Con `entidad`, un Excel de varias hojas se resuelve solo: se usa la hoja
+    cuyas columnas mapean a lo que esa entidad necesita, en vez de la primera
+    con datos. Reportado con un `Bases y diccionario.xlsx` de ocho hojas,
+    donde la primera era el diccionario —48 filas de `Tabla | Campo | Tipo |
+    Descripción`, datos de verdad— y la pantalla contestaba «No pude mapear
+    columnas obligatorias de productos» con los productos en otra hoja del
+    mismo archivo.
     """
     from plania import archivos
-    return archivos.leer(ruta, **forzado)
+    sirve = sirve_para(entidad) if entidad in OBLIGATORIAS else None
+    return archivos.leer(ruta, sirve=sirve, **forzado)
 
 
 def guardar_como_base(datos: dict[str, pd.DataFrame], ruta_db: str | None = None) -> str:

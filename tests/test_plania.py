@@ -7220,3 +7220,68 @@ def test_secciones_desde_paquete_interpola_los_montos_del_resumen():
         # sin interpolar ("{capital_liberable}" suelto en el texto final).
         assert "{" not in texto_resumen, f"[{idioma}] quedó un placeholder sin interpolar: {texto_resumen}"
         assert i18n.miles(paq["resumen"]["capital_liberable"], 0, idioma) in texto_resumen
+
+
+# ==========================================================================
+# Un libro con el diccionario adelante
+# ==========================================================================
+def _libro(hojas: dict) -> str:
+    """Un .xlsx de verdad con varias hojas, en un temporal."""
+    import tempfile
+    ruta = os.path.join(tempfile.mkdtemp(), "Bases y diccionario.xlsx")
+    with pd.ExcelWriter(ruta) as w:
+        for nombre, df in hojas.items():
+            df.to_excel(w, sheet_name=nombre, index=False)
+    return ruta
+
+
+def test_se_elige_la_hoja_que_SIRVE_y_no_la_primera_con_datos():
+    """Reportado: `Bases y diccionario.xlsx`, ocho hojas, la primera es el
+    diccionario —48 filas de `Tabla | Campo | Tipo | Descripción`, o sea
+    datos de verdad, así que ganaba— y la pantalla contestaba «No pude
+    mapear columnas obligatorias de productos: ['sku', 'precio']» con los
+    productos ahí al lado, en otra hoja del mismo archivo."""
+    ruta = _libro({
+        "Diccionario": pd.DataFrame({"Tabla": ["productos"], "Campo": ["sku"],
+                                     "Tipo": ["texto"], "Descripción": ["código"]}),
+        "Productos": pd.DataFrame({"sku": ["A1"], "nombre": ["Agua"],
+                                   "precio": [10.0]}),
+    })
+    df = conectores.leer_archivo(ruta, entidad="productos")
+    assert list(df.columns) == ["sku", "nombre", "precio"]
+    # y el camino entero, que es lo que el usuario apretaba
+    assert len(conectores.normalizar(df, "productos")) == 1
+
+
+def test_el_mismo_libro_subido_dos_veces_da_dos_hojas_distintas():
+    """Productos y ventas en hojas distintas del MISMO archivo: se sube dos
+    veces, y sin esto las dos veces se leía la primera hoja — o sea que una
+    de las dos fallaba siempre, hiciera lo que hiciera el usuario."""
+    ruta = _libro({
+        "Diccionario": pd.DataFrame({"Tabla": ["x"], "Campo": ["y"]}),
+        "Productos": pd.DataFrame({"sku": ["A1"], "nombre": ["Agua"], "precio": [10.0]}),
+        "Ventas": pd.DataFrame({"fecha": ["2026-01-02"], "sku": ["A1"], "cantidad": [3]}),
+    })
+    prod = conectores.leer_archivo(ruta, entidad="productos")
+    vent = conectores.leer_archivo(ruta, entidad="ventas")
+    assert "precio" in prod.columns and "cantidad" in vent.columns
+
+
+def test_si_ninguna_hoja_sirve_el_error_sigue_siendo_el_de_siempre():
+    """Callar con un DataFrame vacío cambiaría «no pude mapear estas
+    columnas» por «el archivo está vacío», que es mentira y manda a buscar
+    el problema al lugar equivocado."""
+    ruta = _libro({"Diccionario": pd.DataFrame({"Tabla": ["x"], "Campo": ["y"]})})
+    df = conectores.leer_archivo(ruta, entidad="productos")
+    assert list(df.columns) == ["Tabla", "Campo"]
+    with pytest.raises(ValueError, match="columnas obligatorias"):
+        conectores.normalizar(df, "productos")
+
+
+def test_sin_entidad_la_regla_es_la_de_antes():
+    """Quien no dice qué busca sigue recibiendo la primera hoja con datos:
+    este cambio no puede mover el piso de los que ya andaban."""
+    ruta = _libro({"Vacia": pd.DataFrame({"a": []}),
+                   "Primera": pd.DataFrame({"a": [1]}),
+                   "Segunda": pd.DataFrame({"b": [2]})})
+    assert list(conectores.leer_archivo(ruta).columns) == ["a"]
