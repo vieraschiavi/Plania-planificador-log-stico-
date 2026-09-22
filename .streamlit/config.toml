@@ -9,6 +9,14 @@ gatherUsageStats = false
 
 [server]
 headless = true
+# Tope de subida, 4 GB. Sin esta línea rige el default de Streamlit —200 MB—
+# y un export del ERP con millones de filas lo pasa sin esfuerzo: el
+# navegador lo rechaza con «File must be 200.0MB or smaller» antes de que el
+# programa vea el archivo, así que no hay mensaje nuestro que lo explique ni
+# forma de subirlo partido. El archivo está en la misma máquina que el
+# programa; subirlo no cuesta red, sólo RAM del proceso.
+maxUploadSize = 4096
+maxMessageSize = 4096
 
 [client]
 toolbarMode = "minimal"
