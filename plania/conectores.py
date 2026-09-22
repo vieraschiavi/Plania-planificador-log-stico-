@@ -227,9 +227,54 @@ def leer_sql(engine, tabla_o_query: str, limite: int | None = None) -> pd.DataFr
                 "usar una consulta, tiene que empezar con SELECT.")
         q = f"SELECT * FROM {q}"
     if limite:
-        q = f"{q} LIMIT {int(limite)}"
+        return _leer_acotado(engine, q, int(limite))
     with engine.connect() as con:
         return pd.read_sql(text(q), con)
+
+
+#: Tope por defecto al leer una tabla del ERP del cliente.
+#:
+#: Antes no había ninguno: `cargar_desde_sql` llamaba a `leer_sql(engine,
+#: tabla)` sin `limite`, o sea `SELECT * FROM ventas` completo dentro de un
+#: `pd.read_sql`. En la base demo son miles de filas y no se nota; en el ERP
+#: de un distribuidor con diez años de historia son millones, y el programa
+#: se los trae todos a memoria antes de mostrar nada.
+#:
+#: 500.000 y no 50.000 porque acá el tope no es para perfilar: la analítica
+#: de Plania agrega ventas por período y por SKU, así que recortar de más
+#: cambia los números que el cliente va a mirar. Con 500.000 filas entran
+#: varios años de un distribuidor mediano y el costo de memoria queda en el
+#: orden de los cientos de MB, no de los gigas.
+LIMITE_FILAS = 500_000
+
+
+def _leer_acotado(engine, sql: str, limite: int):
+    """Trae como mucho `limite` filas, en cualquiera de los cinco motores.
+
+    NO se arma `f"{sql} LIMIT n"`: esa es sintaxis de PostgreSQL, MySQL y
+    SQLite. SQL Server quiere `TOP` y Oracle `FETCH FIRST`, así que pegarle
+    `LIMIT` al final a la consulta de un cliente con SQL Server o con Oracle
+    —dos de los cinco motores que este mismo archivo dice soportar— es un
+    error de sintaxis, no un recorte.
+
+    `chunksize` lo resuelve del lado del driver y sin dialecto: abre un
+    cursor del lado del servidor y se corta apenas se juntan las filas
+    pedidas. Es el mismo camino que ya usa MV Data Governance por la misma
+    razón.
+    """
+    import pandas as pd
+    from sqlalchemy import text
+    trozos, total = [], 0
+    with engine.connect() as con:
+        for trozo in pd.read_sql(text(sql), con,
+                                 chunksize=min(limite, 50_000)):
+            trozos.append(trozo)
+            total += len(trozo)
+            if total >= limite:
+                break
+        if not trozos:
+            return pd.read_sql(text(sql), con).head(0)   # vacío CON columnas
+    return pd.concat(trozos, ignore_index=True).head(limite)
 
 
 def autodescubrir_tabla(engine, entidad: str) -> str | None:
@@ -338,6 +383,6 @@ def cargar_datos(url: str | None = None,
                 f"No encontré una tabla de {entidad} en la base conectada. "
                 f"Tablas disponibles: {listar_tablas(engine)}. "
                 "Elegila manualmente en 'Conectar ERP'.")
-        df = leer_sql(engine, tabla)
+        df = leer_sql(engine, tabla, limite=LIMITE_FILAS)
         datos[entidad] = normalizar(df, entidad, (mapeos or {}).get(entidad))
     return datos

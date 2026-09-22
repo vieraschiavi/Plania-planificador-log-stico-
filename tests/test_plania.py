@@ -7285,3 +7285,58 @@ def test_sin_entidad_la_regla_es_la_de_antes():
                    "Primera": pd.DataFrame({"a": [1]}),
                    "Segunda": pd.DataFrame({"b": [2]})})
     assert list(conectores.leer_archivo(ruta).columns) == ["a"]
+
+
+# ---------------------------------------------------------------------------
+# Tamaño: el ERP del cliente no es la base demo
+# ---------------------------------------------------------------------------
+# `cargar_desde_sql` llamaba a `leer_sql(engine, tabla)` SIN límite, o sea
+# `SELECT * FROM ventas` entero dentro de un `pd.read_sql`. Con la base demo
+# —miles de filas— no se nota. En el ERP de un distribuidor con diez años de
+# historia son millones de filas a memoria antes de dibujar nada.
+def _erp_grande(tmp_path, filas=120_000):
+    """Una tabla de ventas más grande que el tope del test."""
+    import sqlite3
+    ruta = tmp_path / "erp.db"
+    cx = sqlite3.connect(ruta)
+    cx.execute("CREATE TABLE ventas (fecha TEXT, sku TEXT, cantidad INT)")
+    cx.executemany(
+        "INSERT INTO ventas VALUES (?,?,?)",
+        [(f"2026-01-{(i % 28) + 1:02d}", f"SKU{i % 900}", i % 7)
+         for i in range(filas)])
+    cx.commit()
+    cx.close()
+    return ruta
+
+
+def test_leer_sql_respeta_el_tope_de_filas(tmp_path):
+    from plania import conectores
+    eng = conectores.conectar_sql(f"sqlite:///{_erp_grande(tmp_path)}")
+    assert len(conectores.leer_sql(eng, "ventas", limite=1_000)) == 1_000
+
+
+def test_el_conector_no_trae_la_tabla_entera_del_erp(tmp_path):
+    """El defecto, en su camino real: `cargar_datos` no pasaba límite."""
+    from plania import conectores
+    assert conectores.LIMITE_FILAS > 0
+    eng = conectores.conectar_sql(f"sqlite:///{_erp_grande(tmp_path)}")
+    # Sin tope explícito sigue trayendo todo: es la puerta de atrás para
+    # quien SABE lo que pide. Lo que no puede pasar es que sea el default.
+    assert len(conectores.leer_sql(eng, "ventas")) == 120_000
+    import inspect as _inspect
+    fuente = _inspect.getsource(conectores.cargar_datos)
+    assert "limite=" in fuente, (
+        "cargar_datos volvió a leer la tabla del ERP sin tope")
+
+
+def test_el_recorte_no_se_escribe_con_LIMIT_pegado_al_final():
+    """`f\"{sql} LIMIT n\"` es sintaxis de Postgres, MySQL y SQLite. SQL
+    Server quiere TOP y Oracle FETCH FIRST — y este archivo dice soportar
+    los cinco. Pegarle LIMIT a la consulta de un cliente con SQL Server no
+    es un recorte: es un error de sintaxis."""
+    import inspect as _inspect
+
+    from plania import conectores
+    fuente = _inspect.getsource(conectores.leer_sql)
+    assert "LIMIT {" not in fuente and 'LIMIT {int(limite)}' not in fuente
+    assert "chunksize" in _inspect.getsource(conectores._leer_acotado)
