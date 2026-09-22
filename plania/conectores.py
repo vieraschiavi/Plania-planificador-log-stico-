@@ -124,6 +124,24 @@ def autodetectar_mapeo(df: pd.DataFrame, entidad: str) -> dict:
     return mapeo
 
 
+def faltan_obligatorias(df: pd.DataFrame, entidad: str,
+                        mapeo: dict | None = None) -> list:
+    """Qué columnas obligatorias de `entidad` quedan SIN origen con `mapeo`.
+
+    Es la misma cuenta que hace `normalizar()` antes de levantar, pero sin
+    levantar: la pantalla «Conectar ERP» la necesita para saber si tiene
+    que abrir el ajuste manual ANTES de que el archivo falle. Sin esto la
+    app sólo podía enterarse por la excepción, o sea cuando ya no quedaba
+    nada que ofrecerle al usuario más que el texto del error.
+
+    Cuenta dos orígenes, igual que `rename`: la columna que el mapeo
+    renombra, y la que ya venía llamándose como la canónica.
+    """
+    mapeo = autodetectar_mapeo(df, entidad) if mapeo is None else mapeo
+    resueltas = set(mapeo.values()) | (set(df.columns) - set(mapeo))
+    return [c for c in OBLIGATORIAS[entidad] if c not in resueltas]
+
+
 def normalizar(df: pd.DataFrame, entidad: str, mapeo: dict | None = None) -> pd.DataFrame:
     """Renombra al esquema canónico, valida obligatorias y completa defaults."""
     mapeo = mapeo or autodetectar_mapeo(df, entidad)

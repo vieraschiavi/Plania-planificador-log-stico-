@@ -437,6 +437,70 @@ def _botones_export(clave: str, secciones: list, etiqueta: str | None = None):
                             ".spreadsheetml.sheet")
 
 
+_SIN_MAPEAR = "—"
+
+
+def _mapeo_de(entidad: str, crudo: pd.DataFrame) -> dict:
+    """Dibuja el mapeo de columnas de `entidad` y devuelve el efectivo.
+
+    Arranca del auto-mapeo por sinónimos, que resuelve un export de Zureo,
+    Memory, Tango, Bejerman, Odoo o SAP B1 sin tocar nada. Lo que agrega es
+    la salida cuando NO resuelve: el motor decía «definí el mapeo manual en
+    la pantalla Conectar ERP» y esa pantalla no tenía dónde definirlo — el
+    archivo quedaba rechazado con una instrucción imposible de seguir.
+    Ahora cada columna canónica tiene su selector, y el ajuste se abre solo
+    cuando falta una obligatoria.
+
+    El estado vive en los `key=` de los selectores: Streamlit los conserva
+    entre reruns, así que el mapeo elegido sobrevive a subir el archivo
+    siguiente o a tocar cualquier otro control de la pantalla.
+    """
+    auto = conectores.autodetectar_mapeo(crudo, entidad)
+    nombre = t(f"conectar.entidad_{entidad}")
+    st.caption(t("conectar.mapeo_detectado", entidad=nombre, mapeo=auto or _SIN_MAPEAR))
+
+    columnas = [str(c) for c in crudo.columns]
+    obligatorias = conectores.OBLIGATORIAS[entidad]
+    # Al revés que `auto`, que va {origen: canónica}: para preseleccionar
+    # cada selector hace falta ir de la canónica a su origen.
+    origen_de = {canonica: origen for origen, canonica in auto.items()}
+    # La que ya venía con el nombre canónico no está en `auto` —`rename` no
+    # la toca— y sin embargo está resuelta. Si no se preselecciona, el
+    # selector la muestra en «—» y parece que falta.
+    for canonica in conectores.SINONIMOS[entidad]:
+        if canonica not in origen_de and canonica in columnas:
+            origen_de[canonica] = canonica
+
+    faltan = conectores.faltan_obligatorias(crudo, entidad, auto)
+    with st.expander(t("conectar.ajustar_mapeo", entidad=nombre), expanded=bool(faltan)):
+        st.caption(t("conectar.ajustar_ayuda"))
+        elegido: dict = {}
+        repetidas: list = []
+        for canonica in conectores.SINONIMOS[entidad]:
+            opciones = [_SIN_MAPEAR] + columnas
+            previo = origen_de.get(canonica)
+            etiqueta = (t("conectar.columna_obligatoria", columna=canonica)
+                        if canonica in obligatorias else canonica)
+            sel = st.selectbox(
+                etiqueta, opciones,
+                index=opciones.index(previo) if previo in opciones else 0,
+                key=f"map_{entidad}_{canonica}")
+            if sel == _SIN_MAPEAR:
+                continue
+            if sel in elegido:
+                # Un `dict {origen: canónica}` se pisa solo y la canónica
+                # anterior desaparece sin decir nada: el archivo terminaba
+                # rechazado por una columna que el usuario creía haber
+                # mapeado. Se avisa y se conserva la primera.
+                repetidas.append((sel, elegido[sel], canonica))
+                continue
+            elegido[sel] = canonica
+        for columna, primera, segunda in repetidas:
+            st.warning(t("conectar.columna_repetida", columna=columna,
+                         primera=primera, segunda=segunda))
+    return elegido
+
+
 # ---------------------------------------------------------------------------
 # Páginas
 # ---------------------------------------------------------------------------
@@ -722,23 +786,36 @@ elif pagina == "conectar_erp":
                     type=["csv", "xlsx", "xls"], key=f"up_{e}")
                 for e in ("productos", "ventas", "clientes")}
         if arch["productos"] and arch["ventas"]:
-            try:
-                nuevos = {}
-                for e, f in arch.items():
-                    if f is None:
-                        nuevos[e] = pd.DataFrame(
-                            columns=list(conectores.SINONIMOS["clientes"]))
-                        continue
+            nuevos, rechazados = {}, []
+            for e, f in arch.items():
+                if f is None:
+                    nuevos[e] = pd.DataFrame(
+                        columns=list(conectores.SINONIMOS["clientes"]))
+                    continue
+                try:
                     # Con la entidad, un libro de varias hojas elige la que
                     # tiene las columnas de ESTA entidad. El mismo archivo
                     # puede traer productos y ventas en hojas distintas, y
                     # se sube dos veces: sin esto las dos veces leían la
                     # primera hoja y una de las dos fallaba siempre.
                     crudo = conectores.leer_archivo(f, entidad=e)
-                    mapeo = conectores.autodetectar_mapeo(crudo, e)
-                    st.caption(t("conectar.mapeo_detectado",
-                                entidad=t(f"conectar.entidad_{e}"), mapeo=mapeo))
+                except Exception as err:               # archivo ilegible
+                    rechazados.append(str(err))
+                    continue
+                # El mapeo se dibuja SIEMPRE, incluso para el archivo que
+                # va a fallar: si el `try` envolviera también esto, el
+                # primer archivo sin mapear cortaba el bucle y los otros
+                # dos ni aparecían en pantalla — o sea que el usuario no
+                # tenía dónde arreglar lo que el error le pedía arreglar.
+                mapeo = _mapeo_de(e, crudo)
+                try:
                     nuevos[e] = conectores.normalizar(crudo, e, mapeo)
+                except ValueError as err:              # falta una obligatoria
+                    rechazados.append(str(err))
+            if rechazados:
+                for mensaje in rechazados:
+                    st.error(mensaje)
+            else:
                 st.session_state.datos_archivo = nuevos
                 st.dataframe(nuevos["productos"].head(), width="stretch")
                 if st.button(t("conectar.usar_archivos"), type="primary"):
@@ -747,8 +824,6 @@ elif pagina == "conectar_erp":
                     st.session_state.erp_url = url_archivos
                     _cargar.clear()
                     st.success(t("conectar.archivos_listo"))
-            except Exception as e:
-                st.error(str(e))
 
 elif pagina == "planes":
     st.title(t("planes.titulo"))
