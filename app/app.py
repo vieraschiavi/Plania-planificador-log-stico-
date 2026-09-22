@@ -332,6 +332,15 @@ if BLOQUEADA:
 datos = None
 if pagina not in ("planes", "configuracion", "ayuda", "conectar_erp"):
     datos = cargar_datos()
+    # El recorte por tope se DICE, en todas las páginas y no sólo en la de
+    # conexión: si las ventas entraron cortadas, cada número de este
+    # programa —sobrestock, reposición, precios, rutas, copiloto— sale de
+    # ese pedazo. Mostrarlo una sola vez al conectar y después callarlo
+    # equivale a no decirlo.
+    # Sin `icon=`: este producto no usa emojis decorativos y hay un test
+    # que lo hace cumplir (`test_el_producto_no_usa_emojis_decorativos`).
+    for _aviso in conectores.avisos_de_recorte(datos or {}):
+        st.warning(_aviso)
 
 
 # ---------------------------------------------------------------------------

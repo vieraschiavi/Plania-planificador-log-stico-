@@ -263,7 +263,29 @@ def leer_sql(engine, tabla_o_query: str, limite: int | None = None) -> pd.DataFr
 #: cambia los números que el cliente va a mirar. Con 500.000 filas entran
 #: varios años de un distribuidor mediano y el costo de memoria queda en el
 #: orden de los cientos de MB, no de los gigas.
-LIMITE_FILAS = 500_000
+LIMITE_FILAS = int(os.environ.get("PLANIA_LIMITE_FILAS") or 500_000)
+
+
+def avisos_de_recorte(datos: dict) -> list[str]:
+    """Qué entidades se leyeron recortadas, para decirlo en pantalla.
+
+    El tope existía y estaba razonado, pero era MUDO: `LIMITE_FILAS` no se
+    leía en ningún otro archivo del repo —ni la app ni la API lo miraban—,
+    así que con el ERP de un distribuidor de diez años las ventas se
+    cortaban en 500.000 filas y la analítica entera (períodos, sobrestock,
+    reposición, re-precificación, ruteo, copiloto) salía de ese pedazo
+    presentada como el total del negocio. Un número parcial con cara de
+    total es peor que no tener el número.
+    """
+    fuera = []
+    for entidad, df in (datos or {}).items():
+        if getattr(df, "attrs", {}).get("recortada"):
+            fuera.append(
+                f"{entidad}: se leyeron {len(df):,} filas, que es el tope "
+                f"actual. La tabla tiene más, y todo lo que se calcule sale "
+                f"de ese recorte. Subí PLANIA_LIMITE_FILAS si necesitás la "
+                f"tabla entera.")
+    return fuera
 
 
 def _leer_acotado(engine, sql: str, limite: int):
@@ -401,6 +423,17 @@ def cargar_datos(url: str | None = None,
                 f"No encontré una tabla de {entidad} en la base conectada. "
                 f"Tablas disponibles: {listar_tablas(engine)}. "
                 "Elegila manualmente en 'Conectar ERP'.")
-        df = leer_sql(engine, tabla, limite=LIMITE_FILAS)
-        datos[entidad] = normalizar(df, entidad, (mapeos or {}).get(entidad))
+        # `limite + 1`: que vuelva la de más es la prueba de que la tabla
+        # tiene más. Sin esa fila no hay forma de distinguir «entró justo»
+        # de «se cortó», y era exactamente eso lo que dejaba el recorte mudo.
+        df = leer_sql(engine, tabla, limite=LIMITE_FILAS + 1)
+        recortada = len(df) > LIMITE_FILAS
+        if recortada:
+            df = df.head(LIMITE_FILAS)
+        norm = normalizar(df, entidad, (mapeos or {}).get(entidad))
+        # Después de `normalizar`, no antes: esa función devuelve un frame
+        # nuevo y se llevaría puesto el `attrs`.
+        norm.attrs["recortada"] = recortada
+        norm.attrs["limite"] = LIMITE_FILAS
+        datos[entidad] = norm
     return datos
