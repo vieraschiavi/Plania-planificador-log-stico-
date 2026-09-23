@@ -183,25 +183,50 @@ def _rebobinar(origen):
             pass
 
 
-def leer(origen, hoja=None, **forzado) -> pd.DataFrame:
+def leer(origen, hoja=None, sirve=None, **forzado) -> pd.DataFrame:
     """El archivo como DataFrame, detectando el formato solo.
 
     `forzado` permite pisar lo detectado (`separador=";"`, `codificacion=...`)
     para cuando el cliente corrige a mano desde la pantalla.
+
+    `sirve(df) -> bool` decide si una hoja es la buscada. Sin él, la regla
+    es la de siempre: la primera con datos.
+
+    Por qué hizo falta. «La primera con datos» elige mal en el libro más
+    común de todos — el que trae el DICCIONARIO adelante. Reportado con un
+    `Bases y diccionario.xlsx` de ocho hojas: la primera tenía 48 filas de
+    `Tabla | Campo | Tipo | Descripción`, o sea datos de verdad, así que
+    ganaba, y la pantalla contestaba «No pude mapear columnas obligatorias
+    de productos: ['sku', 'precio']» con los productos ahí al lado, en otra
+    hoja del mismo archivo. El usuario leía eso como «mi archivo no sirve».
+
+    Quien llama sabe qué columnas necesita; acá no se adivina de nuevo.
     """
     nombre = getattr(origen, "name", str(origen))
     _rebobinar(origen)
 
     if _es_excel(nombre):
-        # Una sola hoja: se usa esa. Varias y sin elegir: la primera con
-        # datos, no la primera a secas — muchos reportes traen una hoja
-        # "Portada" vacía adelante.
+        # Una sola hoja: se usa esa. Varias y sin elegir: la que SIRVE, y
+        # si ninguna sirve, la primera con datos —no la primera a secas,
+        # porque muchos reportes traen una "Portada" vacía adelante.
         if hoja is None:
+            primera_con_datos = None
             for h in _hojas(origen) or [0]:
                 _rebobinar(origen)
                 df = pd.read_excel(origen, sheet_name=h)
-                if not df.empty:
+                if df.empty:
+                    continue
+                if primera_con_datos is None:
+                    primera_con_datos = df
+                if sirve is None or sirve(df):
                     return df
+            # Ninguna sirvió: se devuelve la de antes para que el mensaje
+            # de error sea el mismo de siempre. Callar acá con un
+            # DataFrame vacío cambiaría «no pude mapear estas columnas»
+            # por «el archivo está vacío», que es mentira y manda a buscar
+            # el problema al lugar equivocado.
+            if primera_con_datos is not None:
+                return primera_con_datos
             _rebobinar(origen)
             return pd.read_excel(origen)
         _rebobinar(origen)

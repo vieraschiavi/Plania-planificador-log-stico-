@@ -124,6 +124,24 @@ def autodetectar_mapeo(df: pd.DataFrame, entidad: str) -> dict:
     return mapeo
 
 
+def faltan_obligatorias(df: pd.DataFrame, entidad: str,
+                        mapeo: dict | None = None) -> list:
+    """Qué columnas obligatorias de `entidad` quedan SIN origen con `mapeo`.
+
+    Es la misma cuenta que hace `normalizar()` antes de levantar, pero sin
+    levantar: la pantalla «Conectar ERP» la necesita para saber si tiene
+    que abrir el ajuste manual ANTES de que el archivo falle. Sin esto la
+    app sólo podía enterarse por la excepción, o sea cuando ya no quedaba
+    nada que ofrecerle al usuario más que el texto del error.
+
+    Cuenta dos orígenes, igual que `rename`: la columna que el mapeo
+    renombra, y la que ya venía llamándose como la canónica.
+    """
+    mapeo = autodetectar_mapeo(df, entidad) if mapeo is None else mapeo
+    resueltas = set(mapeo.values()) | (set(df.columns) - set(mapeo))
+    return [c for c in OBLIGATORIAS[entidad] if c not in resueltas]
+
+
 def normalizar(df: pd.DataFrame, entidad: str, mapeo: dict | None = None) -> pd.DataFrame:
     """Renombra al esquema canónico, valida obligatorias y completa defaults."""
     mapeo = mapeo or autodetectar_mapeo(df, entidad)
@@ -227,9 +245,76 @@ def leer_sql(engine, tabla_o_query: str, limite: int | None = None) -> pd.DataFr
                 "usar una consulta, tiene que empezar con SELECT.")
         q = f"SELECT * FROM {q}"
     if limite:
-        q = f"{q} LIMIT {int(limite)}"
+        return _leer_acotado(engine, q, int(limite))
     with engine.connect() as con:
         return pd.read_sql(text(q), con)
+
+
+#: Tope por defecto al leer una tabla del ERP del cliente.
+#:
+#: Antes no había ninguno: `cargar_desde_sql` llamaba a `leer_sql(engine,
+#: tabla)` sin `limite`, o sea `SELECT * FROM ventas` completo dentro de un
+#: `pd.read_sql`. En la base demo son miles de filas y no se nota; en el ERP
+#: de un distribuidor con diez años de historia son millones, y el programa
+#: se los trae todos a memoria antes de mostrar nada.
+#:
+#: 500.000 y no 50.000 porque acá el tope no es para perfilar: la analítica
+#: de Plania agrega ventas por período y por SKU, así que recortar de más
+#: cambia los números que el cliente va a mirar. Con 500.000 filas entran
+#: varios años de un distribuidor mediano y el costo de memoria queda en el
+#: orden de los cientos de MB, no de los gigas.
+LIMITE_FILAS = int(os.environ.get("PLANIA_LIMITE_FILAS") or 500_000)
+
+
+def avisos_de_recorte(datos: dict) -> list[str]:
+    """Qué entidades se leyeron recortadas, para decirlo en pantalla.
+
+    El tope existía y estaba razonado, pero era MUDO: `LIMITE_FILAS` no se
+    leía en ningún otro archivo del repo —ni la app ni la API lo miraban—,
+    así que con el ERP de un distribuidor de diez años las ventas se
+    cortaban en 500.000 filas y la analítica entera (períodos, sobrestock,
+    reposición, re-precificación, ruteo, copiloto) salía de ese pedazo
+    presentada como el total del negocio. Un número parcial con cara de
+    total es peor que no tener el número.
+    """
+    fuera = []
+    for entidad, df in (datos or {}).items():
+        if getattr(df, "attrs", {}).get("recortada"):
+            fuera.append(
+                f"{entidad}: se leyeron {len(df):,} filas, que es el tope "
+                f"actual. La tabla tiene más, y todo lo que se calcule sale "
+                f"de ese recorte. Subí PLANIA_LIMITE_FILAS si necesitás la "
+                f"tabla entera.")
+    return fuera
+
+
+def _leer_acotado(engine, sql: str, limite: int):
+    """Trae como mucho `limite` filas, en cualquiera de los cinco motores.
+
+    NO se arma `f"{sql} LIMIT n"`: esa es sintaxis de PostgreSQL, MySQL y
+    SQLite. SQL Server quiere `TOP` y Oracle `FETCH FIRST`, así que pegarle
+    `LIMIT` al final a la consulta de un cliente con SQL Server o con Oracle
+    —dos de los cinco motores que este mismo archivo dice soportar— es un
+    error de sintaxis, no un recorte.
+
+    `chunksize` lo resuelve del lado del driver y sin dialecto: abre un
+    cursor del lado del servidor y se corta apenas se juntan las filas
+    pedidas. Es el mismo camino que ya usa MV Data Governance por la misma
+    razón.
+    """
+    import pandas as pd
+    from sqlalchemy import text
+    trozos, total = [], 0
+    with engine.connect() as con:
+        for trozo in pd.read_sql(text(sql), con,
+                                 chunksize=min(limite, 50_000)):
+            trozos.append(trozo)
+            total += len(trozo)
+            if total >= limite:
+                break
+        if not trozos:
+            return pd.read_sql(text(sql), con).head(0)   # vacío CON columnas
+    return pd.concat(trozos, ignore_index=True).head(limite)
 
 
 def autodescubrir_tabla(engine, entidad: str) -> str | None:
@@ -240,7 +325,22 @@ def autodescubrir_tabla(engine, entidad: str) -> str | None:
     return None
 
 
-def leer_archivo(ruta, **forzado) -> pd.DataFrame:
+def sirve_para(entidad: str):
+    """Un predicado: ¿esta hoja tiene las columnas obligatorias de `entidad`?
+
+    Es el MISMO `autodetectar_mapeo` que después va a usar `normalizar`, a
+    propósito: si la hoja se eligiera con una regla y se validara con otra,
+    habría libros donde la elegida es justo la que después se rechaza, y el
+    usuario vería un error sobre una hoja que él nunca nombró.
+    """
+    def _sirve(df: pd.DataFrame) -> bool:
+        renombradas = set(autodetectar_mapeo(df, entidad).values())
+        return all(c in renombradas for c in OBLIGATORIAS[entidad])
+
+    return _sirve
+
+
+def leer_archivo(ruta, entidad: str | None = None, **forzado) -> pd.DataFrame:
     """CSV o Excel exportado del ERP (acepta ruta o file-like de Streamlit).
 
     Delega en `plania.archivos`, que detecta codificación, separador, filas de
@@ -248,9 +348,18 @@ def leer_archivo(ruta, **forzado) -> pd.DataFrame:
     y fallaba con los tres formatos más comunes de un ERP de acá: latin-1 con
     punto y coma, separado por tabulaciones, y con el encabezado del reporte
     arriba del encabezado real.
+
+    Con `entidad`, un Excel de varias hojas se resuelve solo: se usa la hoja
+    cuyas columnas mapean a lo que esa entidad necesita, en vez de la primera
+    con datos. Reportado con un `Bases y diccionario.xlsx` de ocho hojas,
+    donde la primera era el diccionario —48 filas de `Tabla | Campo | Tipo |
+    Descripción`, datos de verdad— y la pantalla contestaba «No pude mapear
+    columnas obligatorias de productos» con los productos en otra hoja del
+    mismo archivo.
     """
     from plania import archivos
-    return archivos.leer(ruta, **forzado)
+    sirve = sirve_para(entidad) if entidad in OBLIGATORIAS else None
+    return archivos.leer(ruta, sirve=sirve, **forzado)
 
 
 def guardar_como_base(datos: dict[str, pd.DataFrame], ruta_db: str | None = None) -> str:
@@ -314,6 +423,17 @@ def cargar_datos(url: str | None = None,
                 f"No encontré una tabla de {entidad} en la base conectada. "
                 f"Tablas disponibles: {listar_tablas(engine)}. "
                 "Elegila manualmente en 'Conectar ERP'.")
-        df = leer_sql(engine, tabla)
-        datos[entidad] = normalizar(df, entidad, (mapeos or {}).get(entidad))
+        # `limite + 1`: que vuelva la de más es la prueba de que la tabla
+        # tiene más. Sin esa fila no hay forma de distinguir «entró justo»
+        # de «se cortó», y era exactamente eso lo que dejaba el recorte mudo.
+        df = leer_sql(engine, tabla, limite=LIMITE_FILAS + 1)
+        recortada = len(df) > LIMITE_FILAS
+        if recortada:
+            df = df.head(LIMITE_FILAS)
+        norm = normalizar(df, entidad, (mapeos or {}).get(entidad))
+        # Después de `normalizar`, no antes: esa función devuelve un frame
+        # nuevo y se llevaría puesto el `attrs`.
+        norm.attrs["recortada"] = recortada
+        norm.attrs["limite"] = LIMITE_FILAS
+        datos[entidad] = norm
     return datos

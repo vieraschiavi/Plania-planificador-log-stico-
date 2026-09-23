@@ -7220,3 +7220,348 @@ def test_secciones_desde_paquete_interpola_los_montos_del_resumen():
         # sin interpolar ("{capital_liberable}" suelto en el texto final).
         assert "{" not in texto_resumen, f"[{idioma}] quedó un placeholder sin interpolar: {texto_resumen}"
         assert i18n.miles(paq["resumen"]["capital_liberable"], 0, idioma) in texto_resumen
+
+
+# ==========================================================================
+# Un libro con el diccionario adelante
+# ==========================================================================
+def _libro(hojas: dict) -> str:
+    """Un .xlsx de verdad con varias hojas, en un temporal."""
+    import tempfile
+    ruta = os.path.join(tempfile.mkdtemp(), "Bases y diccionario.xlsx")
+    with pd.ExcelWriter(ruta) as w:
+        for nombre, df in hojas.items():
+            df.to_excel(w, sheet_name=nombre, index=False)
+    return ruta
+
+
+def test_se_elige_la_hoja_que_SIRVE_y_no_la_primera_con_datos():
+    """Reportado: `Bases y diccionario.xlsx`, ocho hojas, la primera es el
+    diccionario —48 filas de `Tabla | Campo | Tipo | Descripción`, o sea
+    datos de verdad, así que ganaba— y la pantalla contestaba «No pude
+    mapear columnas obligatorias de productos: ['sku', 'precio']» con los
+    productos ahí al lado, en otra hoja del mismo archivo."""
+    ruta = _libro({
+        "Diccionario": pd.DataFrame({"Tabla": ["productos"], "Campo": ["sku"],
+                                     "Tipo": ["texto"], "Descripción": ["código"]}),
+        "Productos": pd.DataFrame({"sku": ["A1"], "nombre": ["Agua"],
+                                   "precio": [10.0]}),
+    })
+    df = conectores.leer_archivo(ruta, entidad="productos")
+    assert list(df.columns) == ["sku", "nombre", "precio"]
+    # y el camino entero, que es lo que el usuario apretaba
+    assert len(conectores.normalizar(df, "productos")) == 1
+
+
+def test_el_mismo_libro_subido_dos_veces_da_dos_hojas_distintas():
+    """Productos y ventas en hojas distintas del MISMO archivo: se sube dos
+    veces, y sin esto las dos veces se leía la primera hoja — o sea que una
+    de las dos fallaba siempre, hiciera lo que hiciera el usuario."""
+    ruta = _libro({
+        "Diccionario": pd.DataFrame({"Tabla": ["x"], "Campo": ["y"]}),
+        "Productos": pd.DataFrame({"sku": ["A1"], "nombre": ["Agua"], "precio": [10.0]}),
+        "Ventas": pd.DataFrame({"fecha": ["2026-01-02"], "sku": ["A1"], "cantidad": [3]}),
+    })
+    prod = conectores.leer_archivo(ruta, entidad="productos")
+    vent = conectores.leer_archivo(ruta, entidad="ventas")
+    assert "precio" in prod.columns and "cantidad" in vent.columns
+
+
+def test_si_ninguna_hoja_sirve_el_error_sigue_siendo_el_de_siempre():
+    """Callar con un DataFrame vacío cambiaría «no pude mapear estas
+    columnas» por «el archivo está vacío», que es mentira y manda a buscar
+    el problema al lugar equivocado."""
+    ruta = _libro({"Diccionario": pd.DataFrame({"Tabla": ["x"], "Campo": ["y"]})})
+    df = conectores.leer_archivo(ruta, entidad="productos")
+    assert list(df.columns) == ["Tabla", "Campo"]
+    with pytest.raises(ValueError, match="columnas obligatorias"):
+        conectores.normalizar(df, "productos")
+
+
+def test_sin_entidad_la_regla_es_la_de_antes():
+    """Quien no dice qué busca sigue recibiendo la primera hoja con datos:
+    este cambio no puede mover el piso de los que ya andaban."""
+    ruta = _libro({"Vacia": pd.DataFrame({"a": []}),
+                   "Primera": pd.DataFrame({"a": [1]}),
+                   "Segunda": pd.DataFrame({"b": [2]})})
+    assert list(conectores.leer_archivo(ruta).columns) == ["a"]
+
+
+# ---------------------------------------------------------------------------
+# Tamaño: el ERP del cliente no es la base demo
+# ---------------------------------------------------------------------------
+# `cargar_desde_sql` llamaba a `leer_sql(engine, tabla)` SIN límite, o sea
+# `SELECT * FROM ventas` entero dentro de un `pd.read_sql`. Con la base demo
+# —miles de filas— no se nota. En el ERP de un distribuidor con diez años de
+# historia son millones de filas a memoria antes de dibujar nada.
+def _erp_grande(tmp_path, filas=120_000):
+    """Una tabla de ventas más grande que el tope del test."""
+    import sqlite3
+    ruta = tmp_path / "erp.db"
+    cx = sqlite3.connect(ruta)
+    cx.execute("CREATE TABLE ventas (fecha TEXT, sku TEXT, cantidad INT)")
+    cx.executemany(
+        "INSERT INTO ventas VALUES (?,?,?)",
+        [(f"2026-01-{(i % 28) + 1:02d}", f"SKU{i % 900}", i % 7)
+         for i in range(filas)])
+    cx.commit()
+    cx.close()
+    return ruta
+
+
+def test_leer_sql_respeta_el_tope_de_filas(tmp_path):
+    from plania import conectores
+    eng = conectores.conectar_sql(f"sqlite:///{_erp_grande(tmp_path)}")
+    assert len(conectores.leer_sql(eng, "ventas", limite=1_000)) == 1_000
+
+
+def test_el_conector_no_trae_la_tabla_entera_del_erp(tmp_path):
+    """El defecto, en su camino real: `cargar_datos` no pasaba límite."""
+    from plania import conectores
+    assert conectores.LIMITE_FILAS > 0
+    eng = conectores.conectar_sql(f"sqlite:///{_erp_grande(tmp_path)}")
+    # Sin tope explícito sigue trayendo todo: es la puerta de atrás para
+    # quien SABE lo que pide. Lo que no puede pasar es que sea el default.
+    assert len(conectores.leer_sql(eng, "ventas")) == 120_000
+    import inspect as _inspect
+    fuente = _inspect.getsource(conectores.cargar_datos)
+    assert "limite=" in fuente, (
+        "cargar_datos volvió a leer la tabla del ERP sin tope")
+
+
+def test_el_recorte_no_se_escribe_con_LIMIT_pegado_al_final():
+    """`f\"{sql} LIMIT n\"` es sintaxis de Postgres, MySQL y SQLite. SQL
+    Server quiere TOP y Oracle FETCH FIRST — y este archivo dice soportar
+    los cinco. Pegarle LIMIT a la consulta de un cliente con SQL Server no
+    es un recorte: es un error de sintaxis."""
+    import inspect as _inspect
+
+    from plania import conectores
+    fuente = _inspect.getsource(conectores.leer_sql)
+    assert "LIMIT {" not in fuente and 'LIMIT {int(limite)}' not in fuente
+    assert "chunksize" in _inspect.getsource(conectores._leer_acotado)
+
+
+# ---------------------------------------------------------------------------
+# Mapeo manual de columnas: el error mandaba a una pantalla que no lo tenía
+# ---------------------------------------------------------------------------
+def _pantalla_conectar_erp(app: str) -> str:
+    """El cuerpo de la pantalla «Conectar ERP» dentro de app/app.py.
+
+    Se ancla en `elif pagina == "conectar_erp":` y no en `with tab2:`: hay
+    varias pantallas con dos pestañas y el `with tab2:` de otra página se
+    quedaba con el corte (pasó al escribir este test).
+    """
+    cuerpo = app.split('elif pagina == "conectar_erp":', 1)[1]
+    return cuerpo.split("\nelif pagina ==", 1)[0]
+
+
+def _archivo_que_no_auto_mapea():
+    """El archivo real que reportó el usuario: un diccionario de datos, con
+    columnas Tabla/Campo/Tipo/Descripción. El auto-mapeo saca `nombre` de
+    «Descripción» y nada más — sku y precio quedan sin origen."""
+    import pandas as pd
+    return pd.DataFrame({
+        "Tabla": ["ventas", "ventas"],
+        "Campo": ["ART001", "ART002"],
+        "Tipo": ["texto", "texto"],
+        "Descripción": ["Jarabe 120 ml", "Comprimidos x30"],
+    })
+
+
+def test_faltan_obligatorias_dice_exactamente_lo_que_falta():
+    """La pantalla necesita saber QUÉ falta antes de que el archivo reviente:
+    con la excepción sola no puede abrir el ajuste ni preseleccionar nada."""
+    from plania import conectores
+
+    crudo = _archivo_que_no_auto_mapea()
+    auto = conectores.autodetectar_mapeo(crudo, "productos")
+    assert auto == {"Descripción": "nombre"}, auto
+    assert conectores.faltan_obligatorias(crudo, "productos", auto) == ["sku", "precio"]
+    # Y con el mapeo puesto a mano no falta ninguna.
+    a_mano = {"Campo": "sku", "Descripción": "nombre", "Tipo": "precio"}
+    assert conectores.faltan_obligatorias(crudo, "productos", a_mano) == []
+
+
+def test_faltan_obligatorias_cuenta_la_columna_que_ya_se_llama_como_la_canonica():
+    """`rename` no toca la columna que ya viene con el nombre canónico, así
+    que tampoco aparece en el mapeo. Si no se la contara, la pantalla abriría
+    el ajuste pidiendo mapear algo que ya está."""
+    import pandas as pd
+
+    from plania import conectores
+    crudo = pd.DataFrame({"sku": ["A"], "nombre": ["X"], "precio": [1.0]})
+    assert conectores.faltan_obligatorias(crudo, "productos", {}) == []
+
+
+def test_normalizar_acepta_el_mapeo_hecho_a_mano():
+    """El valor de todo esto: el archivo que el auto-mapeo rechaza tiene que
+    entrar cuando el usuario dice qué es cada columna."""
+    import pytest
+
+    from plania import conectores
+    crudo = _archivo_que_no_auto_mapea()
+    with pytest.raises(ValueError):
+        conectores.normalizar(crudo, "productos")
+    out = conectores.normalizar(
+        crudo, "productos",
+        {"Campo": "sku", "Descripción": "nombre", "Tipo": "precio"})
+    assert list(out["sku"]) == ["ART001", "ART002"]
+    assert out["nombre"].iloc[0] == "Jarabe 120 ml"
+
+
+def test_la_pantalla_conectar_erp_tiene_de_verdad_el_mapeo_manual():
+    """EL defecto reportado: `normalizar` decía «definí el mapeo manual en la
+    pantalla Conectar ERP» y esa pantalla sólo llamaba a `autodetectar_mapeo`
+    — no había un solo control para definir nada. El mensaje mandaba a hacer
+    algo imposible."""
+    import inspect as _inspect
+    import os
+
+    from plania import conectores
+    mensaje = _inspect.getsource(conectores.normalizar)
+    assert "Conectar ERP" in mensaje, "cambió el mensaje: revisá este test"
+
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    assert "def _mapeo_de(" in app, "no existe el ajuste manual de columnas"
+    # Un selector por columna canónica, con el archivo real como opciones.
+    assert "st.selectbox(" in app.split("def _mapeo_de(", 1)[1].split("\ndef ", 1)[0]
+    # Y la pestaña de archivos tiene que USARLO, no volver al auto a secas.
+    tab = _pantalla_conectar_erp(app)
+    assert "_mapeo_de(e, crudo)" in tab
+    assert "conectores.autodetectar_mapeo" not in tab, \
+        "la pestaña volvió a mapear sola sin ofrecer el ajuste"
+
+
+def test_un_archivo_sin_mapear_no_tapa_el_ajuste_de_los_otros():
+    """Estaban los tres adentro de un solo `try`: el primero que fallaba
+    cortaba el bucle y los otros dos no llegaban a dibujarse. O sea que el
+    usuario veía el error de productos y no tenía dónde arreglar ventas."""
+    import os
+
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    tab = _pantalla_conectar_erp(app)
+    # El mapeo se dibuja ANTES de normalizar, y los rechazos se juntan para
+    # mostrarlos todos al final.
+    assert tab.index("_mapeo_de(e, crudo)") < tab.index("conectores.normalizar")
+    assert "rechazados" in tab
+
+
+def test_las_claves_nuevas_del_mapeo_estan_en_los_tres_idiomas():
+    import json
+    import os
+
+    claves = ("conectar.ajustar_mapeo", "conectar.ajustar_ayuda",
+              "conectar.columna_obligatoria", "conectar.columna_repetida")
+    for idioma in ("es", "en", "pt"):
+        ruta = os.path.join(RAIZ, "plania", "locales", f"{idioma}.json")
+        with open(ruta, encoding="utf-8") as fh:
+            textos = json.load(fh)
+        for clave in claves:
+            assert clave in textos, f"falta {clave} en {idioma}.json"
+            assert textos[clave].strip(), f"{clave} vacía en {idioma}.json"
+
+
+class _StDeJuguete:
+    """Un `st` mínimo que anota qué dibujó `_mapeo_de` y contesta lo que el
+    usuario habría elegido. Permite CORRER la función de la pantalla, no
+    mirarle el código: es la diferencia entre probar que el control existe y
+    probar que el mapeo que devuelve sirve para normalizar el archivo."""
+
+    class _Expander:
+        def __init__(self, registro, titulo, expanded):
+            registro.append((titulo, expanded))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def __init__(self, respuestas):
+        self.respuestas = respuestas
+        self.selectboxes, self.expanders, self.avisos = [], [], []
+
+    def caption(self, texto):
+        pass
+
+    def warning(self, texto):
+        self.avisos.append(texto)
+
+    def expander(self, titulo, expanded=False):
+        return self._Expander(self.expanders, titulo, expanded)
+
+    def selectbox(self, etiqueta, opciones, index=0, key=None):
+        self.selectboxes.append((etiqueta, list(opciones)))
+        return self.respuestas.get(key, list(opciones)[index])
+
+
+def _cargar_mapeo_de(respuestas):
+    """`_mapeo_de` sacada de app/app.py y compilada aparte: app.py es un
+    guion de Streamlit que al importarse levanta la app entera."""
+    import json
+    import os
+    import textwrap
+
+    from plania import conectores
+
+    app = open(os.path.join(RAIZ, "app", "app.py"), encoding="utf-8").read()
+    cuerpo = app.split("\ndef _mapeo_de(", 1)[1].split("\n\n\n", 1)[0]
+    fuente = textwrap.dedent("def _mapeo_de(" + cuerpo)
+    with open(os.path.join(RAIZ, "plania", "locales", "es.json"),
+              encoding="utf-8") as fh:
+        textos = json.load(fh)
+    st = _StDeJuguete(respuestas)
+    ns = {"st": st, "pd": pd, "conectores": conectores, "_SIN_MAPEAR": "—",
+          "t": lambda c, **kw: textos.get(c, c).format(**kw)}
+    exec(compile(fuente, "app.py", "exec"), ns)
+    return ns["_mapeo_de"], st
+
+
+def test_el_ajuste_manual_se_abre_solo_y_deja_entrar_el_archivo():
+    """El camino completo del caso reportado, ejecutado: el archivo que el
+    auto-mapeo rechaza abre el ajuste con un selector por campo, y con lo que
+    el usuario elige `normalizar` lo acepta."""
+    from plania import conectores
+
+    crudo = _archivo_que_no_auto_mapea()
+    crudo["Tipo"] = ["10.5", "22"]          # acá «Tipo» es el precio
+
+    mapeo_de, st = _cargar_mapeo_de({})
+    mapeo = mapeo_de("productos", crudo)
+    assert st.expanders and st.expanders[0][1] is True, \
+        "falta una obligatoria y el ajuste no se abrió solo"
+    etiquetas = [e for e, _ in st.selectboxes]
+    assert [e for e in etiquetas if e.endswith(" *")] == \
+        ["sku *", "nombre *", "precio *"]
+    assert all(set(crudo.columns) <= set(o) for _, o in st.selectboxes), \
+        "los selectores no ofrecen las columnas del archivo"
+    assert conectores.faltan_obligatorias(crudo, "productos", mapeo) == ["sku", "precio"]
+
+    mapeo_de, st = _cargar_mapeo_de({"map_productos_sku": "Campo",
+                                     "map_productos_precio": "Tipo"})
+    mapeo = mapeo_de("productos", crudo)
+    out = conectores.normalizar(crudo, "productos", mapeo)
+    assert list(out["sku"]) == ["ART001", "ART002"]
+    assert out["precio"].iloc[0] == 10.5
+
+
+def test_el_ajuste_avisa_si_una_columna_se_elige_para_dos_campos():
+    """Un `{origen: canónica}` se pisa solo: sin el aviso, el archivo salía
+    rechazado por un campo que el usuario creía haber mapeado."""
+    crudo = _archivo_que_no_auto_mapea()
+    mapeo_de, st = _cargar_mapeo_de({"map_productos_sku": "Campo",
+                                     "map_productos_nombre": "Campo"})
+    mapeo = mapeo_de("productos", crudo)
+    assert mapeo.get("Campo") == "sku", "no ganó la primera"
+    assert st.avisos and "Campo" in st.avisos[0]
+
+
+def test_el_ajuste_queda_cerrado_cuando_el_auto_mapeo_alcanza():
+    """El 90 % de los casos: un export de ERP entra solo. El ajuste no tiene
+    que aparecer abierto estorbando."""
+    mapeo_de, st = _cargar_mapeo_de({})
+    bueno = pd.DataFrame({"Codigo": ["A"], "Descripcion": ["X"], "Precio": [1.0]})
+    mapeo = mapeo_de("productos", bueno)
+    assert st.expanders[0][1] is False
+    assert mapeo == {"Codigo": "sku", "Descripcion": "nombre", "Precio": "precio"}
