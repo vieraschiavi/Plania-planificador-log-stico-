@@ -312,5 +312,16 @@
   "exportes.pie_marca_word": "Plania · smart logistics and sales planning",
   "exportes.hoja_marca": "Plania · {subtitulo} · {fecha}",
   "exportes.resumen_titulo": "Executive summary",
-  "exportes.resumen_texto": "Capital freed up by offers: ${capital_liberable} · Sales at risk from stockouts: ${venta_en_riesgo}/month · Extra margin from prices: ${margen_extra_mensual}/month · Potential by zone: ${venta_potencial_zonas} · Recoverable sales: ${venta_recuperable}."
+  "exportes.resumen_texto": "Capital freed up by offers: ${capital_liberable} · Sales at risk from stockouts: ${venta_en_riesgo}/month · Extra margin from prices: ${margen_extra_mensual}/month · Potential by zone: ${venta_potencial_zonas} · Recoverable sales: ${venta_recuperable}.",
+  "conectar.hoja_de": "Sheet for {entidad}",
+  "conectar.hoja_ayuda": "The sheet that best matches the {entidad} columns was picked automatically. Change it if it is not the right one.",
+  "conectar.hojas_probadas": "Sheets tried for {entidad}:",
+  "conectar.hoja_vacia": "empty",
+  "conectar.hoja_diccionario": "looks like a data dictionary (Table/Field/Type), not data",
+  "conectar.hoja_falta": "missing {columnas}",
+  "conectar.hoja_completa": "has every required column",
+  "conectar.precio_derivar": "Derive the price as {monto} / {unidades} (average price per unit)",
+  "conectar.precio_derivar_ayuda": "Your file has no price. Plania does not make one up: it only computes it if you ask here, and says so.",
+  "conectar.precio_derivado_nota": "DERIVED price, not list price: price = {monto} / {unidades} (summed per product). Check it before using the offer and pricing suggestions.",
+  "exportes.word_no_disponible": "Word unavailable: the python-docx library is missing. Install it with `pip install python-docx` and restart Plania. PDF and Excel still work."
 }

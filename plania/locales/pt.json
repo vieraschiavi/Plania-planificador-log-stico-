@@ -312,5 +312,16 @@
   "exportes.pie_marca_word": "Plania · planejamento logístico e comercial inteligente",
   "exportes.hoja_marca": "Plania · {subtitulo} · {fecha}",
   "exportes.resumen_titulo": "Resumo executivo",
-  "exportes.resumen_texto": "Capital a liberar por ofertas: ${capital_liberable} · Venda em risco por rupturas: ${venta_en_riesgo}/mês · Margem extra por preços: ${margen_extra_mensual}/mês · Potencial por zonas: ${venta_potencial_zonas} · Venda recuperável: ${venta_recuperable}."
+  "exportes.resumen_texto": "Capital a liberar por ofertas: ${capital_liberable} · Venda em risco por rupturas: ${venta_en_riesgo}/mês · Margem extra por preços: ${margen_extra_mensual}/mês · Potencial por zonas: ${venta_potencial_zonas} · Venda recuperável: ${venta_recuperable}.",
+  "conectar.hoja_de": "Planilha de {entidad}",
+  "conectar.hoja_ayuda": "A planilha que melhor mapeia as colunas de {entidad} foi escolhida sozinha. Troque se não for a correta.",
+  "conectar.hojas_probadas": "Planilhas testadas para {entidad}:",
+  "conectar.hoja_vacia": "vazia",
+  "conectar.hoja_diccionario": "parece um dicionário de dados (Tabela/Campo/Tipo), não dados",
+  "conectar.hoja_falta": "falta {columnas}",
+  "conectar.hoja_completa": "tem todas as obrigatórias",
+  "conectar.precio_derivar": "Derivar o preço como {monto} / {unidades} (preço médio por unidade)",
+  "conectar.precio_derivar_ayuda": "Seu arquivo não traz preço. O Plania não inventa: só calcula se você pedir aqui, e deixa anotado.",
+  "conectar.precio_derivado_nota": "Preço DERIVADO, não de tabela: preço = {monto} / {unidades} (soma por produto). Revise antes de usar as sugestões de ofertas e preços.",
+  "exportes.word_no_disponible": "Word indisponível: falta a biblioteca python-docx. Instale com `pip install python-docx` e reinicie o Plania. PDF e Excel continuam funcionando."
 }

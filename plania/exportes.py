@@ -138,9 +138,29 @@ def _lat(s: str) -> str:
 # ---------------------------------------------------------------------------
 # Word (python-docx)
 # ---------------------------------------------------------------------------
+def word_disponible() -> bool:
+    """¿Está instalado python-docx? Sin importarlo.
+
+    La app arma los botones de descarga en cada render. Si llamara a
+    `a_word` para averiguarlo, una PC sin python-docx tiraba
+    `ModuleNotFoundError: No module named 'docx'` en TODAS las pantallas
+    con exportes, aunque nadie apretara «Word» — y se llevaba puestos al
+    PDF y al Excel, que no lo necesitan.
+    """
+    import importlib.util
+    try:
+        return importlib.util.find_spec("docx") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def a_word(titulo: str, secciones: list, idioma: str = "es") -> bytes:
-    from docx import Document
-    from docx.shared import Pt, RGBColor
+    # Import perezoso: python-docx sólo hace falta para ESTE formato.
+    try:
+        from docx import Document
+        from docx.shared import Pt, RGBColor
+    except ImportError as e:
+        raise RuntimeError(i18n.t("exportes.word_no_disponible", idioma)) from e
 
     doc = Document()
     h = doc.add_heading(f"Plania · {titulo}", level=0)
