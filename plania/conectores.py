@@ -37,7 +37,8 @@ SINONIMOS = {
     "productos": {
         "sku": ["sku", "cod_articulo", "codigo", "cod_art", "codart", "id_articulo",
                 "articulo_id", "item", "itemcode", "cod_producto", "codigo_articulo",
-                "codigo_producto", "id_producto", "default_code"],
+                "codigo_producto", "id_producto", "producto_id", "productoid",
+                "default_code"],
         "nombre": ["nombre", "descripcion", "detalle", "articulo", "producto",
                    "desc_articulo", "itemname", "descripcion_articulo", "name"],
         "categoria": ["categoria", "rubro", "familia", "grupo", "linea", "seccion",
@@ -59,7 +60,8 @@ SINONIMOS = {
         "cliente_id": ["cliente_id", "cod_cliente", "codigo_cliente", "id_cliente",
                        "cardcode", "nro_cliente", "cliente", "partner_id", "cuenta"],
         "nombre": ["nombre", "razon_social", "cliente_nombre", "cardname",
-                   "denominacion", "name", "razonsocial"],
+                   "denominacion", "name", "razonsocial", "nombremedico",
+                   "nombre_medico", "nombrecliente", "nombre_cliente"],
         "tipo_negocio": ["tipo_negocio", "giro", "rubro_cliente", "canal",
                          "segmento", "tipo_cliente", "actividad", "categoria_cliente"],
         "departamento": ["departamento", "depto", "provincia", "estado", "region",
@@ -77,7 +79,7 @@ SINONIMOS = {
         "cliente_id": ["cliente_id", "cod_cliente", "cardcode", "id_cliente",
                        "cliente", "nro_cliente", "partner_id"],
         "sku": ["sku", "cod_articulo", "codigo", "itemcode", "id_articulo",
-                "articulo", "cod_producto", "product_id"],
+                "articulo", "cod_producto", "product_id", "producto_id", "productoid"],
         "cantidad": ["cantidad", "unidades", "qty", "quantity", "cant",
                      "cantidad_vendida", "product_uom_qty"],
         "precio_unit": ["precio_unit", "precio_unitario", "precio", "pu",
@@ -110,8 +112,34 @@ def _normalizar_nombre(c: str) -> str:
     return s.strip().lower().replace(" ", "_").replace("-", "_")
 
 
+#: Nombres de hoja (o de archivo) que dicen de qué entidad es la tabla. Con
+#: eso, una columna que se llama sólo «ID» se puede tomar como la clave: en
+#: la hoja «Producto» el ID es el del producto; en «Visitas», no.
+_HOJAS_ENTIDAD = {
+    "productos": ("producto", "productos", "articulo", "articulos", "item", "items",
+                  "sku", "skus", "catalogo"),
+    "clientes": ("cliente", "clientes", "medico", "medicos", "customer",
+                 "customers", "cuenta", "cuentas", "socio", "socios"),
+}
+_CLAVE_ENTIDAD = {"productos": "sku", "clientes": "cliente_id"}
+
+
+def _hoja_es_de(df: pd.DataFrame, entidad: str) -> bool:
+    hoja = _normalizar_nombre(df.attrs.get("hoja") or "")
+    return bool(hoja) and hoja in _HOJAS_ENTIDAD.get(entidad, ())
+
+
 def autodetectar_mapeo(df: pd.DataFrame, entidad: str) -> dict:
-    """Devuelve {col_origen: col_canonica} por matcheo de sinónimos."""
+    """Devuelve {col_origen: col_canonica} por matcheo de sinónimos.
+
+    Si la clave de la entidad no aparece por sinónimo pero hay una columna
+    llamada «ID» y la hoja se llama como la entidad («Producto», «Medico»),
+    esa columna es la clave. Reportado con `Bases y diccionario.xlsx`: su
+    hoja «Producto» trae `ID, Producto, Molecula…` y la de «Medico» `ID,
+    NombreMedico…`, y Plania pedía mapear a mano algo que el nombre de la
+    hoja ya decía. En una hoja cualquiera un «ID» NO se toma: puede ser el
+    número de fila.
+    """
     sin = SINONIMOS[entidad]
     cols = {_normalizar_nombre(c): c for c in df.columns}
     mapeo, usadas = {}, set()
@@ -121,6 +149,10 @@ def autodetectar_mapeo(df: pd.DataFrame, entidad: str) -> dict:
                 mapeo[cols[cand]] = canonica
                 usadas.add(cols[cand])
                 break
+    clave = _CLAVE_ENTIDAD.get(entidad)
+    if (clave and clave not in mapeo.values() and clave not in df.columns
+            and "id" in cols and cols["id"] not in usadas and _hoja_es_de(df, entidad)):
+        mapeo[cols["id"]] = clave
     return mapeo
 
 
@@ -325,22 +357,97 @@ def autodescubrir_tabla(engine, entidad: str) -> str | None:
     return None
 
 
-def sirve_para(entidad: str):
-    """Un predicado: ¿esta hoja tiene las columnas obligatorias de `entidad`?
+# Columnas que delatan un DICCIONARIO de datos (`Tabla | Campo | Tipo |
+# Descripción`): filas de metadatos, no de productos. Sin descartarlas, el
+# diccionario empata con la hoja buena —su «Descripción» mapea a `nombre`
+# igual que la «Producto» de la hoja de productos— y gana por venir primero.
+_COLUMNAS_DE_DICCIONARIO = {"campo", "columna", "field", "column_name"}
+_COLUMNAS_DE_DICCIONARIO_2 = {"tabla", "tipo", "tipo_dato", "table", "data_type",
+                              "descripcion", "description"}
 
-    Es el MISMO `autodetectar_mapeo` que después va a usar `normalizar`, a
-    propósito: si la hoja se eligiera con una regla y se validara con otra,
-    habría libros donde la elegida es justo la que después se rechaza, y el
-    usuario vería un error sobre una hoja que él nunca nombró.
+
+def parece_diccionario(df: pd.DataFrame) -> bool:
+    cols = {_normalizar_nombre(c) for c in df.columns}
+    return bool(cols & _COLUMNAS_DE_DICCIONARIO) and bool(cols & _COLUMNAS_DE_DICCIONARIO_2)
+
+
+def hojas_de(ruta) -> list[str]:
+    """Las hojas de un Excel, o `[]` si `ruta` no es un Excel."""
+    from plania import archivos
+    nombre = getattr(ruta, "name", str(ruta))
+    if not archivos._es_excel(nombre):
+        return []
+    archivos._rebobinar(ruta)
+    hojas = archivos._hojas(ruta)
+    archivos._rebobinar(ruta)
+    return hojas
+
+
+def evaluar_hojas(ruta, entidad: str) -> list[dict]:
+    """Cuánto sirve cada hoja de un Excel para `entidad`, en orden de libro.
+
+    Cada item: `hoja`, `filas`, `faltan` (obligatorias sin origen, con el
+    MISMO `autodetectar_mapeo` que después usa `normalizar` —si se eligiera
+    con una regla y se validara con otra, habría libros donde la elegida es
+    justo la rechazada—), `mapeadas` (cuántas canónicas resuelve) y
+    `diccionario`. Es lo que la pantalla usa para preseleccionar la hoja y
+    lo que el error lista cuando ninguna sirve.
     """
-    def _sirve(df: pd.DataFrame) -> bool:
-        renombradas = set(autodetectar_mapeo(df, entidad).values())
-        return all(c in renombradas for c in OBLIGATORIAS[entidad])
+    from plania import archivos
+    out = []
+    for h in hojas_de(ruta):
+        archivos._rebobinar(ruta)
+        df = pd.read_excel(ruta, sheet_name=h)
+        df.attrs["hoja"] = h
+        mapeo = autodetectar_mapeo(df, entidad)
+        out.append({
+            "hoja": h,
+            "filas": len(df),
+            "faltan": faltan_obligatorias(df, entidad, mapeo),
+            "mapeadas": len(set(mapeo.values()) | (set(df.columns) & set(SINONIMOS[entidad]))),
+            "diccionario": parece_diccionario(df),
+        })
+    archivos._rebobinar(ruta)
+    return out
 
-    return _sirve
+
+def mejor_hoja(evaluacion: list[dict]) -> str | None:
+    """La hoja que mejor mapea: menos obligatorias faltantes, después más
+    columnas reconocidas; a igualdad, la que viene antes en el libro. Las
+    vacías y los diccionarios de datos quedan últimos."""
+    if not evaluacion:
+        return None
+
+    def _clave(par):
+        i, e = par
+        return (e["filas"] == 0, e["diccionario"], len(e["faltan"]), -e["mapeadas"], i)
+
+    return min(enumerate(evaluacion), key=_clave)[1]["hoja"]
 
 
-def leer_archivo(ruta, entidad: str | None = None, **forzado) -> pd.DataFrame:
+def explicar_hojas(evaluacion: list[dict], entidad: str, idioma: str = "es") -> str:
+    """Qué hojas se probaron y qué le falta a cada una, en una línea por hoja.
+
+    El error de antes nombraba sólo UNA hoja (la primera) aunque el libro
+    tuviera ocho; el usuario no sabía si el problema era el archivo entero
+    o esa hoja.
+    """
+    from plania import i18n
+    lineas = [i18n.t("conectar.hojas_probadas", idioma, entidad=entidad)]
+    for e in evaluacion:
+        if e["filas"] == 0:
+            motivo = i18n.t("conectar.hoja_vacia", idioma)
+        elif e["diccionario"]:
+            motivo = i18n.t("conectar.hoja_diccionario", idioma)
+        elif e["faltan"]:
+            motivo = i18n.t("conectar.hoja_falta", idioma, columnas=", ".join(e["faltan"]))
+        else:
+            motivo = i18n.t("conectar.hoja_completa", idioma)
+        lineas.append(f"- {e['hoja']}: {motivo}")
+    return "\n".join(lineas)
+
+
+def leer_archivo(ruta, entidad: str | None = None, hoja=None, **forzado) -> pd.DataFrame:
     """CSV o Excel exportado del ERP (acepta ruta o file-like de Streamlit).
 
     Delega en `plania.archivos`, que detecta codificación, separador, filas de
@@ -349,17 +456,117 @@ def leer_archivo(ruta, entidad: str | None = None, **forzado) -> pd.DataFrame:
     punto y coma, separado por tabulaciones, y con el encabezado del reporte
     arriba del encabezado real.
 
-    Con `entidad`, un Excel de varias hojas se resuelve solo: se usa la hoja
-    cuyas columnas mapean a lo que esa entidad necesita, en vez de la primera
-    con datos. Reportado con un `Bases y diccionario.xlsx` de ocho hojas,
-    donde la primera era el diccionario —48 filas de `Tabla | Campo | Tipo |
-    Descripción`, datos de verdad— y la pantalla contestaba «No pude mapear
-    columnas obligatorias de productos» con los productos en otra hoja del
-    mismo archivo.
+    `hoja` fuerza una hoja (el selector de la pantalla). Sin ella y con
+    `entidad`, un Excel de varias hojas usa la que MEJOR mapea las columnas
+    de esa entidad (`mejor_hoja`), no la primera. Reportado con un
+    `Bases y diccionario.xlsx` de ocho hojas, donde la primera era el
+    diccionario —48 filas de `Tabla | Campo | Tipo | Descripción`— y la
+    pantalla contestaba «No pude mapear columnas obligatorias de productos:
+    ['sku', 'precio']» con los productos en otra hoja del mismo archivo.
     """
     from plania import archivos
-    sirve = sirve_para(entidad) if entidad in OBLIGATORIAS else None
-    return archivos.leer(ruta, sirve=sirve, **forzado)
+    if hoja is None and entidad in OBLIGATORIAS and len(hojas_de(ruta)) > 1:
+        hoja = mejor_hoja(evaluar_hojas(ruta, entidad))
+    df = archivos.leer(ruta, hoja=hoja, **forzado)
+    # De qué hoja salió (o, en un CSV, el nombre del archivo sin extensión):
+    # `autodetectar_mapeo` lo usa para saber si un «ID» suelto es la clave.
+    nombre = hoja if isinstance(hoja, str) else os.path.splitext(
+        os.path.basename(str(getattr(ruta, "name", ruta))))[0]
+    df.attrs["hoja"] = nombre
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Precio derivado de ventas: SÓLO a pedido explícito
+# ---------------------------------------------------------------------------
+_MONTO = ("ventas", "ventasusd", "ventas_usd", "venta", "importe", "importe_total",
+          "monto", "monto_total", "total", "facturacion", "sales", "revenue", "valor")
+_UNIDADES = ("unidades", "cantidad", "cant", "qty", "quantity", "units",
+             "cantidad_vendida")
+
+
+def candidatas_precio_derivado(df: pd.DataFrame) -> tuple[list, list]:
+    """(columnas de monto, columnas de unidades) presentes en `df`.
+
+    Sirve para OFRECER precio = monto / unidades cuando falta `precio`. Nunca
+    se aplica sola: un precio promedio calculado no es el precio de lista, y
+    el piso de margen de las ofertas se calcula sobre él.
+    """
+    montos, unidades = [], []
+    for c in df.columns:
+        n = _normalizar_nombre(c)
+        if n in _MONTO or n.startswith(("ventas_", "importe_", "monto_")):
+            montos.append(c)
+        elif n in _UNIDADES:
+            unidades.append(c)
+    return montos, unidades
+
+
+def derivar_precio(df: pd.DataFrame, col_monto, col_unidades,
+                   col_clave=None, idioma: str = "es") -> tuple[pd.DataFrame, str]:
+    """Agrega `precio` = suma(monto) / suma(unidades), por `col_clave` si viene.
+
+    Devuelve (df, nota). La nota es obligatoria de mostrar: dice de dónde
+    salió el precio, para que nadie lo lea como el de lista. Las filas con
+    unidades en cero quedan con precio vacío en vez de un infinito.
+    """
+    from plania import i18n
+    d = df.copy()
+    d["_m"] = pd.to_numeric(d[col_monto], errors="coerce")
+    d["_u"] = pd.to_numeric(d[col_unidades], errors="coerce")
+    if col_clave is not None and col_clave in d.columns:
+        sumas = d.groupby(col_clave, sort=False)[["_m", "_u"]].sum()
+        d = d.drop_duplicates(subset=[col_clave]).set_index(col_clave)
+        d[["_m", "_u"]] = sumas
+        d = d.reset_index()
+    u = d["_u"].where(d["_u"] != 0)
+    d["precio"] = (d["_m"] / u).round(2)
+    d = d.drop(columns=["_m", "_u"])
+    nota = i18n.t("conectar.precio_derivado_nota", idioma,
+                  monto=col_monto, unidades=col_unidades)
+    return d, nota
+
+
+def precio_desde_ventas(ventas_crudo: pd.DataFrame, idioma: str = "es"):
+    """Precio promedio REALIZADO por sku, sacado del archivo de ventas.
+
+    Para cuando el maestro de productos no trae precio pero las ventas sí
+    traen monto y unidades (la hoja «Mercado» de `Bases y diccionario`:
+    `ProductoID, Unidades, VentasUSD`). Devuelve `(serie sku→precio, nota)`
+    o `(None, "")` si las ventas no alcanzan para calcularlo.
+
+    No es el precio de lista y la nota lo dice: se muestra siempre que se
+    use. Sin monto en las ventas no se inventa nada.
+    """
+    from plania import i18n
+    montos, unidades = candidatas_precio_derivado(ventas_crudo)
+    mapeo = autodetectar_mapeo(ventas_crudo, "ventas")
+    col_sku = next((o for o, c in mapeo.items() if c == "sku"), None)
+    if not (montos and unidades and col_sku):
+        return None, ""
+    d = pd.DataFrame({
+        "sku": ventas_crudo[col_sku].astype(str).str.strip(),
+        "_m": pd.to_numeric(ventas_crudo[montos[0]], errors="coerce"),
+        "_u": pd.to_numeric(ventas_crudo[unidades[0]], errors="coerce"),
+    }).groupby("sku")[["_m", "_u"]].sum()
+    precio = (d["_m"] / d["_u"].where(d["_u"] != 0)).round(2).dropna()
+    if precio.empty:
+        return None, ""
+    nota = i18n.t("conectar.precio_derivado_nota", idioma,
+                  monto=montos[0], unidades=unidades[0])
+    return precio, nota
+
+
+def completar_precio(productos_crudo: pd.DataFrame, mapeo: dict,
+                     precio_por_sku: pd.Series) -> pd.DataFrame:
+    """Agrega la columna `precio` a los productos cruzando por sku."""
+    col_sku = next((o for o, c in mapeo.items() if c == "sku"),
+                   "sku" if "sku" in productos_crudo.columns else None)
+    if col_sku is None:
+        return productos_crudo
+    d = productos_crudo.copy()
+    d["precio"] = d[col_sku].astype(str).str.strip().map(precio_por_sku)
+    return d
 
 
 def guardar_como_base(datos: dict[str, pd.DataFrame], ruta_db: str | None = None) -> str:

@@ -329,8 +329,12 @@ if BLOQUEADA:
     st.warning(t("licencia.demo_terminada"))
     st.stop()
 
+# Las páginas que no muestran datos del negocio. TODAS las demás cargan
+# datos y, por lo tanto, filtran (ver PAGINAS_CON_FILTRO más abajo).
+PAGINAS_SIN_DATOS = ("planes", "configuracion", "ayuda", "conectar_erp")
+
 datos = None
-if pagina not in ("planes", "configuracion", "ayuda", "conectar_erp"):
+if pagina not in PAGINAS_SIN_DATOS:
     datos = cargar_datos()
     # El recorte por tope se DICE, en todas las páginas y no sólo en la de
     # conexión: si las ventas entraron cortadas, cada número de este
@@ -351,8 +355,12 @@ if pagina not in ("planes", "configuracion", "ayuda", "conectar_erp"):
 # fija de rubros sería adivinar el negocio del cliente; así, un distribuidor
 # de bebidas filtra por sus marcas y una ferretería por sus rubros, sin que
 # nadie configure nada.
-PAGINAS_CON_FILTRO = ("panel_ejecutivo", "stock", "precios", "zonas",
-                      "ofertas", "rutas")
+#
+# Se DERIVA del menú en vez de listarse a mano: la lista escrita dejaba
+# afuera Inicio y Copiloto, y Zonas filtraba sin decirlo. Una página nueva
+# con datos entra sola; para dejarla afuera hay que sumarla a
+# PAGINAS_SIN_DATOS, que es una decisión que se ve.
+PAGINAS_CON_FILTRO = tuple(c for c in MENU_CLAVES if c not in PAGINAS_SIN_DATOS)
 
 
 def _filtrar(d: dict) -> tuple[dict, list[str]]:
@@ -426,6 +434,22 @@ def _ventas_enriquecidas(d: dict) -> pd.DataFrame:
     return analitica.enriquecer_ventas(d["ventas"], d["productos"], d["clientes"])
 
 
+# `st.download_button(data=<callable>)` genera el archivo recién al hacer
+# clic (Streamlit >= 1.5x). Con bytes, el PDF, el Word y el Excel de cada
+# tabla se armaban en CADA render aunque nadie los bajara — y un formato
+# roto (p.ej. sin python-docx) tiraba la pantalla entera.
+try:
+    from streamlit.elements.widgets import button as _st_boton
+    _DESCARGA_DIFERIDA = "Callable" in str(getattr(_st_boton, "DownloadButtonDataType", ""))
+except Exception:                               # API interna: si cambia, eager
+    _DESCARGA_DIFERIDA = False
+
+
+def _diferido(fabrica):
+    """El callable si Streamlit lo acepta; si no, los bytes ya armados."""
+    return fabrica if _DESCARGA_DIFERIDA else fabrica()
+
+
 def _botones_export(clave: str, secciones: list, etiqueta: str | None = None):
     """Botones de descarga PDF / Word / Excel para cualquier tabla o informe."""
     if not licencia.tiene("exportes"):
@@ -433,17 +457,29 @@ def _botones_export(clave: str, secciones: list, etiqueta: str | None = None):
         return
     titulo = secciones[0][0] if secciones else t("comun.informe_default")
     c1, c2, c3, _ = st.columns([1, 1, 1, 3])
-    c1.download_button(t("comun.pdf"), exportes.a_pdf(titulo, secciones, IDIOMA),
+    c1.download_button(t("comun.pdf"),
+                       _diferido(lambda: exportes.a_pdf(titulo, secciones, IDIOMA)),
                        file_name=f"plania_{clave}.pdf", key=f"pdf_{clave}",
                        mime="application/pdf")
-    c2.download_button(t("comun.word"), exportes.a_word(titulo, secciones, IDIOMA),
-                       file_name=f"plania_{clave}.docx", key=f"docx_{clave}",
-                       mime="application/vnd.openxmlformats-officedocument"
-                            ".wordprocessingml.document")
-    c3.download_button(t("comun.excel"), exportes.a_excel(secciones, IDIOMA),
+    if exportes.word_disponible():
+        c2.download_button(t("comun.word"),
+                           _diferido(lambda: exportes.a_word(titulo, secciones, IDIOMA)),
+                           file_name=f"plania_{clave}.docx", key=f"docx_{clave}",
+                           mime="application/vnd.openxmlformats-officedocument"
+                                ".wordprocessingml.document")
+    else:
+        # Sin python-docx el botón queda a la vista pero apagado, con el
+        # comando para instalarlo: esconderlo haría creer que Plania no
+        # exporta a Word, y romper la pantalla se llevaba al PDF y al Excel.
+        c2.button(t("comun.word"), key=f"docx_{clave}", disabled=True,
+                  help=t("exportes.word_no_disponible"))
+    c3.download_button(t("comun.excel"),
+                       _diferido(lambda: exportes.a_excel(secciones, IDIOMA)),
                        file_name=f"plania_{clave}.xlsx", key=f"xlsx_{clave}",
                        mime="application/vnd.openxmlformats-officedocument"
                             ".spreadsheetml.sheet")
+    if not exportes.word_disponible():
+        st.caption(t("exportes.word_no_disponible"))
 
 
 _SIN_MAPEAR = "—"
@@ -522,6 +558,7 @@ if pagina == "inicio":
                         horas=lic.get("horas_restantes", licencia.DIAS_DEMO * 24))
                     + "</div>", unsafe_allow_html=True)
     st.markdown(t("inicio.intro"))
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         k = analitica.kpis(datos["productos"], v)
@@ -620,6 +657,7 @@ elif pagina == "precios":
 
 elif pagina == "zonas":
     st.title(t("zonas.titulo"))
+    _aviso_filtros()
     if datos:
         v = _ventas_enriquecidas(datos)
         # `dim` es la clave interna estable ("zona"/"departamento"/
@@ -722,6 +760,7 @@ elif pagina == "ofertas":
 
 elif pagina == "copiloto":
     st.title(t("copiloto.titulo"))
+    _aviso_filtros()
     if not licencia.tiene("copiloto"):
         st.warning(t("copiloto.no_incluido"))
     elif datos:
@@ -795,19 +834,37 @@ elif pagina == "conectar_erp":
                     type=["csv", "xlsx", "xls"], key=f"up_{e}")
                 for e in ("productos", "ventas", "clientes")}
         if arch["productos"] and arch["ventas"]:
-            nuevos, rechazados = {}, []
-            for e, f in arch.items():
+            nuevos, rechazados, crudos = {}, [], {}
+            # Ventas antes que productos: si el maestro de productos no trae
+            # precio, se calcula del monto y las unidades de las ventas.
+            for e in ("ventas", "productos", "clientes"):
+                f = arch[e]
                 if f is None:
                     nuevos[e] = pd.DataFrame(
                         columns=list(conectores.SINONIMOS["clientes"]))
                     continue
+                # Libro de varias hojas: se preselecciona la que MEJOR mapea
+                # esta entidad y se deja cambiarla. La evaluación lee todas
+                # las hojas, así que se guarda por archivo subido y no se
+                # repite en cada rerun.
+                evaluacion: list = []
+                hoja = None
                 try:
-                    # Con la entidad, un libro de varias hojas elige la que
-                    # tiene las columnas de ESTA entidad. El mismo archivo
-                    # puede traer productos y ventas en hojas distintas, y
-                    # se sube dos veces: sin esto las dos veces leían la
-                    # primera hoja y una de las dos fallaba siempre.
-                    crudo = conectores.leer_archivo(f, entidad=e)
+                    clave_eval = f"hojas_{e}_{getattr(f, 'file_id', f.name)}"
+                    if clave_eval not in st.session_state:
+                        st.session_state[clave_eval] = (
+                            conectores.evaluar_hojas(f, e)
+                            if len(conectores.hojas_de(f)) > 1 else [])
+                    evaluacion = st.session_state[clave_eval]
+                    if evaluacion:
+                        nombres = [x["hoja"] for x in evaluacion]
+                        sugerida = conectores.mejor_hoja(evaluacion)
+                        hoja = st.selectbox(
+                            t("conectar.hoja_de", entidad=t(f"conectar.entidad_{e}")),
+                            nombres, index=nombres.index(sugerida),
+                            key=f"{clave_eval}_sel",
+                            help=t("conectar.hoja_ayuda", entidad=t(f"conectar.entidad_{e}")))
+                    crudo = conectores.leer_archivo(f, entidad=e, hoja=hoja)
                 except Exception as err:               # archivo ilegible
                     rechazados.append(str(err))
                     continue
@@ -817,10 +874,40 @@ elif pagina == "conectar_erp":
                 # dos ni aparecían en pantalla — o sea que el usuario no
                 # tenía dónde arreglar lo que el error le pedía arreglar.
                 mapeo = _mapeo_de(e, crudo)
+                # Sin precio, Plania NO lo inventa. Si la hoja trae monto y
+                # unidades, OFRECE derivarlo — apagado por defecto y, si se
+                # prende, anotado a la vista.
+                crudos[e] = crudo
+                precio_ventas, nota_ventas = (
+                    conectores.precio_desde_ventas(crudos["ventas"], IDIOMA)
+                    if e == "productos" and "ventas" in crudos else (None, ""))
+                if (e == "productos" and precio_ventas is not None
+                        and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo)):
+                    # El maestro no trae precio y las ventas sí traen monto y
+                    # unidades: se usa el precio REALIZADO, rotulado a la
+                    # vista y con la opción de no usarlo.
+                    if st.checkbox(t("conectar.precio_desde_ventas"), value=True,
+                                   key="precio_desde_ventas"):
+                        crudo = conectores.completar_precio(crudo, mapeo, precio_ventas)
+                        st.info(nota_ventas)
+                if e == "productos" and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo):
+                    montos, unidades = conectores.candidatas_precio_derivado(crudo)
+                    if montos and unidades and st.checkbox(
+                            t("conectar.precio_derivar", monto=montos[0], unidades=unidades[0]),
+                            value=False, key=f"derivar_precio_{e}",
+                            help=t("conectar.precio_derivar_ayuda")):
+                        col_sku = next((o for o, c in mapeo.items() if c == "sku"), None)
+                        crudo, nota = conectores.derivar_precio(
+                            crudo, montos[0], unidades[0], col_clave=col_sku, idioma=IDIOMA)
+                        st.info(nota)
                 try:
                     nuevos[e] = conectores.normalizar(crudo, e, mapeo)
                 except ValueError as err:              # falta una obligatoria
-                    rechazados.append(str(err))
+                    mensaje = str(err)
+                    if evaluacion:
+                        mensaje += "\n\n" + conectores.explicar_hojas(
+                            evaluacion, t(f"conectar.entidad_{e}"), IDIOMA)
+                    rechazados.append(mensaje)
             if rechazados:
                 for mensaje in rechazados:
                     st.error(mensaje)
