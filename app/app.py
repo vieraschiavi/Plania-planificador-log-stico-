@@ -834,8 +834,11 @@ elif pagina == "conectar_erp":
                     type=["csv", "xlsx", "xls"], key=f"up_{e}")
                 for e in ("productos", "ventas", "clientes")}
         if arch["productos"] and arch["ventas"]:
-            nuevos, rechazados = {}, []
-            for e, f in arch.items():
+            nuevos, rechazados, crudos = {}, [], {}
+            # Ventas antes que productos: si el maestro de productos no trae
+            # precio, se calcula del monto y las unidades de las ventas.
+            for e in ("ventas", "productos", "clientes"):
+                f = arch[e]
                 if f is None:
                     nuevos[e] = pd.DataFrame(
                         columns=list(conectores.SINONIMOS["clientes"]))
@@ -874,6 +877,19 @@ elif pagina == "conectar_erp":
                 # Sin precio, Plania NO lo inventa. Si la hoja trae monto y
                 # unidades, OFRECE derivarlo — apagado por defecto y, si se
                 # prende, anotado a la vista.
+                crudos[e] = crudo
+                precio_ventas, nota_ventas = (
+                    conectores.precio_desde_ventas(crudos["ventas"], IDIOMA)
+                    if e == "productos" and "ventas" in crudos else (None, ""))
+                if (e == "productos" and precio_ventas is not None
+                        and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo)):
+                    # El maestro no trae precio y las ventas sí traen monto y
+                    # unidades: se usa el precio REALIZADO, rotulado a la
+                    # vista y con la opción de no usarlo.
+                    if st.checkbox(t("conectar.precio_desde_ventas"), value=True,
+                                   key="precio_desde_ventas"):
+                        crudo = conectores.completar_precio(crudo, mapeo, precio_ventas)
+                        st.info(nota_ventas)
                 if e == "productos" and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo):
                     montos, unidades = conectores.candidatas_precio_derivado(crudo)
                     if montos and unidades and st.checkbox(

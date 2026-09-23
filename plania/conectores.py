@@ -60,7 +60,8 @@ SINONIMOS = {
         "cliente_id": ["cliente_id", "cod_cliente", "codigo_cliente", "id_cliente",
                        "cardcode", "nro_cliente", "cliente", "partner_id", "cuenta"],
         "nombre": ["nombre", "razon_social", "cliente_nombre", "cardname",
-                   "denominacion", "name", "razonsocial"],
+                   "denominacion", "name", "razonsocial", "nombremedico",
+                   "nombre_medico", "nombrecliente", "nombre_cliente"],
         "tipo_negocio": ["tipo_negocio", "giro", "rubro_cliente", "canal",
                          "segmento", "tipo_cliente", "actividad", "categoria_cliente"],
         "departamento": ["departamento", "depto", "provincia", "estado", "region",
@@ -111,8 +112,34 @@ def _normalizar_nombre(c: str) -> str:
     return s.strip().lower().replace(" ", "_").replace("-", "_")
 
 
+#: Nombres de hoja (o de archivo) que dicen de qué entidad es la tabla. Con
+#: eso, una columna que se llama sólo «ID» se puede tomar como la clave: en
+#: la hoja «Producto» el ID es el del producto; en «Visitas», no.
+_HOJAS_ENTIDAD = {
+    "productos": ("producto", "productos", "articulo", "articulos", "item", "items",
+                  "sku", "skus", "catalogo"),
+    "clientes": ("cliente", "clientes", "medico", "medicos", "customer",
+                 "customers", "cuenta", "cuentas", "socio", "socios"),
+}
+_CLAVE_ENTIDAD = {"productos": "sku", "clientes": "cliente_id"}
+
+
+def _hoja_es_de(df: pd.DataFrame, entidad: str) -> bool:
+    hoja = _normalizar_nombre(df.attrs.get("hoja") or "")
+    return bool(hoja) and hoja in _HOJAS_ENTIDAD.get(entidad, ())
+
+
 def autodetectar_mapeo(df: pd.DataFrame, entidad: str) -> dict:
-    """Devuelve {col_origen: col_canonica} por matcheo de sinónimos."""
+    """Devuelve {col_origen: col_canonica} por matcheo de sinónimos.
+
+    Si la clave de la entidad no aparece por sinónimo pero hay una columna
+    llamada «ID» y la hoja se llama como la entidad («Producto», «Medico»),
+    esa columna es la clave. Reportado con `Bases y diccionario.xlsx`: su
+    hoja «Producto» trae `ID, Producto, Molecula…` y la de «Medico» `ID,
+    NombreMedico…`, y Plania pedía mapear a mano algo que el nombre de la
+    hoja ya decía. En una hoja cualquiera un «ID» NO se toma: puede ser el
+    número de fila.
+    """
     sin = SINONIMOS[entidad]
     cols = {_normalizar_nombre(c): c for c in df.columns}
     mapeo, usadas = {}, set()
@@ -122,6 +149,10 @@ def autodetectar_mapeo(df: pd.DataFrame, entidad: str) -> dict:
                 mapeo[cols[cand]] = canonica
                 usadas.add(cols[cand])
                 break
+    clave = _CLAVE_ENTIDAD.get(entidad)
+    if (clave and clave not in mapeo.values() and clave not in df.columns
+            and "id" in cols and cols["id"] not in usadas and _hoja_es_de(df, entidad)):
+        mapeo[cols["id"]] = clave
     return mapeo
 
 
@@ -367,6 +398,7 @@ def evaluar_hojas(ruta, entidad: str) -> list[dict]:
     for h in hojas_de(ruta):
         archivos._rebobinar(ruta)
         df = pd.read_excel(ruta, sheet_name=h)
+        df.attrs["hoja"] = h
         mapeo = autodetectar_mapeo(df, entidad)
         out.append({
             "hoja": h,
@@ -435,7 +467,13 @@ def leer_archivo(ruta, entidad: str | None = None, hoja=None, **forzado) -> pd.D
     from plania import archivos
     if hoja is None and entidad in OBLIGATORIAS and len(hojas_de(ruta)) > 1:
         hoja = mejor_hoja(evaluar_hojas(ruta, entidad))
-    return archivos.leer(ruta, hoja=hoja, **forzado)
+    df = archivos.leer(ruta, hoja=hoja, **forzado)
+    # De qué hoja salió (o, en un CSV, el nombre del archivo sin extensión):
+    # `autodetectar_mapeo` lo usa para saber si un «ID» suelto es la clave.
+    nombre = hoja if isinstance(hoja, str) else os.path.splitext(
+        os.path.basename(str(getattr(ruta, "name", ruta))))[0]
+    df.attrs["hoja"] = nombre
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -487,6 +525,48 @@ def derivar_precio(df: pd.DataFrame, col_monto, col_unidades,
     nota = i18n.t("conectar.precio_derivado_nota", idioma,
                   monto=col_monto, unidades=col_unidades)
     return d, nota
+
+
+def precio_desde_ventas(ventas_crudo: pd.DataFrame, idioma: str = "es"):
+    """Precio promedio REALIZADO por sku, sacado del archivo de ventas.
+
+    Para cuando el maestro de productos no trae precio pero las ventas sí
+    traen monto y unidades (la hoja «Mercado» de `Bases y diccionario`:
+    `ProductoID, Unidades, VentasUSD`). Devuelve `(serie sku→precio, nota)`
+    o `(None, "")` si las ventas no alcanzan para calcularlo.
+
+    No es el precio de lista y la nota lo dice: se muestra siempre que se
+    use. Sin monto en las ventas no se inventa nada.
+    """
+    from plania import i18n
+    montos, unidades = candidatas_precio_derivado(ventas_crudo)
+    mapeo = autodetectar_mapeo(ventas_crudo, "ventas")
+    col_sku = next((o for o, c in mapeo.items() if c == "sku"), None)
+    if not (montos and unidades and col_sku):
+        return None, ""
+    d = pd.DataFrame({
+        "sku": ventas_crudo[col_sku].astype(str).str.strip(),
+        "_m": pd.to_numeric(ventas_crudo[montos[0]], errors="coerce"),
+        "_u": pd.to_numeric(ventas_crudo[unidades[0]], errors="coerce"),
+    }).groupby("sku")[["_m", "_u"]].sum()
+    precio = (d["_m"] / d["_u"].where(d["_u"] != 0)).round(2).dropna()
+    if precio.empty:
+        return None, ""
+    nota = i18n.t("conectar.precio_derivado_nota", idioma,
+                  monto=montos[0], unidades=unidades[0])
+    return precio, nota
+
+
+def completar_precio(productos_crudo: pd.DataFrame, mapeo: dict,
+                     precio_por_sku: pd.Series) -> pd.DataFrame:
+    """Agrega la columna `precio` a los productos cruzando por sku."""
+    col_sku = next((o for o, c in mapeo.items() if c == "sku"),
+                   "sku" if "sku" in productos_crudo.columns else None)
+    if col_sku is None:
+        return productos_crudo
+    d = productos_crudo.copy()
+    d["precio"] = d[col_sku].astype(str).str.strip().map(precio_por_sku)
+    return d
 
 
 def guardar_como_base(datos: dict[str, pd.DataFrame], ruta_db: str | None = None) -> str:

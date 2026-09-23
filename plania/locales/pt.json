@@ -323,5 +323,6 @@
   "conectar.precio_derivar": "Derivar o preço como {monto} / {unidades} (preço médio por unidade)",
   "conectar.precio_derivar_ayuda": "Seu arquivo não traz preço. O Plania não inventa: só calcula se você pedir aqui, e deixa anotado.",
   "conectar.precio_derivado_nota": "Preço DERIVADO, não de tabela: preço = {monto} / {unidades} (soma por produto). Revise antes de usar as sugestões de ofertas e preços.",
-  "exportes.word_no_disponible": "Word indisponível: falta a biblioteca python-docx. Instale com `pip install python-docx` e reinicie o Plania. PDF e Excel continuam funcionando."
+  "exportes.word_no_disponible": "Word indisponível: falta a biblioteca python-docx. Instale com `pip install python-docx` e reinicie o Plania. PDF e Excel continuam funcionando.",
+  "conectar.precio_desde_ventas": "Usar o preço médio das vendas carregadas (o cadastro de produtos não traz preço)"
 }

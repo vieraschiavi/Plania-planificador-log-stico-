@@ -234,3 +234,75 @@ def test_cada_pestana_filtrada_avisa_el_filtro():
     for pagina in ("inicio", "panel_ejecutivo", "stock", "precios", "zonas",
                    "rutas", "ofertas", "copiloto"):
         assert "_aviso_filtros()" in por_pagina[pagina], pagina
+
+
+# ---------------------------------------------------------------------------
+# «ID» por nombre de hoja + precio sacado de las ventas (Bases y diccionario)
+# ---------------------------------------------------------------------------
+from plania import conectores  # noqa: E402
+
+
+def _libro_farma(ruta):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    d = wb.active
+    d.title = "Diccionario"
+    d.append(["Tabla", "Campo", "Tipo", "Descripción"])
+    d.append(["Producto", "ID", "texto", "código"])
+    p = wb.create_sheet("Producto")
+    p.append(["ID", "Producto", "Molecula"])
+    p.append(["P1", "Uno", "x"])
+    p.append(["P2", "Dos", "y"])
+    m = wb.create_sheet("Medico")
+    m.append(["ID", "NombreMedico", "Ciudad"])
+    m.append(["M1", "Médico 1", "Colonia"])
+    v = wb.create_sheet("Visitas")
+    v.append(["ID", "Fecha", "MedicoID", "ProductoID"])
+    v.append([1, "2025-01-01", "M1", "P1"])
+    mer = wb.create_sheet("Mercado")
+    mer.append(["Fecha", "ProductoID", "Unidades", "VentasUSD"])
+    mer.append(["2025-01-01", "P1", 10, 100.0])
+    mer.append(["2025-02-01", "P1", 10, 300.0])
+    mer.append(["2025-01-01", "P2", 0, 50.0])
+    wb.save(ruta)
+
+
+def test_un_ID_suelto_es_la_clave_si_la_hoja_se_llama_como_la_entidad(tmp_path):
+    ruta = tmp_path / "libro.xlsx"
+    _libro_farma(ruta)
+    p = conectores.leer_archivo(str(ruta), "productos")
+    assert p.attrs["hoja"] == "Producto"
+    assert conectores.autodetectar_mapeo(p, "productos")["ID"] == "sku"
+    c = conectores.leer_archivo(str(ruta), "clientes")
+    mc = conectores.autodetectar_mapeo(c, "clientes")
+    assert c.attrs["hoja"] == "Medico" and mc["ID"] == "cliente_id"
+    assert mc["NombreMedico"] == "nombre"
+
+
+def test_en_otra_hoja_un_ID_no_se_toma_como_clave():
+    import pandas as pd
+    df = pd.DataFrame({"ID": [1], "Fecha": ["2025-01-01"]})
+    df.attrs["hoja"] = "Visitas"
+    assert "ID" not in conectores.autodetectar_mapeo(df, "productos")
+    df.attrs = {}
+    assert "ID" not in conectores.autodetectar_mapeo(df, "clientes")
+
+
+def test_precio_desde_ventas_es_el_realizado_y_viene_rotulado(tmp_path):
+    ruta = tmp_path / "libro.xlsx"
+    _libro_farma(ruta)
+    v = conectores.leer_archivo(str(ruta), "ventas")
+    precio, nota = conectores.precio_desde_ventas(v)
+    assert precio["P1"] == 20.0                 # (100+300)/(10+10)
+    assert "P2" not in precio.index             # unidades 0: no se inventa
+    assert "DERIVADO" in nota
+    p = conectores.leer_archivo(str(ruta), "productos")
+    m = conectores.autodetectar_mapeo(p, "productos")
+    out = conectores.normalizar(conectores.completar_precio(p, m, precio), "productos", m)
+    assert out.set_index("sku").loc["P1", "precio"] == 20.0
+
+
+def test_sin_monto_en_las_ventas_no_hay_precio_derivado():
+    import pandas as pd
+    v = pd.DataFrame({"fecha": ["2025-01-01"], "sku": ["P1"], "cantidad": [3]})
+    assert conectores.precio_desde_ventas(v) == (None, "")

@@ -323,5 +323,6 @@
   "conectar.precio_derivar": "Derive the price as {monto} / {unidades} (average price per unit)",
   "conectar.precio_derivar_ayuda": "Your file has no price. Plania does not make one up: it only computes it if you ask here, and says so.",
   "conectar.precio_derivado_nota": "DERIVED price, not list price: price = {monto} / {unidades} (summed per product). Check it before using the offer and pricing suggestions.",
-  "exportes.word_no_disponible": "Word unavailable: the python-docx library is missing. Install it with `pip install python-docx` and restart Plania. PDF and Excel still work."
+  "exportes.word_no_disponible": "Word unavailable: the python-docx library is missing. Install it with `pip install python-docx` and restart Plania. PDF and Excel still work.",
+  "conectar.precio_desde_ventas": "Use the average price from the loaded sales (the product master has no price)"
 }
