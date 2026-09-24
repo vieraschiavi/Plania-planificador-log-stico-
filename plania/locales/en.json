@@ -191,7 +191,7 @@
   "conectar.columna_obligatoria": "{columna} *",
   "conectar.columna_repetida": "Column \"{columna}\" is selected for both \"{primera}\" and \"{segunda}\". It will be used for \"{primera}\": pick another one for \"{segunda}\".",
   "conectar.usar_archivos": "Use these files across the app",
-  "conectar.archivos_listo": "Done: the files are now saved as the database and the whole app reads from there (panel, suggestions, copilot, routes). You can go back to the demo database by clearing ERP · URL in Settings.",
+  "conectar.archivos_listo": "Done: the files are now saved as the database and the whole app reads from there (panel, suggestions, copilot, routes); the demo no longer shows up. To go back to the demo, use the “Back to demo data” button in the sidebar.",
   "planes.titulo": "Plans & license",
   "planes.demo_activa": "Full trial active — {horas} hours left. When you buy, your data and settings stay exactly as they are.",
   "planes.starter_nombre": "Starter",
@@ -324,5 +324,10 @@
   "conectar.precio_derivar_ayuda": "Your file has no price. Plania does not make one up: it only computes it if you ask here, and says so.",
   "conectar.precio_derivado_nota": "DERIVED price, not list price: price = {monto} / {unidades} (summed per product). Check it before using the offer and pricing suggestions.",
   "exportes.word_no_disponible": "Word unavailable: the python-docx library is missing. Install it with `pip install python-docx` and restart Plania. PDF and Excel still work.",
-  "conectar.precio_desde_ventas": "Use the average price from the loaded sales (the product master has no price)"
+  "conectar.precio_desde_ventas": "Use the average price from the loaded sales (the product master has no price)",
+  "fuente.tipo_sql": "Your SQL database ({nombre})",
+  "fuente.tipo_archivo": "Your files ({nombre})",
+  "fuente.activa": "Every screen is reading: **{fuente}**",
+  "fuente.volver_demo": "Back to demo data",
+  "fuente.fijada_por_entorno": "This source was set by the installation (ERP_DB_URL variable): to go back to the demo it has to be removed there."
 }

@@ -40,8 +40,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from plania import (analitica, conectores, copiloto, exportes, licencia, rutas,
-                    sugerencias)
+from plania import (analitica, conectores, copiloto, exportes, fuente, licencia,
+                    rutas, sugerencias)
 from plania import config as pconfig
 
 app = FastAPI(title="Plania · API local", docs_url="/_docs")
@@ -129,8 +129,8 @@ def _datos() -> dict:
     mientras alguien la está mirando en una demo.
     """
     if "datos" not in _CACHE:
-        url = os.environ.get("ERP_DB_URL") or None
-        _CACHE["datos"] = conectores.cargar_datos(url=url)
+        # Sin URL: decide `plania/fuente.py`, igual que la app.
+        _CACHE["datos"] = conectores.cargar_datos()
     return _CACHE["datos"]
 
 
@@ -522,7 +522,7 @@ def guardar_erp(c: Conexion) -> dict:
         # Guardar una URL que no conecta deja la aplicación sin datos en el
         # próximo arranque, y el usuario no relaciona una cosa con la otra.
         raise HTTPException(400, f"No se guardó porque no conecta: {ex}")
-    pconfig.guardar_extra("ERP_DB_URL", c.url)
+    fuente.usar(c.url)
     invalidar_cache()
     return {"ok": True}
 
@@ -530,8 +530,9 @@ def guardar_erp(c: Conexion) -> dict:
 @app.get("/erp/estado")
 def estado_erp() -> dict:
     _exigir_licencia_vigente()
-    url = pconfig.leer_extra("ERP_DB_URL") or ""
-    return {"conectado": bool(url), "url_enmascarada": pconfig.enmascarar(url) if url else ""}
+    activa = fuente.resolver()
+    return {"conectado": not activa.es_demo, "tipo": activa.tipo, "nombre": activa.nombre,
+            "url_enmascarada": "" if activa.es_demo else pconfig.enmascarar(activa.url)}
 
 
 # ---------------------------------------------------------------------------

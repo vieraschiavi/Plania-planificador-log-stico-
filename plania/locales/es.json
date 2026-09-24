@@ -191,7 +191,7 @@
   "conectar.columna_obligatoria": "{columna} *",
   "conectar.columna_repetida": "La columna «{columna}» está elegida para «{primera}» y para «{segunda}». Se usa para «{primera}»: elegí otra para «{segunda}».",
   "conectar.usar_archivos": "Usar estos archivos en toda la app",
-  "conectar.archivos_listo": "Listo: los archivos quedaron guardados como base de datos y toda la app pasa a leer de ahí (panel, sugerencias, copiloto, rutas). Podés volver a la base demo borrando ERP · URL en Configuración.",
+  "conectar.archivos_listo": "Listo: los archivos quedaron guardados como base de datos y toda la app pasa a leer de ahí (panel, sugerencias, copiloto, rutas); la demo deja de aparecer. Para volver a la demo, usá el botón «Volver a los datos demo» de la barra lateral.",
   "planes.titulo": "Planes y licencia",
   "planes.demo_activa": "Demo full activa — quedan {horas} horas. Al comprar, tus datos y configuración quedan tal cual.",
   "planes.starter_nombre": "Starter",
@@ -324,5 +324,10 @@
   "conectar.precio_derivar_ayuda": "Tu archivo no trae precio. Plania no lo inventa: sólo lo calcula si lo pedís acá, y lo anota.",
   "conectar.precio_derivado_nota": "Precio DERIVADO, no de lista: precio = {monto} / {unidades} (suma por producto). Revisalo antes de usar las sugerencias de ofertas y precios.",
   "exportes.word_no_disponible": "Word no disponible: falta la librería python-docx. Instalala con `pip install python-docx` y reiniciá Plania. PDF y Excel siguen andando.",
-  "conectar.precio_desde_ventas": "Usar el precio promedio de las ventas cargadas (el maestro de productos no trae precio)"
+  "conectar.precio_desde_ventas": "Usar el precio promedio de las ventas cargadas (el maestro de productos no trae precio)",
+  "fuente.tipo_sql": "Tu base SQL ({nombre})",
+  "fuente.tipo_archivo": "Tus archivos ({nombre})",
+  "fuente.activa": "Todas las pantallas están leyendo: **{fuente}**",
+  "fuente.volver_demo": "Volver a los datos demo",
+  "fuente.fijada_por_entorno": "Esta fuente la fijó la instalación (variable ERP_DB_URL): para volver a la demo hay que quitarla de ahí."
 }

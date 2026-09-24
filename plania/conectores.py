@@ -608,15 +608,15 @@ def cargar_datos(url: str | None = None,
       - tablas: {"productos": "articulos", ...} para forzar tablas/queries.
       - mapeos: {"productos": {col_origen: canonica}, ...} para forzar mapeo.
     """
-    from plania import config as pconfig
-    url = url or os.environ.get("ERP_DB_URL") or pconfig.leer_extra("ERP_DB_URL")
-    if not url:
-        demo = os.path.join(RAIZ, "data", "erp_demo.db")
-        if not os.path.exists(demo):
-            raise FileNotFoundError(
-                "No hay ERP conectado ni base demo. Corré "
-                "`python3 data/generate_dataset.py` o configurá ERP_DB_URL.")
-        url = f"sqlite:///{demo}"
+    # Sin URL explícita, decide `plania/fuente.py`: el mismo resolvedor que
+    # usa la app, así ninguna boca (panel del dueño, API, verificación) lee
+    # la demo mientras el usuario tiene su propia fuente elegida.
+    from plania import fuente as pfuente
+    url = url or pfuente.resolver().url
+    if pfuente.es_url_demo(url) and not os.path.exists(url[len("sqlite:///"):]):
+        raise FileNotFoundError(
+            "No hay ERP conectado ni base demo. Corré "
+            "`python3 data/generate_dataset.py` o configurá ERP_DB_URL.")
 
     engine = conectar_sql(url)
     datos = {}

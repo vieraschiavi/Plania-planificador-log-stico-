@@ -33,7 +33,6 @@ rerun aunque nadie tocara el botón de exportar.
 from __future__ import annotations
 
 import dataclasses
-import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -72,8 +71,8 @@ def _datos_producto() -> dict:
     de contenido lo recalculaba ocho veces.
     """
     if "datos" not in _CACHE:
-        url = os.environ.get("ERP_DB_URL") or None
-        _CACHE["datos"] = conectores.cargar_datos(url=url)
+        # Sin URL: decide `plania/fuente.py`, igual que la app.
+        _CACHE["datos"] = conectores.cargar_datos()
     return _CACHE["datos"]
 
 
