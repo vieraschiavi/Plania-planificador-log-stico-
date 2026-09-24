@@ -31,7 +31,7 @@ pd.set_option("mode.string_storage", "python")
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 
-from plania import analitica, apariencia, catalogo, conectores, copiloto, exportes, i18n, licencia, rutas, sugerencias  # noqa: E402
+from plania import analitica, apariencia, catalogo, conectores, copiloto, exportes, fuente, i18n, licencia, rutas, sugerencias  # noqa: E402
 from plania import config as pconfig  # noqa: E402
 
 pconfig.aplicar()
@@ -181,25 +181,69 @@ if not licencia.eula_aceptada():
 
 
 # ---------------------------------------------------------------------------
-# Datos: ERP conectado o demo — cacheado
+# Datos: UNA fuente activa para toda la app — cacheado
 # ---------------------------------------------------------------------------
+# Quién decide es `plania/fuente.py`, no esta pantalla: la misma regla la usan
+# el panel del dueño, la API y el motor. Si el usuario eligió su archivo o su
+# base SQL, TODAS las páginas leen de ahí y la demo desaparece; si la
+# fuente del usuario falla, se dice — no se cae a la demo en silencio.
+FUENTE = fuente.resolver(st.session_state.get("erp_url"))
+
+# Al cambiar de fuente se tira todo lo que se armó con la anterior: los
+# filtros (sus valores eran categorías de la otra base) y el historial del
+# copiloto (sus tablas eran de la otra base). Sin esto, después de subir el
+# archivo el chat seguía mostrando respuestas sacadas de la demo.
+if st.session_state.get("_fuente_clave") != FUENTE.clave:
+    if "_fuente_clave" in st.session_state:
+        for _k in [k for k in st.session_state if k.startswith("filtro_")]:
+            del st.session_state[_k]
+        st.session_state.pop("chat", None)
+    st.session_state["_fuente_clave"] = FUENTE.clave
+
+
 @st.cache_data(show_spinner="…")
-def _cargar(url: str | None, tablas_key: str) -> dict:
+def _cargar(url: str, clave: str, tablas_key: str) -> dict:
+    # `clave` entra en la llave del caché aunque no se use: cambia cuando
+    # cambia el CONTENIDO (archivos resubidos a la misma URL), y así ninguna
+    # sesión sigue viendo los datos de antes.
     tablas = st.session_state.get("tablas_erp") or None
-    return conectores.cargar_datos(url=url or None, tablas=tablas)
+    # Las tablas elegidas a mano son de la base del usuario, nunca de la demo.
+    return conectores.cargar_datos(url=url, tablas=None if fuente.es_url_demo(url) else tablas)
 
 
 def cargar_datos() -> dict | None:
-    url = st.session_state.get("erp_url") or pconfig.leer_extra("ERP_DB_URL") or ""
     try:
-        if not url and not os.path.exists(os.path.join(RAIZ, "data", "erp_demo.db")):
+        if FUENTE.es_demo and not os.path.exists(fuente.ruta_demo()):
             import data.generate_dataset as gen
             gen.main()
             _cargar.clear()
-        return _cargar(url, str(st.session_state.get("tablas_erp")))
+        return _cargar(FUENTE.url, FUENTE.clave, str(st.session_state.get("tablas_erp")))
     except Exception as e:
         st.error(t("errores.no_pude_leer_datos", error=e))
         return None
+
+
+def _nombre_fuente(f: "fuente.Fuente") -> str:
+    """Lo que ve el usuario: qué datos está mirando, sin contraseñas."""
+    if f.es_demo:
+        return t("fuente.base_demo")
+    return t(f"fuente.tipo_{f.tipo}", nombre=f.nombre)
+
+
+def _volver_a_demo(clave: str) -> None:
+    """Botón para dejar de usar la fuente propia. Se muestra donde se mira:
+    la barra lateral (todas las páginas) y Conectar ERP."""
+    if FUENTE.es_demo:
+        return
+    if FUENTE.fijada_por_entorno:
+        st.caption(t("fuente.fijada_por_entorno"))
+        return
+    if st.button(t("fuente.volver_demo"), key=clave, width="stretch"):
+        fuente.volver_a_demo()
+        for k in ("erp_url", "tablas_erp", "datos_archivo"):
+            st.session_state.pop(k, None)
+        _cargar.clear()
+        st.rerun()
 
 
 def _miles(n: float, decimales: int = 0) -> str:
@@ -313,10 +357,8 @@ with st.sidebar:
         st.markdown(t("licencia.plan_activo", plan=lic["plan"], dias=lic["dias_restantes"]))
     else:
         st.markdown(t("licencia.demo_vencida_sidebar"))
-    fuente = (t("fuente.erp_conectado") if (st.session_state.get("erp_url")
-                                            or pconfig.leer_extra("ERP_DB_URL"))
-             else t("fuente.base_demo"))
-    st.caption(t("fuente.etiqueta", fuente=fuente))
+    st.caption(t("fuente.etiqueta", fuente=_nombre_fuente(FUENTE)))
+    _volver_a_demo("volver_demo_sidebar")
 
 # `pagina` es la clave interna estable (p.ej. "panel_ejecutivo"), no el texto
 # traducido — todo el resto del archivo compara contra esta clave, así que
@@ -483,6 +525,17 @@ def _botones_export(clave: str, secciones: list, etiqueta: str | None = None):
 
 
 _SIN_MAPEAR = "—"
+
+
+def _elegir_hoja(clave_selector: str, hoja: str) -> None:
+    """Callback del botón «Usar la hoja X»: mueve el selector de hoja.
+
+    Tiene que ser un `on_click` y no código después del botón: Streamlit no
+    deja escribir el estado de un widget que ya se dibujó en esta pasada, y
+    el callback corre ANTES de la próxima, cuando el selector todavía no
+    existe.
+    """
+    st.session_state[clave_selector] = hoja
 
 
 def _mapeo_de(entidad: str, crudo: pd.DataFrame) -> dict:
@@ -791,6 +844,10 @@ elif pagina == "copiloto":
 elif pagina == "conectar_erp":
     st.title(t("conectar.titulo"))
     st.markdown(t("conectar.intro"))
+    if st.session_state.get("_aviso_fuente"):
+        st.success(st.session_state.pop("_aviso_fuente"))
+    st.info(t("fuente.activa", fuente=_nombre_fuente(FUENTE)))
+    _volver_a_demo("volver_demo_conectar")
     tab1, tab2 = st.tabs([t("conectar.tab_sql"), t("conectar.tab_archivos")])
     with tab1:
         url = st.text_input(t("conectar.url_conexion"),
@@ -813,10 +870,13 @@ elif pagina == "conectar_erp":
             except Exception as e:
                 st.error(t("conectar.no_conecto", error=e))
         if c2.button(t("conectar.guardar_y_usar")):
-            pconfig.guardar_extra("ERP_DB_URL", url)
+            fuente.usar(url)
             st.session_state.erp_url = url
             _cargar.clear()
-            st.success(t("conectar.guardado_ok"))
+            # Se re-ejecuta para que la barra lateral —ya dibujada con la
+            # fuente anterior— muestre la nueva; el aviso sobrevive al rerun.
+            st.session_state["_aviso_fuente"] = t("conectar.guardado_ok")
+            st.rerun()
         with st.expander(t("conectar.elegir_tablas")):
             t_p = st.text_input(t("conectar.tabla_productos"), "")
             t_c = st.text_input(t("conectar.tabla_clientes"), "")
@@ -849,8 +909,8 @@ elif pagina == "conectar_erp":
                 # repite en cada rerun.
                 evaluacion: list = []
                 hoja = None
+                clave_eval = f"hojas_{e}_{getattr(f, 'file_id', f.name)}"
                 try:
-                    clave_eval = f"hojas_{e}_{getattr(f, 'file_id', f.name)}"
                     if clave_eval not in st.session_state:
                         st.session_state[clave_eval] = (
                             conectores.evaluar_hojas(f, e)
@@ -859,10 +919,16 @@ elif pagina == "conectar_erp":
                     if evaluacion:
                         nombres = [x["hoja"] for x in evaluacion]
                         sugerida = conectores.mejor_hoja(evaluacion)
+                        clave_sel = f"{clave_eval}_sel"
+                        # Si el botón «Usar la hoja X» ya escribió el valor,
+                        # no se pasa `index`: Streamlit avisa cuando un widget
+                        # recibe default y valor del estado a la vez.
                         hoja = st.selectbox(
                             t("conectar.hoja_de", entidad=t(f"conectar.entidad_{e}")),
-                            nombres, index=nombres.index(sugerida),
-                            key=f"{clave_eval}_sel",
+                            nombres,
+                            index=(None if st.session_state.get(clave_sel) in nombres
+                                   else nombres.index(sugerida)),
+                            key=clave_sel,
                             help=t("conectar.hoja_ayuda", entidad=t(f"conectar.entidad_{e}")))
                     crudo = conectores.leer_archivo(f, entidad=e, hoja=hoja)
                 except Exception as err:               # archivo ilegible
@@ -881,6 +947,23 @@ elif pagina == "conectar_erp":
                 precio_ventas, nota_ventas = (
                     conectores.precio_desde_ventas(crudos["ventas"], IDIOMA)
                     if e == "productos" and "ventas" in crudos else (None, ""))
+                if (e == "productos" and precio_ventas is None
+                        and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo)):
+                    # La hoja elegida para ventas no trae monto (o no es la de
+                    # ventas): se busca en los libros subidos una hoja que sí
+                    # lo traiga. Antes de esto, elegir mal la hoja de ventas
+                    # rechazaba TAMBIÉN los productos por «falta precio», con
+                    # «Mercado» en el mismo libro. Se guarda por archivo: lee
+                    # todas las hojas y no tiene que repetirse en cada rerun.
+                    for libro in (f, arch["ventas"]):
+                        clave_libro = f"precio_libro_{getattr(libro, 'file_id', libro.name)}"
+                        if clave_libro not in st.session_state:
+                            st.session_state[clave_libro] = (
+                                conectores.precio_desde_libro(libro, IDIOMA)[:2]
+                                if len(conectores.hojas_de(libro)) > 1 else (None, ""))
+                        precio_ventas, nota_ventas = st.session_state[clave_libro]
+                        if precio_ventas is not None:
+                            break
                 if (e == "productos" and precio_ventas is not None
                         and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo)):
                     # El maestro no trae precio y las ventas sí traen monto y
@@ -904,6 +987,19 @@ elif pagina == "conectar_erp":
                     nuevos[e] = conectores.normalizar(crudo, e, mapeo)
                 except ValueError as err:              # falta una obligatoria
                     mensaje = str(err)
+                    alternativa = (conectores.hoja_completa_alternativa(evaluacion, hoja)
+                                   if evaluacion else None)
+                    if alternativa:
+                        # Qué hoja se usó y cuál sirve, arriba de todo, y el
+                        # cambio en un clic. No se cambia sola: elegir una
+                        # hoja incompleta para mapearla a mano es válido.
+                        entidad_txt = t(f"conectar.entidad_{e}")
+                        mensaje = t("conectar.hoja_no_sirve", entidad=entidad_txt,
+                                    hoja=hoja, alternativa=alternativa) + "\n\n" + mensaje
+                        st.button(t("conectar.usar_hoja", hoja=alternativa, entidad=entidad_txt),
+                                  key=f"{clave_eval}_usar_alternativa",
+                                  on_click=_elegir_hoja,
+                                  args=(f"{clave_eval}_sel", alternativa))
                     if evaluacion:
                         mensaje += "\n\n" + conectores.explicar_hojas(
                             evaluacion, t(f"conectar.entidad_{e}"), IDIOMA)
@@ -916,10 +1012,14 @@ elif pagina == "conectar_erp":
                 st.dataframe(nuevos["productos"].head(), width="stretch")
                 if st.button(t("conectar.usar_archivos"), type="primary"):
                     url_archivos = conectores.guardar_como_base(nuevos)
-                    pconfig.guardar_extra("ERP_DB_URL", url_archivos)
+                    fuente.usar(url_archivos, nombre=", ".join(
+                        f.name for f in arch.values() if f is not None))
                     st.session_state.erp_url = url_archivos
+                    # Las tablas elegidas a mano eran de otra base.
+                    st.session_state.pop("tablas_erp", None)
                     _cargar.clear()
-                    st.success(t("conectar.archivos_listo"))
+                    st.session_state["_aviso_fuente"] = t("conectar.archivos_listo")
+                    st.rerun()
 
 elif pagina == "planes":
     st.title(t("planes.titulo"))
@@ -983,6 +1083,11 @@ elif pagina == "configuracion":
             cambios = {k: v for k, v in nuevos.items() if v.strip()}
             if cambios:
                 pconfig.guardar(cambios)
+                if "ERP_DB_URL" in cambios:
+                    # Misma puerta que Conectar ERP: que toda la app cambie.
+                    fuente.usar(cambios["ERP_DB_URL"])
+                    st.session_state.pop("erp_url", None)
+                    _cargar.clear()
                 pconfig.aplicar()
                 st.success(t("configuracion.guardado_ok", claves=", ".join(cambios)))
             else:

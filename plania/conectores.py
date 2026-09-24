@@ -79,9 +79,15 @@ SINONIMOS = {
         "cliente_id": ["cliente_id", "cod_cliente", "cardcode", "id_cliente",
                        "cliente", "nro_cliente", "partner_id"],
         "sku": ["sku", "cod_articulo", "codigo", "itemcode", "id_articulo",
-                "articulo", "cod_producto", "product_id", "producto_id", "productoid"],
+                "articulo", "cod_producto", "product_id", "producto_id", "productoid",
+                "id_producto", "codigo_producto", "codigo_articulo", "cod_art",
+                "codart"],
+        # «PXs» (recetas) NO va acá a propósito: una receta no es una venta.
+        # Con ese sinónimo la hoja «Recetas» empataría con «Mercado» y ganaría
+        # por venir antes en el libro — ventas sin monto, o sea sin precio.
         "cantidad": ["cantidad", "unidades", "qty", "quantity", "cant",
-                     "cantidad_vendida", "product_uom_qty"],
+                     "cantidad_vendida", "product_uom_qty", "units",
+                     "unidades_vendidas", "cantidad_unidades"],
         "precio_unit": ["precio_unit", "precio_unitario", "precio", "pu",
                         "price_unit", "precio_venta", "importe_unitario"],
         "costo_unit": ["costo_unit", "costo_unitario", "costo", "stockprice",
@@ -210,6 +216,17 @@ def normalizar(df: pd.DataFrame, entidad: str, mapeo: dict | None = None) -> pd.
         out["fecha"] = pd.to_datetime(out["fecha"], errors="coerce")
         out = out.dropna(subset=["fecha"])
         out["cantidad"] = pd.to_numeric(out["cantidad"], errors="coerce").fillna(0)
+        # `cliente_id` y `venta_id` son opcionales en el esquema, pero la
+        # analítica los agrupa y los cruza. Unas ventas agregadas de mercado
+        # (`Fecha, ProductoID, Unidades, VentasUSD`, sin cliente ni
+        # comprobante) tiraban `KeyError: 'cliente_id'` en todas las
+        # pestañas. Se agregan VACÍAS —nunca inventadas—: agrupar ignora el
+        # vacío, así que «clientes activos» da 0 en vez de un número falso.
+        # `object` y no float: si no, cruzar con los `cliente_id` de texto
+        # de la hoja de clientes falla por tipos distintos.
+        for c in ["cliente_id", "venta_id"]:
+            if c not in out.columns:
+                out[c] = pd.Series(pd.NA, index=out.index, dtype="object")
         for c in ["precio_unit", "costo_unit"]:
             if c in out.columns:
                 out[c] = pd.to_numeric(out[c], errors="coerce")
@@ -425,6 +442,33 @@ def mejor_hoja(evaluacion: list[dict]) -> str | None:
     return min(enumerate(evaluacion), key=_clave)[1]["hoja"]
 
 
+def _sirve_entera(e: dict) -> bool:
+    return e["filas"] > 0 and not e["diccionario"] and not e["faltan"]
+
+
+def hoja_completa_alternativa(evaluacion: list[dict], hoja) -> str | None:
+    """Otra hoja que SÍ trae todas las obligatorias, cuando `hoja` no.
+
+    Reportado con `Bases y diccionario.xlsx`: el selector de «Hoja de
+    ventas» quedó en «Producto», y el error decía a la vez «No pude mapear
+    ventas: ['fecha', 'sku', 'cantidad']» y, más abajo, «Mercado: tiene
+    todas las obligatorias». El dato estaba, pero no el camino de vuelta:
+    no decía qué hoja se había usado ni ofrecía la buena. Esto es lo que
+    la pantalla usa para decirlo y para ofrecer el cambio en un clic.
+
+    No se cambia sola: elegir una hoja «incompleta» a propósito para
+    mapearla a mano es un uso válido (el ajuste manual de columnas existe
+    para eso), y pisarlo lo haría imposible. Devuelve `None` si `hoja` ya
+    sirve o si ninguna otra sirve.
+    """
+    elegida = next((e for e in evaluacion if e["hoja"] == hoja), None)
+    if elegida is None or _sirve_entera(elegida):
+        return None
+    mejor = mejor_hoja(evaluacion)
+    e = next((x for x in evaluacion if x["hoja"] == mejor), None)
+    return mejor if e is not None and mejor != hoja and _sirve_entera(e) else None
+
+
 def explicar_hojas(evaluacion: list[dict], entidad: str, idioma: str = "es") -> str:
     """Qué hojas se probaron y qué le falta a cada una, en una línea por hoja.
 
@@ -545,7 +589,7 @@ def precio_desde_ventas(ventas_crudo: pd.DataFrame, idioma: str = "es"):
     if not (montos and unidades and col_sku):
         return None, ""
     d = pd.DataFrame({
-        "sku": ventas_crudo[col_sku].astype(str).str.strip(),
+        "sku": _clave_texto(ventas_crudo[col_sku]),
         "_m": pd.to_numeric(ventas_crudo[montos[0]], errors="coerce"),
         "_u": pd.to_numeric(ventas_crudo[unidades[0]], errors="coerce"),
     }).groupby("sku")[["_m", "_u"]].sum()
@@ -557,6 +601,47 @@ def precio_desde_ventas(ventas_crudo: pd.DataFrame, idioma: str = "es"):
     return precio, nota
 
 
+def precio_desde_libro(ruta, idioma: str = "es"):
+    """Precio realizado sacado de CUALQUIER hoja del libro que lo permita.
+
+    `precio_desde_ventas` depende de la hoja que se eligió para ventas: si
+    esa hoja no trae monto (o no es la de ventas), los productos quedaban
+    rechazados por «falta precio» aunque el mismo libro tuviera la hoja
+    «Mercado» con `ProductoID, Unidades, VentasUSD` al lado. Esto la busca.
+
+    Devuelve `(serie sku→precio, nota, hoja)` o `(None, "", None)`. La nota
+    nombra la hoja: igual que antes, se muestra siempre que se use y nunca
+    se inventa un número — sin una hoja con monto y unidades, no hay precio.
+    """
+    from plania import archivos, i18n
+    for h in hojas_de(ruta):
+        archivos._rebobinar(ruta)
+        df = pd.read_excel(ruta, sheet_name=h)
+        df.attrs["hoja"] = h
+        if df.empty or parece_diccionario(df):
+            continue
+        precio, nota = precio_desde_ventas(df, idioma)
+        if precio is not None:
+            archivos._rebobinar(ruta)
+            return precio, nota + " " + i18n.t("conectar.precio_de_hoja", idioma, hoja=h), h
+    archivos._rebobinar(ruta)
+    return None, "", None
+
+
+def _clave_texto(serie: pd.Series) -> pd.Series:
+    """La clave de producto como texto comparable entre hojas.
+
+    Un código numérico que en una hoja vino como entero (`101`) y en otra
+    como decimal (`101.0`, porque la columna tenía algún vacío) no cruzaba:
+    `astype(str)` los deja distintos y el precio quedaba vacío sin avisar.
+    """
+    def _uno(v):
+        if isinstance(v, float) and v.is_integer():
+            return str(int(v))
+        return str(v).strip()
+    return serie.map(_uno)
+
+
 def completar_precio(productos_crudo: pd.DataFrame, mapeo: dict,
                      precio_por_sku: pd.Series) -> pd.DataFrame:
     """Agrega la columna `precio` a los productos cruzando por sku."""
@@ -565,7 +650,7 @@ def completar_precio(productos_crudo: pd.DataFrame, mapeo: dict,
     if col_sku is None:
         return productos_crudo
     d = productos_crudo.copy()
-    d["precio"] = d[col_sku].astype(str).str.strip().map(precio_por_sku)
+    d["precio"] = _clave_texto(d[col_sku]).map(precio_por_sku)
     return d
 
 
@@ -608,15 +693,15 @@ def cargar_datos(url: str | None = None,
       - tablas: {"productos": "articulos", ...} para forzar tablas/queries.
       - mapeos: {"productos": {col_origen: canonica}, ...} para forzar mapeo.
     """
-    from plania import config as pconfig
-    url = url or os.environ.get("ERP_DB_URL") or pconfig.leer_extra("ERP_DB_URL")
-    if not url:
-        demo = os.path.join(RAIZ, "data", "erp_demo.db")
-        if not os.path.exists(demo):
-            raise FileNotFoundError(
-                "No hay ERP conectado ni base demo. Corré "
-                "`python3 data/generate_dataset.py` o configurá ERP_DB_URL.")
-        url = f"sqlite:///{demo}"
+    # Sin URL explícita, decide `plania/fuente.py`: el mismo resolvedor que
+    # usa la app, así ninguna boca (panel del dueño, API, verificación) lee
+    # la demo mientras el usuario tiene su propia fuente elegida.
+    from plania import fuente as pfuente
+    url = url or pfuente.resolver().url
+    if pfuente.es_url_demo(url) and not os.path.exists(url[len("sqlite:///"):]):
+        raise FileNotFoundError(
+            "No hay ERP conectado ni base demo. Corré "
+            "`python3 data/generate_dataset.py` o configurá ERP_DB_URL.")
 
     engine = conectar_sql(url)
     datos = {}

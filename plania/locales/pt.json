@@ -191,7 +191,7 @@
   "conectar.columna_obligatoria": "{columna} *",
   "conectar.columna_repetida": "A coluna «{columna}» está escolhida para «{primera}» e para «{segunda}». Será usada para «{primera}»: escolha outra para «{segunda}».",
   "conectar.usar_archivos": "Usar estes arquivos em todo o app",
-  "conectar.archivos_listo": "Pronto: os arquivos ficaram salvos como banco de dados e o app inteiro passa a ler dali (painel, sugestões, copiloto, rotas). Você pode voltar ao banco demo apagando ERP · URL em Configurações.",
+  "conectar.archivos_listo": "Pronto: os arquivos ficaram salvos como banco de dados e o app inteiro passa a ler dali (painel, sugestões, copiloto, rotas); o demo deixa de aparecer. Para voltar ao demo, use o botão “Voltar aos dados demo” da barra lateral.",
   "planes.titulo": "Planos e licença",
   "planes.demo_activa": "Demo completa ativa — faltam {horas} horas. Ao comprar, seus dados e configurações continuam exatamente iguais.",
   "planes.starter_nombre": "Starter",
@@ -324,5 +324,13 @@
   "conectar.precio_derivar_ayuda": "Seu arquivo não traz preço. O Plania não inventa: só calcula se você pedir aqui, e deixa anotado.",
   "conectar.precio_derivado_nota": "Preço DERIVADO, não de tabela: preço = {monto} / {unidades} (soma por produto). Revise antes de usar as sugestões de ofertas e preços.",
   "exportes.word_no_disponible": "Word indisponível: falta a biblioteca python-docx. Instale com `pip install python-docx` e reinicie o Plania. PDF e Excel continuam funcionando.",
-  "conectar.precio_desde_ventas": "Usar o preço médio das vendas carregadas (o cadastro de produtos não traz preço)"
+  "conectar.precio_desde_ventas": "Usar o preço médio das vendas carregadas (o cadastro de produtos não traz preço)",
+  "conectar.precio_de_hoja": "Tirado da planilha «{hoja}».",
+  "conectar.hoja_no_sirve": "A planilha escolhida para {entidad} é «{hoja}», e ela não traz todas as colunas obrigatórias. A planilha «{alternativa}» traz.",
+  "conectar.usar_hoja": "Usar a planilha «{hoja}» para {entidad}",
+  "fuente.tipo_sql": "Seu banco SQL ({nombre})",
+  "fuente.tipo_archivo": "Seus arquivos ({nombre})",
+  "fuente.activa": "Todas as telas estão lendo: **{fuente}**",
+  "fuente.volver_demo": "Voltar aos dados demo",
+  "fuente.fijada_por_entorno": "Esta fonte foi definida pela instalação (variável ERP_DB_URL): para voltar ao demo é preciso removê-la de lá."
 }

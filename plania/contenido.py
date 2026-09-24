@@ -40,9 +40,8 @@ AVISO_DEMO = ("CONTENIDO DE EJEMPLO — los números salen de la base demo de "
 
 def _sobre_datos_demo() -> bool:
     """True si estamos trabajando contra la base demo incluida."""
-    from plania import config as pconfig
-    url = os.environ.get("ERP_DB_URL") or pconfig.leer_extra("ERP_DB_URL") or ""
-    return (not url) or url.endswith("erp_demo.db")
+    from plania import fuente
+    return fuente.resolver().es_demo
 
 
 def _cifras(datos: dict) -> dict:

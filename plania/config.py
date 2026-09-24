@@ -325,6 +325,20 @@ def aplicar():
     for k, v in cargar().items():
         if k in CLAVES and isinstance(v, str) and v and not os.environ.get(k):
             os.environ[k] = v
+            COPIADAS_AL_ENTORNO[k] = v
+
+
+# Lo que `aplicar()` copió de la config al entorno. Hace falta distinguirlo de
+# una variable de entorno PUESTA A PROPÓSITO (Docker, soporte): la copia es un
+# reflejo de la config y tiene que seguirla cuando la config cambia —si no,
+# `ERP_DB_URL` quedaba apuntando a la fuente vieja en el entorno aunque el
+# usuario ya hubiera elegido otra o vuelto a la demo (ver `plania/fuente.py`).
+COPIADAS_AL_ENTORNO: dict[str, str] = {}
+
+
+def viene_de_la_config(clave: str) -> bool:
+    """True si el valor de entorno de `clave` lo puso `aplicar()`, no alguien."""
+    return clave in COPIADAS_AL_ENTORNO and os.environ.get(clave) == COPIADAS_AL_ENTORNO[clave]
 
 
 def estado() -> dict:

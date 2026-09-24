@@ -306,3 +306,159 @@ def test_sin_monto_en_las_ventas_no_hay_precio_derivado():
     import pandas as pd
     v = pd.DataFrame({"fecha": ["2025-01-01"], "sku": ["P1"], "cantidad": [3]})
     assert conectores.precio_desde_ventas(v) == (None, "")
+
+
+# ---------------------------------------------------------------------------
+# «Hoja de ventas» en la hoja equivocada (Bases y diccionario, segundo reporte)
+# ---------------------------------------------------------------------------
+# El error decía a la vez «No pude mapear ventas: ['fecha', 'sku',
+# 'cantidad']. Columnas disponibles: ['ID', 'Producto', …]» y «Mercado: tiene
+# todas las obligatorias»: las ventas se leían de la hoja «Producto». De
+# rebote, los productos caían por «falta precio», porque el precio se sacaba
+# de esa misma hoja de ventas. Libro SINTÉTICO con la misma forma que el
+# real: ocho hojas, mismos encabezados, valores inventados.
+def _libro_ocho_hojas(ruta, con_mercado=True):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    d = wb.active
+    d.title = "Diccionario"
+    d.append(["Tabla", "Campo", "Tipo", "Descripción"])
+    for campo in ("ID", "Producto", "Unidades", "VentasUSD"):
+        d.append(["Mercado", campo, "texto", "sintético"])
+    med = wb.create_sheet("Medico")
+    med.append(["ID", "NombreMedico", "Especialidad", "Ciudad", "Segmento",
+                "Potencial", "ConsentimientoDigital"])
+    for i in range(1, 4):
+        med.append([f"M{i:03d}", f"Médico {i}", "Clínica", "Ciudad X", "A", "Alto", "Sí"])
+    prod = wb.create_sheet("Producto")
+    prod.append(["ID", "Producto", "Molecula", "ATC4", "AreaTerapeutica", "Corporacion"])
+    for i in range(1, 4):
+        prod.append([f"P{i:03d}", f"Producto {i}", f"Mol {i}", "A01A", "Área", "Corp Z"])
+    fec = wb.create_sheet("Fecha")
+    fec.append(["Fecha", "Anio", "MesNumero", "Mes", "AnioMes", "Trimestre", "DiaSemanaNumero"])
+    fec.append(["2025-01-01", 2025, 1, "Ene", "2025-01", 1, 3])
+    vis = wb.create_sheet("Visitas")
+    vis.append(["ID", "Fecha", "MedicoID", "ProductoID", "APM", "Estado", "Visitas"])
+    vis.append([1, "2025-01-02", "M001", "P001", "APM 1", "Hecha", 1])
+    rec = wb.create_sheet("Recetas")
+    rec.append(["ID", "Fecha", "MedicoID", "ProductoID", "PXs", "Especialidad"])
+    rec.append([1, "2025-01-03", "M001", "P001", 4, "Clínica"])
+    dig = wb.create_sheet("Interacc. Digital")
+    dig.append(["InteraccionID", "Fecha", "MedicoID", "ProductoID", "Canal", "Enviado",
+                "Abierto", "Click", "DuracionMin", "Especialidad"])
+    dig.append([1, "2025-01-04", "M001", "P002", "Mail", 1, 1, 0, 2.5, "Clínica"])
+    if con_mercado:
+        mer = wb.create_sheet("Mercado")
+        mer.append(["Fecha", "ProductoID", "Corporacion", "Unidades", "VentasUSD"])
+        mer.append(["2025-01-01", "P001", "Corp Z", 10, 100.0])
+        mer.append(["2025-02-01", "P001", "Corp Z", 30, 500.0])   # P001: 600/40 = 15
+        mer.append(["2025-01-01", "P002", "Corp Z", 4, 50.0])     # P002: 12.5
+        mer.append(["2025-02-01", "P003", "Corp Z", 0, 20.0])     # sin unidades: sin precio
+    wb.save(ruta)
+
+
+def test_ventas_del_libro_de_ocho_hojas_salen_de_mercado(tmp_path):
+    ruta = tmp_path / "bases.xlsx"
+    _libro_ocho_hojas(ruta)
+    ev = conectores.evaluar_hojas(str(ruta), "ventas")
+    assert conectores.mejor_hoja(ev) == "Mercado"
+    v = conectores.leer_archivo(str(ruta), "ventas")
+    assert v.attrs["hoja"] == "Mercado"
+    m = conectores.autodetectar_mapeo(v, "ventas")
+    assert m == {"Fecha": "fecha", "ProductoID": "sku", "Unidades": "cantidad"}
+    out = conectores.normalizar(v, "ventas", m)
+    assert len(out) == 4 and out["cantidad"].sum() == 44
+    # Sin cliente ni comprobante en la hoja: las columnas existen VACÍAS,
+    # para que la analítica no tire KeyError, pero no se inventa ningún id.
+    assert out["cliente_id"].isna().all() and out["venta_id"].isna().all()
+
+
+def test_las_recetas_no_cuentan_como_ventas(tmp_path):
+    # «PXs» no es sinónimo de cantidad: con él, «Recetas» empataría con
+    # «Mercado» y ganaría por venir antes, dejando ventas sin monto.
+    ruta = tmp_path / "bases.xlsx"
+    _libro_ocho_hojas(ruta)
+    ev = {e["hoja"]: e for e in conectores.evaluar_hojas(str(ruta), "ventas")}
+    assert ev["Recetas"]["faltan"] == ["cantidad"]
+    assert ev["Mercado"]["faltan"] == []
+
+
+def test_hoja_de_ventas_mal_elegida_nombra_la_que_sirve(tmp_path):
+    ruta = tmp_path / "bases.xlsx"
+    _libro_ocho_hojas(ruta)
+    ev = conectores.evaluar_hojas(str(ruta), "ventas")
+    assert conectores.hoja_completa_alternativa(ev, "Producto") == "Mercado"
+    assert conectores.hoja_completa_alternativa(ev, "Recetas") == "Mercado"
+    assert conectores.hoja_completa_alternativa(ev, "Mercado") is None
+    # Si ninguna hoja sirve entera, no hay alternativa que ofrecer.
+    sin = tmp_path / "sin_mercado.xlsx"
+    _libro_ocho_hojas(sin, con_mercado=False)
+    ev_sin = conectores.evaluar_hojas(str(sin), "ventas")
+    assert conectores.hoja_completa_alternativa(ev_sin, "Producto") is None
+
+
+def test_productos_toman_el_precio_de_la_hoja_mercado_del_libro(tmp_path):
+    ruta = tmp_path / "bases.xlsx"
+    _libro_ocho_hojas(ruta)
+    p = conectores.leer_archivo(str(ruta), "productos")
+    assert p.attrs["hoja"] == "Producto"
+    m = conectores.autodetectar_mapeo(p, "productos")
+    assert m == {"ID": "sku", "Producto": "nombre"}
+    assert conectores.faltan_obligatorias(p, "productos", m) == ["precio"]
+    # Aunque la hoja elegida para ventas fuera otra, el libro trae Mercado.
+    precio, nota, hoja = conectores.precio_desde_libro(str(ruta))
+    assert hoja == "Mercado"
+    assert precio.to_dict() == {"P001": 15.0, "P002": 12.5}   # P003: 0 unidades
+    assert "DERIVADO" in nota and "Mercado" in nota
+    out = conectores.normalizar(conectores.completar_precio(p, m, precio), "productos", m)
+    por_sku = out.set_index("sku")
+    assert por_sku.loc["P001", "nombre"] == "Producto 1"
+    assert por_sku.loc["P001", "precio"] == 15.0
+    assert por_sku.loc["P002", "precio"] == 12.5
+    assert por_sku.loc["P003", "precio"] == 0.0   # sin dato: no se inventa
+
+
+def test_sin_hoja_con_monto_no_hay_precio_del_libro(tmp_path):
+    ruta = tmp_path / "sin_mercado.xlsx"
+    _libro_ocho_hojas(ruta, con_mercado=False)
+    assert conectores.precio_desde_libro(str(ruta)) == (None, "", None)
+
+
+def test_el_codigo_cruza_aunque_una_hoja_lo_traiga_como_decimal():
+    ventas = pd.DataFrame({"fecha": ["2025-01-01"] * 2, "sku": [101.0, 102.0],
+                           "cantidad": [2, 4], "VentasUSD": [20.0, 10.0]})
+    precio, _ = conectores.precio_desde_ventas(ventas)
+    productos = pd.DataFrame({"sku": [101, 102], "nombre": ["a", "b"]})
+    out = conectores.completar_precio(productos, {}, precio)
+    assert out["precio"].tolist() == [10.0, 2.5]
+
+
+def test_ventas_sin_cliente_no_rompen_la_analitica(tmp_path):
+    from plania import analitica, sugerencias
+    ruta = tmp_path / "bases.xlsx"
+    _libro_ocho_hojas(ruta)
+    v = conectores.leer_archivo(str(ruta), "ventas")
+    ventas = conectores.normalizar(v, "ventas")
+    p = conectores.leer_archivo(str(ruta), "productos")
+    mp = conectores.autodetectar_mapeo(p, "productos")
+    precio, _, _ = conectores.precio_desde_libro(str(ruta))
+    productos = conectores.normalizar(conectores.completar_precio(p, mp, precio),
+                                      "productos", mp)
+    clientes = conectores.normalizar(conectores.leer_archivo(str(ruta), "clientes"),
+                                     "clientes")
+    datos = {"productos": productos, "clientes": clientes, "ventas": ventas}
+    enr = analitica.enriquecer_ventas(ventas, productos, clientes)
+    k = analitica.kpis(productos, enr)
+    assert k["clientes_activos"] == 0          # no hay dato, no un número falso
+    sugerencias.generar_todas(datos)           # no levanta KeyError('cliente_id')
+    # Y sobrevive al ida y vuelta por la base SQLite que usa la app.
+    url = conectores.guardar_como_base(datos, str(tmp_path / "erp.db"))
+    vuelta = conectores.cargar_datos(url)
+    assert len(vuelta["ventas"]) == 4 and "cliente_id" in vuelta["ventas"].columns
+
+
+def test_la_pantalla_ofrece_la_hoja_buena_y_el_precio_del_libro():
+    fuente = open(APP, encoding="utf-8").read()
+    assert "conectores.hoja_completa_alternativa(" in fuente
+    assert "on_click=_elegir_hoja" in fuente
+    assert "conectores.precio_desde_libro(" in fuente
