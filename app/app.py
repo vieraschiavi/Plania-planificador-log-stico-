@@ -527,6 +527,17 @@ def _botones_export(clave: str, secciones: list, etiqueta: str | None = None):
 _SIN_MAPEAR = "—"
 
 
+def _elegir_hoja(clave_selector: str, hoja: str) -> None:
+    """Callback del botón «Usar la hoja X»: mueve el selector de hoja.
+
+    Tiene que ser un `on_click` y no código después del botón: Streamlit no
+    deja escribir el estado de un widget que ya se dibujó en esta pasada, y
+    el callback corre ANTES de la próxima, cuando el selector todavía no
+    existe.
+    """
+    st.session_state[clave_selector] = hoja
+
+
 def _mapeo_de(entidad: str, crudo: pd.DataFrame) -> dict:
     """Dibuja el mapeo de columnas de `entidad` y devuelve el efectivo.
 
@@ -898,8 +909,8 @@ elif pagina == "conectar_erp":
                 # repite en cada rerun.
                 evaluacion: list = []
                 hoja = None
+                clave_eval = f"hojas_{e}_{getattr(f, 'file_id', f.name)}"
                 try:
-                    clave_eval = f"hojas_{e}_{getattr(f, 'file_id', f.name)}"
                     if clave_eval not in st.session_state:
                         st.session_state[clave_eval] = (
                             conectores.evaluar_hojas(f, e)
@@ -908,10 +919,16 @@ elif pagina == "conectar_erp":
                     if evaluacion:
                         nombres = [x["hoja"] for x in evaluacion]
                         sugerida = conectores.mejor_hoja(evaluacion)
+                        clave_sel = f"{clave_eval}_sel"
+                        # Si el botón «Usar la hoja X» ya escribió el valor,
+                        # no se pasa `index`: Streamlit avisa cuando un widget
+                        # recibe default y valor del estado a la vez.
                         hoja = st.selectbox(
                             t("conectar.hoja_de", entidad=t(f"conectar.entidad_{e}")),
-                            nombres, index=nombres.index(sugerida),
-                            key=f"{clave_eval}_sel",
+                            nombres,
+                            index=(None if st.session_state.get(clave_sel) in nombres
+                                   else nombres.index(sugerida)),
+                            key=clave_sel,
                             help=t("conectar.hoja_ayuda", entidad=t(f"conectar.entidad_{e}")))
                     crudo = conectores.leer_archivo(f, entidad=e, hoja=hoja)
                 except Exception as err:               # archivo ilegible
@@ -930,6 +947,23 @@ elif pagina == "conectar_erp":
                 precio_ventas, nota_ventas = (
                     conectores.precio_desde_ventas(crudos["ventas"], IDIOMA)
                     if e == "productos" and "ventas" in crudos else (None, ""))
+                if (e == "productos" and precio_ventas is None
+                        and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo)):
+                    # La hoja elegida para ventas no trae monto (o no es la de
+                    # ventas): se busca en los libros subidos una hoja que sí
+                    # lo traiga. Antes de esto, elegir mal la hoja de ventas
+                    # rechazaba TAMBIÉN los productos por «falta precio», con
+                    # «Mercado» en el mismo libro. Se guarda por archivo: lee
+                    # todas las hojas y no tiene que repetirse en cada rerun.
+                    for libro in (f, arch["ventas"]):
+                        clave_libro = f"precio_libro_{getattr(libro, 'file_id', libro.name)}"
+                        if clave_libro not in st.session_state:
+                            st.session_state[clave_libro] = (
+                                conectores.precio_desde_libro(libro, IDIOMA)[:2]
+                                if len(conectores.hojas_de(libro)) > 1 else (None, ""))
+                        precio_ventas, nota_ventas = st.session_state[clave_libro]
+                        if precio_ventas is not None:
+                            break
                 if (e == "productos" and precio_ventas is not None
                         and "precio" in conectores.faltan_obligatorias(crudo, e, mapeo)):
                     # El maestro no trae precio y las ventas sí traen monto y
@@ -953,6 +987,19 @@ elif pagina == "conectar_erp":
                     nuevos[e] = conectores.normalizar(crudo, e, mapeo)
                 except ValueError as err:              # falta una obligatoria
                     mensaje = str(err)
+                    alternativa = (conectores.hoja_completa_alternativa(evaluacion, hoja)
+                                   if evaluacion else None)
+                    if alternativa:
+                        # Qué hoja se usó y cuál sirve, arriba de todo, y el
+                        # cambio en un clic. No se cambia sola: elegir una
+                        # hoja incompleta para mapearla a mano es válido.
+                        entidad_txt = t(f"conectar.entidad_{e}")
+                        mensaje = t("conectar.hoja_no_sirve", entidad=entidad_txt,
+                                    hoja=hoja, alternativa=alternativa) + "\n\n" + mensaje
+                        st.button(t("conectar.usar_hoja", hoja=alternativa, entidad=entidad_txt),
+                                  key=f"{clave_eval}_usar_alternativa",
+                                  on_click=_elegir_hoja,
+                                  args=(f"{clave_eval}_sel", alternativa))
                     if evaluacion:
                         mensaje += "\n\n" + conectores.explicar_hojas(
                             evaluacion, t(f"conectar.entidad_{e}"), IDIOMA)
