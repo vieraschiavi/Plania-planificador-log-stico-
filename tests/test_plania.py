@@ -7315,18 +7315,12 @@ def test_leer_sql_respeta_el_tope_de_filas(tmp_path):
     assert len(conectores.leer_sql(eng, "ventas", limite=1_000)) == 1_000
 
 
-def test_el_conector_no_trae_la_tabla_entera_del_erp(tmp_path):
-    """El defecto, en su camino real: `cargar_datos` no pasaba límite."""
+def test_el_conector_lee_la_tabla_entera_por_defecto(tmp_path):
+    """Pedido del dueño: «sin límite de tamaño». El tope de 500.000 que
+    había se sacó: sin límite explícito, se lee todo."""
     from plania import conectores
-    assert conectores.LIMITE_FILAS > 0
     eng = conectores.conectar_sql(f"sqlite:///{_erp_grande(tmp_path)}")
-    # Sin tope explícito sigue trayendo todo: es la puerta de atrás para
-    # quien SABE lo que pide. Lo que no puede pasar es que sea el default.
     assert len(conectores.leer_sql(eng, "ventas")) == 120_000
-    import inspect as _inspect
-    fuente = _inspect.getsource(conectores.cargar_datos)
-    assert "limite=" in fuente, (
-        "cargar_datos volvió a leer la tabla del ERP sin tope")
 
 
 def test_el_recorte_no_se_escribe_con_LIMIT_pegado_al_final():

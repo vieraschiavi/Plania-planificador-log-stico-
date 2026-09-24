@@ -299,41 +299,73 @@ def leer_sql(engine, tabla_o_query: str, limite: int | None = None) -> pd.DataFr
         return pd.read_sql(text(q), con)
 
 
-#: Tope por defecto al leer una tabla del ERP del cliente.
+#: Tope de filas al leer una tabla del ERP del cliente: por defecto NINGUNO.
 #:
-#: Antes no había ninguno: `cargar_desde_sql` llamaba a `leer_sql(engine,
-#: tabla)` sin `limite`, o sea `SELECT * FROM ventas` completo dentro de un
-#: `pd.read_sql`. En la base demo son miles de filas y no se nota; en el ERP
-#: de un distribuidor con diez años de historia son millones, y el programa
-#: se los trae todos a memoria antes de mostrar nada.
+#: Hubo uno de 500.000, pensado para no traer a memoria diez años de ventas
+#: de golpe. El dueño del producto lo sacó a propósito: «sin límite de
+#: tamaño». La analítica de Plania agrega ventas por período y por SKU, así
+#: que cualquier recorte cambia los números que el cliente va a mirar — el
+#: default correcto es la tabla entera.
 #:
-#: 500.000 y no 50.000 porque acá el tope no es para perfilar: la analítica
-#: de Plania agrega ventas por período y por SKU, así que recortar de más
-#: cambia los números que el cliente va a mirar. Con 500.000 filas entran
-#: varios años de un distribuidor mediano y el costo de memoria queda en el
-#: orden de los cientos de MB, no de los gigas.
-LIMITE_FILAS = int(os.environ.get("PLANIA_LIMITE_FILAS") or 500_000)
+#: Quien necesite un tope (una PC con poca RAM, una prueba rápida) lo pone
+#: con `PLANIA_LIMITE_FILAS=<n>`. Vacío, 0 o negativo = sin tope. Se lee en
+#: cada carga (no al importar el módulo) para que cambiarlo no exija
+#: reiniciar el proceso. Y si el tope recorta, se AVISA con el total real
+#: (`avisos_de_recorte`): un número parcial con cara de total es peor que
+#: no tener el número.
+def limite_filas() -> int | None:
+    """El tope vigente, o None si no hay (el default)."""
+    crudo = (os.environ.get("PLANIA_LIMITE_FILAS") or "").strip()
+    try:
+        n = int(crudo) if crudo else 0
+    except ValueError:
+        n = 0
+    return n if n > 0 else None
+
+
+def contar_filas(engine, tabla_o_query: str) -> int | None:
+    """Cuántas filas tiene de verdad la tabla (o devuelve la consulta).
+
+    Sólo se llama cuando un tope explícito recortó, para poder decir el
+    total real en el aviso. Si el motor no acepta el COUNT sobre la
+    subconsulta (p. ej. SQL Server con un ORDER BY sin TOP adentro), se
+    devuelve None y el aviso dice «más de N» en vez de inventar un número.
+    """
+    from sqlalchemy import text
+    q = tabla_o_query.strip()
+    if q.lower().startswith("select"):
+        sql = f"SELECT COUNT(*) FROM ({q}) t"
+    elif _TABLA_VALIDA.match(q):
+        sql = f"SELECT COUNT(*) FROM {q}"
+    else:
+        return None
+    try:
+        with engine.connect() as con:
+            return int(con.execute(text(sql)).scalar())
+    except Exception:
+        return None
 
 
 def avisos_de_recorte(datos: dict) -> list[str]:
     """Qué entidades se leyeron recortadas, para decirlo en pantalla.
 
-    El tope existía y estaba razonado, pero era MUDO: `LIMITE_FILAS` no se
-    leía en ningún otro archivo del repo —ni la app ni la API lo miraban—,
-    así que con el ERP de un distribuidor de diez años las ventas se
-    cortaban en 500.000 filas y la analítica entera (períodos, sobrestock,
-    reposición, re-precificación, ruteo, copiloto) salía de ese pedazo
-    presentada como el total del negocio. Un número parcial con cara de
-    total es peor que no tener el número.
+    Sin tope (el default) nunca hay recorte y esto devuelve una lista
+    vacía. Con `PLANIA_LIMITE_FILAS` puesto, cada entidad cortada se dice
+    con el total real de la tabla: todo lo que se calcule (períodos,
+    sobrestock, reposición, re-precificación, ruteo, copiloto) sale de ese
+    pedazo, y el usuario tiene que saberlo.
     """
     fuera = []
     for entidad, df in (datos or {}).items():
-        if getattr(df, "attrs", {}).get("recortada"):
+        attrs = getattr(df, "attrs", {})
+        if attrs.get("recortada"):
+            total = attrs.get("total_filas")
+            total_txt = f"{total:,}" if total else f"más de {len(df):,}"
             fuera.append(
-                f"{entidad}: se leyeron {len(df):,} filas, que es el tope "
-                f"actual. La tabla tiene más, y todo lo que se calcule sale "
-                f"de ese recorte. Subí PLANIA_LIMITE_FILAS si necesitás la "
-                f"tabla entera.")
+                f"{entidad}: se leyeron {len(df):,} de {total_txt} filas "
+                f"por el tope PLANIA_LIMITE_FILAS={attrs.get('limite'):,}. "
+                f"Todo lo que se calcule sale de ese recorte. Sacá la "
+                f"variable (o ponela en 0) para leer la tabla entera.")
     return fuera
 
 
@@ -718,14 +750,22 @@ def cargar_datos(url: str | None = None,
         # `limite + 1`: que vuelva la de más es la prueba de que la tabla
         # tiene más. Sin esa fila no hay forma de distinguir «entró justo»
         # de «se cortó», y era exactamente eso lo que dejaba el recorte mudo.
-        df = leer_sql(engine, tabla, limite=LIMITE_FILAS + 1)
-        recortada = len(df) > LIMITE_FILAS
+        # Sin tope (el default) se lee la tabla entera. Con tope explícito,
+        # se pide `tope + 1`: que vuelva la de más es la prueba de que la
+        # tabla tiene más (sin ella no se distingue «entró justo» de «se
+        # cortó», que es lo que dejaba el recorte mudo).
+        tope = limite_filas()
+        df = leer_sql(engine, tabla, limite=(tope + 1) if tope else None)
+        recortada = bool(tope) and len(df) > tope
+        total = None
         if recortada:
-            df = df.head(LIMITE_FILAS)
+            df = df.head(tope)
+            total = contar_filas(engine, tabla)
         norm = normalizar(df, entidad, (mapeos or {}).get(entidad))
         # Después de `normalizar`, no antes: esa función devuelve un frame
         # nuevo y se llevaría puesto el `attrs`.
         norm.attrs["recortada"] = recortada
-        norm.attrs["limite"] = LIMITE_FILAS
+        norm.attrs["limite"] = tope
+        norm.attrs["total_filas"] = total if recortada else len(norm)
         datos[entidad] = norm
     return datos
